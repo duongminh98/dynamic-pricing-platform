@@ -24,6 +24,7 @@ scripts/
 
 # Documentation / spec markdown — kept out of version control by request
 *.md
+!README.md
 !.gitkeep
 
 # Python / venv
