@@ -1,0 +1,215 @@
+{
+  "realm": "dynamic-pricing",
+  "displayName": "Dynamic Pricing Platform",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "accessTokenLifespan": 1800,
+  "accessTokenLifespanForImplicitFlow": 1800,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "clientSessionIdleTimeout": 1800,
+  "clientSessionMaxLifespan": 36000,
+  "components": {
+    "org.keycloak.keys.KeyProvider": [
+      {
+        "name": "rsa-pinned",
+        "providerId": "rsa",
+        "subComponents": {},
+        "config": {
+          "priority": ["200"],
+          "enabled": ["true"],
+          "active": ["true"],
+          "algorithm": ["RS256"],
+          "privateKey": ["MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDKKe3YOb41Hh5JAd0Yxk/QOhfoPUzn1rnX5ibIZgqY2ByavrhraWOLuEWDFk0WRqtProp9a75nsvL8Y35/QXNml4bdYdaUUx1T3UaoHn0ygBdBXV58NC0nVgQ+A5luOVaiWovQB7JAONApkFQLNgEUQUIKwPwBb1JfMtJegWiA8oZ1ciyH/JbT7x6XM8m/N4WgOlUckNxu+B2uCZGoSK++ufjU6nd9laQiMUOsjx/mZAgS48zI4CiG5MscCas3i4hoJ9ZcgAXofh2fOVIrja4a2A9rHzrPzPajtz3XNXsFfofDQ7iATkRPHIzim/7BwM4Z+wm8JGf94FhQ8QTAiI6nAgMBAAECggEAAavhaAa+MFaR6IedP4MFjj1Ut5pTeZ04XHUY1VJRUccuTAc5+MVedH1vBwZBrTv4rEgko/nRPAPqPLTz4Eh3FEjkwrgi29y+DX9IV259GX7z8kSRLz9dL4nnWhM8iwFABUfwsk/F+lWd6aIPAn1ipTtkOOOJ5yx3nArhsLSq269h16aW6nvkEMGoVCnFyn6kFwWJ/uAOEXbB3Je6VZMw0N93ukxw2r5BZNv78vCk/7FqgrbyofwUqdoaxYdtdGyXQTRwTJCCHS/ZxFFi8oyQPbpeiGsks6YXtWhd/Yubi0TYPr9pimyKYrGicNq3FpX2RBblb5u4BLa+Qc+z+I+UQQKBgQD+26mNlF4xPbhIsdPXNAfwZIk9Mm+TrRv4MQr/+zuSXWITJBmBkwOh4MeIEvqazXLRv4TOoTb1u0/wN9fQltRAlM5LUet6Hv6u1uLkp9dUS1xUZ+o/K1A48Mfr/4Quy6jsMAMljlY6GSgoaGPTCDviRPc+uWd+/oKp+wsbG3Q/ZwKBgQDLEdK/XCA5V1ldQ739mWRhf+catg5BMFfHncnsU214scP3cKNfqaHt4pU2PeB1gQEuEw5Z7LzQjaPWQtS00k3BqXHfnKod2HndGnmUhhHLTUQDZpQg/LM4nqldENCsvzPHtR3yik1U/IpCYtZRYU0VEfcuitCdg0w2ngwgzJXuwQKBgQCE5wgETNrR0t3HCvTtxLRfKA5pW2PUHvH2+5xA4UKvkQMT+D9U0tWSFSX4T+1fzMOTncwj9O40Nvn4yyZAIGePRgpOPOoPRRqLEoQ/uUcRLjt3yLjfODcdenLHHvhPbuUoReFeNFvC8FuAtu9XnXOdC1nj28uc7hw1iDTCbg6xAQKBgHB8lAA6eQMqdq8qCkFDSg6UOiFavbSwob9KkYLeh+J2njYf5+/i2Hccr0jXp9GPP2cVWTrI36KrAxl59begU0A2q4SRlM5pjr/CnZx/U7YJO+aiWOWY9XIkuW57FQzL8VPr6QXkRIgSSEgT1eJIgtlsFT9r17mY9IvAqrk0es1BAoGBANdYtdn/jJ8m89agw3ZV/R4Zw1j9FpL+d6TRd4z0/KsblwELFDeX+0pmAjAyK9kKpPlRq09SWqgyZ4wftT9iULPL71MMOmGr0Z80+rDIe7wZ7jxNHgU2g4Nd/pypykw/iV4c+j62U2MzMo0LsZ+2Z+/ojtW+zB7LPHy9kLhCHTG7"],
+          "certificate": ["MIICwDCCAaigAwIBAgIUFjKdoO1KqOAwoU1sG+fm6jC7IWowDQYJKoZIhvcNAQELBQAwGjEYMBYGA1UEAwwPZHluYW1pYy1wcmljaW5nMB4XDTIwMDEwMTAwMDAwMFoXDTQwMDEwMTAwMDAwMFowGjEYMBYGA1UEAwwPZHluYW1pYy1wcmljaW5nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyint2Dm+NR4eSQHdGMZP0DoX6D1M59a51+YmyGYKmNgcmr64a2lji7hFgxZNFkarT66KfWu+Z7Ly/GN+f0FzZpeG3WHWlFMdU91GqB59MoAXQV1efDQtJ1YEPgOZbjlWolqL0AeyQDjQKZBUCzYBFEFCCsD8AW9SXzLSXoFogPKGdXIsh/yW0+8elzPJvzeFoDpVHJDcbvgdrgmRqEivvrn41Op3fZWkIjFDrI8f5mQIEuPMyOAohuTLHAmrN4uIaCfWXIAF6H4dnzlSK42uGtgPax86z8z2o7c91zV7BX6Hw0O4gE5ETxyM4pv+wcDOGfsJvCRn/eBYUPEEwIiOpwIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQAI5hA3rvukv370UkPsffofLvgVPqD8u+oklkEbO/bTaSGSPBquZVXdcMvgjjQQRuJ91zhbAWCeW0GinIsxhJqM95GLbxHTkQ623JHl7Mni3dm2yMkfimv1/P0uzgM893e25oy5f7+0oHKyOARzflir3MOX9rauCCE44D7S4a1ix2X7C9qeMVo3/MkeVHl30tPGRjASkLMOPtmtmax5t25Muqc+ZM1eoZlHvomiJhUzo60lN44ljNmTYy3cUdRW+dPI3OsiA1/7ObIXEQrPi7LD0Hx4KgtbMWmM+t7nfVvxtYVEaCBoVqJU8Ai6pT+wAuYjC9Sq8sd0XQOdlC+W8rN+"]
+        }
+      }
+    ]
+  },
+  "roles": {
+    "realm": [
+      {
+        "name": "Customer",
+        "description": "Customer using the insurance mini app"
+      },
+      {
+        "name": "Administrator",
+        "description": "Platform administrator"
+      },
+      {
+        "name": "Underwriter",
+        "description": "Underwriting user"
+      },
+      {
+        "name": "Claims_Handler",
+        "description": "Claims handling user"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "mini-app",
+      "name": "Mini App public SPA client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "1800"
+      }
+    },
+    {
+      "clientId": "kong-gateway",
+      "name": "Kong Gateway OIDC client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "kong-gateway-secret-dev-only",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "1800"
+      }
+    },
+    {
+      "clientId": "customer-service",
+      "name": "Customer Service confidential client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "customer-service-secret-dev-only",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "1800"
+      }
+    },
+    {
+      "clientId": "product-service",
+      "name": "Product Service confidential client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "product-service-secret-dev-only",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "1800"
+      }
+    },
+    {
+      "clientId": "order-service",
+      "name": "Order Service confidential client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "order-service-secret-dev-only",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "1800"
+      }
+    },
+    {
+      "clientId": "underwriting-service",
+      "name": "Underwriting Service confidential client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "underwriting-service-secret-dev-only",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "1800"
+      }
+    },
+    {
+      "clientId": "claims-service",
+      "name": "Claims Service confidential client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "claims-service-secret-dev-only",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "1800"
+      }
+    },
+    {
+      "clientId": "billing-service",
+      "name": "Billing Service confidential client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "billing-service-secret-dev-only",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "1800"
+      }
+    },
+    {
+      "clientId": "notification-service",
+      "name": "Notification Service confidential client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "notification-service-secret-dev-only",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "1800"
+      }
+    },
+    {
+      "clientId": "pricing-service",
+      "name": "Pricing Service confidential client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "pricing-service-secret-dev-only",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "1800"
+      }
+    }
+  ]
+}

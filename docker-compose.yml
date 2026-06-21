@@ -1,0 +1,279 @@
+name: ${COMPOSE_PROJECT_NAME:-dynamic-pricing-platform}
+
+x-postgres-healthcheck: &postgres-healthcheck
+  test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+
+services:
+  postgres-customer:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: dpp-postgres-customer
+    environment:
+      POSTGRES_DB: ${CUSTOMER_DB_NAME:-customer_db}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_password_dev_only}
+    ports:
+      - "${CUSTOMER_DB_PORT:-5433}:5432"
+    volumes:
+      - postgres_customer_data:/var/lib/postgresql/data
+    networks:
+      - dpp-network
+    healthcheck: *postgres-healthcheck
+
+  postgres-product:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: dpp-postgres-product
+    environment:
+      POSTGRES_DB: ${PRODUCT_DB_NAME:-product_db}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_password_dev_only}
+    ports:
+      - "${PRODUCT_DB_PORT:-5434}:5432"
+    volumes:
+      - postgres_product_data:/var/lib/postgresql/data
+    networks:
+      - dpp-network
+    healthcheck: *postgres-healthcheck
+
+  postgres-order:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: dpp-postgres-order
+    environment:
+      POSTGRES_DB: ${ORDER_DB_NAME:-order_db}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_password_dev_only}
+    ports:
+      - "${ORDER_DB_PORT:-5435}:5432"
+    volumes:
+      - postgres_order_data:/var/lib/postgresql/data
+    networks:
+      - dpp-network
+    healthcheck: *postgres-healthcheck
+
+  postgres-underwriting:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: dpp-postgres-underwriting
+    environment:
+      POSTGRES_DB: ${UNDERWRITING_DB_NAME:-underwriting_db}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_password_dev_only}
+    ports:
+      - "${UNDERWRITING_DB_PORT:-5436}:5432"
+    volumes:
+      - postgres_underwriting_data:/var/lib/postgresql/data
+    networks:
+      - dpp-network
+    healthcheck: *postgres-healthcheck
+
+  postgres-claims:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: dpp-postgres-claims
+    environment:
+      POSTGRES_DB: ${CLAIMS_DB_NAME:-claims_db}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_password_dev_only}
+    ports:
+      - "${CLAIMS_DB_PORT:-5437}:5432"
+    volumes:
+      - postgres_claims_data:/var/lib/postgresql/data
+    networks:
+      - dpp-network
+    healthcheck: *postgres-healthcheck
+
+  postgres-billing:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: dpp-postgres-billing
+    environment:
+      POSTGRES_DB: ${BILLING_DB_NAME:-billing_db}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_password_dev_only}
+    ports:
+      - "${BILLING_DB_PORT:-5438}:5432"
+    volumes:
+      - postgres_billing_data:/var/lib/postgresql/data
+    networks:
+      - dpp-network
+    healthcheck: *postgres-healthcheck
+
+  postgres-notification:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: dpp-postgres-notification
+    environment:
+      POSTGRES_DB: ${NOTIFICATION_DB_NAME:-notification_db}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_password_dev_only}
+    ports:
+      - "${NOTIFICATION_DB_PORT:-5439}:5432"
+    volumes:
+      - postgres_notification_data:/var/lib/postgresql/data
+    networks:
+      - dpp-network
+    healthcheck: *postgres-healthcheck
+
+  postgres-pricing:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: dpp-postgres-pricing
+    environment:
+      POSTGRES_DB: ${PRICING_DB_NAME:-pricing_db}
+      POSTGRES_USER: ${POSTGRES_USER:-platform_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_password_dev_only}
+    ports:
+      - "${PRICING_DB_PORT:-5440}:5432"
+    volumes:
+      - postgres_pricing_data:/var/lib/postgresql/data
+    networks:
+      - dpp-network
+    healthcheck: *postgres-healthcheck
+
+  rabbitmq:
+    image: ${RABBITMQ_IMAGE:-rabbitmq:3.13-management-alpine}
+    container_name: dpp-rabbitmq
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-platform_user}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-platform_password_dev_only}
+      RABBITMQ_ENABLED_PLUGINS_FILE: /etc/rabbitmq/enabled_plugins
+    ports:
+      - "${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+      - "${RABBITMQ_PROMETHEUS_PORT:-15692}:15692"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./infra/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    networks:
+      - dpp-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+
+  keycloak:
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0.7}
+    container_name: dpp-keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev_only}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev_only}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+      - "${KEYCLOAK_HEALTH_PORT:-9000}:9000"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    networks:
+      - dpp-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec 'exec 3<>/dev/tcp/127.0.0.1/9000; printf \"GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; grep -q \"200 OK\" <&3'"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+
+  kong:
+    image: ${KONG_IMAGE:-kong:3.8.0}
+    container_name: dpp-kong
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_STATUS_LISTEN: 0.0.0.0:8100
+      KONG_PLUGINS: bundled
+      KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
+      KONG_LICENSE_DATA: ${KONG_LICENSE_DATA:-}
+    ports:
+      - "${KONG_PROXY_PORT:-8000}:8000"
+      - "${KONG_ADMIN_PORT:-8001}:8001"
+      - "${KONG_STATUS_PORT:-8100}:8100"
+    volumes:
+      - ./infra/kong/kong.yml:/etc/kong/kong.yml:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - dpp-network
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 30s
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v2.55.1}
+    container_name: dpp-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - dpp-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:11.3.0}
+    container_name: dpp-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin_dev_only}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - dpp-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+networks:
+  dpp-network:
+    name: dynamic-pricing-platform-network
+    driver: bridge
+
+volumes:
+  postgres_customer_data:
+  postgres_product_data:
+  postgres_order_data:
+  postgres_underwriting_data:
+  postgres_claims_data:
+  postgres_billing_data:
+  postgres_notification_data:
+  postgres_pricing_data:
+  rabbitmq_data:
+  keycloak_data:
+  prometheus_data:
+  grafana_data:

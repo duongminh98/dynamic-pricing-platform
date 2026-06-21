@@ -1,0 +1,443 @@
+_format_version: "3.0"
+_transform: true
+
+plugins:
+  - name: prometheus
+    config:
+      per_consumer: false
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+  # Gateway-level JWT verification against the Keycloak realm signing key (R9.3, R18.1, R18.2).
+  # The Kong OSS image does not include the enterprise `openid-connect` plugin, so we use the
+  # bundled `jwt` plugin with a pinned RS256 public key from `infra/keycloak/realm-public-key.pem`.
+  # The realm export pins the same RSA keypair, so JWTs signed by Keycloak verify against this key
+  # across container restarts. Two JWT credentials below cover the two issuer hostnames a token
+  # can carry depending on whether it was issued through the host or the in-network Keycloak URL.
+  - name: jwt
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+      run_on_preflight: true
+
+consumers:
+  - username: keycloak-realm
+    jwt_secrets:
+      - key: http://localhost:8080/realms/dynamic-pricing
+        algorithm: RS256
+        rsa_public_key: |
+          -----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyint2Dm+NR4eSQHdGMZP
+          0DoX6D1M59a51+YmyGYKmNgcmr64a2lji7hFgxZNFkarT66KfWu+Z7Ly/GN+f0Fz
+          ZpeG3WHWlFMdU91GqB59MoAXQV1efDQtJ1YEPgOZbjlWolqL0AeyQDjQKZBUCzYB
+          FEFCCsD8AW9SXzLSXoFogPKGdXIsh/yW0+8elzPJvzeFoDpVHJDcbvgdrgmRqEiv
+          vrn41Op3fZWkIjFDrI8f5mQIEuPMyOAohuTLHAmrN4uIaCfWXIAF6H4dnzlSK42u
+          GtgPax86z8z2o7c91zV7BX6Hw0O4gE5ETxyM4pv+wcDOGfsJvCRn/eBYUPEEwIiO
+          pwIDAQAB
+          -----END PUBLIC KEY-----
+      - key: http://keycloak:8080/realms/dynamic-pricing
+        algorithm: RS256
+        rsa_public_key: |
+          -----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyint2Dm+NR4eSQHdGMZP
+          0DoX6D1M59a51+YmyGYKmNgcmr64a2lji7hFgxZNFkarT66KfWu+Z7Ly/GN+f0Fz
+          ZpeG3WHWlFMdU91GqB59MoAXQV1efDQtJ1YEPgOZbjlWolqL0AeyQDjQKZBUCzYB
+          FEFCCsD8AW9SXzLSXoFogPKGdXIsh/yW0+8elzPJvzeFoDpVHJDcbvgdrgmRqEiv
+          vrn41Op3fZWkIjFDrI8f5mQIEuPMyOAohuTLHAmrN4uIaCfWXIAF6H4dnzlSK42u
+          GtgPax86z8z2o7c91zV7BX6Hw0O4gE5ETxyM4pv+wcDOGfsJvCRn/eBYUPEEwIiO
+          pwIDAQAB
+          -----END PUBLIC KEY-----
+
+services:
+  - name: customer-service
+    protocol: http
+    host: customer-service-upstream
+    port: 80
+    connect_timeout: 5000
+    read_timeout: 5000
+    write_timeout: 5000
+    retries: 0
+    routes:
+      - name: customer-routes
+        paths:
+          - /customers
+        strip_path: false
+        preserve_host: false
+
+  - name: product-service
+    protocol: http
+    host: product-service-upstream
+    port: 80
+    connect_timeout: 5000
+    read_timeout: 5000
+    write_timeout: 5000
+    retries: 0
+    routes:
+      - name: product-routes
+        paths:
+          - /products
+          - /admin/products
+          - /admin/loading-factors
+          - /admin/eligibility-rules
+          - /admin/rate-versions
+        strip_path: false
+        preserve_host: false
+
+  - name: order-service
+    protocol: http
+    host: order-service-upstream
+    port: 80
+    connect_timeout: 5000
+    read_timeout: 5000
+    write_timeout: 5000
+    retries: 0
+    routes:
+      - name: order-routes
+        paths:
+          - /orders
+          - /policies
+        strip_path: false
+        preserve_host: false
+
+  - name: underwriting-service
+    protocol: http
+    host: underwriting-service-upstream
+    port: 80
+    connect_timeout: 5000
+    read_timeout: 5000
+    write_timeout: 5000
+    retries: 0
+    routes:
+      - name: underwriting-routes
+        paths:
+          - /underwriting
+        strip_path: false
+        preserve_host: false
+
+  - name: claims-service
+    protocol: http
+    host: claims-service-upstream
+    port: 80
+    connect_timeout: 5000
+    read_timeout: 5000
+    write_timeout: 5000
+    retries: 0
+    routes:
+      - name: claims-routes
+        paths:
+          - /claims
+        strip_path: false
+        preserve_host: false
+
+  - name: billing-service
+    protocol: http
+    host: billing-service-upstream
+    port: 80
+    connect_timeout: 5000
+    read_timeout: 5000
+    write_timeout: 5000
+    retries: 0
+    routes:
+      - name: billing-routes
+        paths:
+          - /billing
+        strip_path: false
+        preserve_host: false
+
+  - name: notification-service
+    protocol: http
+    host: notification-service-upstream
+    port: 80
+    connect_timeout: 5000
+    read_timeout: 5000
+    write_timeout: 5000
+    retries: 0
+    routes:
+      - name: notification-routes
+        paths:
+          - /notifications
+        strip_path: false
+        preserve_host: false
+
+  - name: pricing-service
+    protocol: http
+    host: pricing-service-upstream
+    port: 80
+    connect_timeout: 5000
+    read_timeout: 5000
+    write_timeout: 5000
+    retries: 0
+    routes:
+      - name: pricing-routes
+        paths:
+          - /pricing
+          - /admin/champion
+        strip_path: false
+        preserve_host: false
+
+upstreams:
+  - name: customer-service-upstream
+    algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        timeout: 5
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+          http_statuses:
+            - 200
+            - 302
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 3
+          http_failures: 3
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+    targets:
+      - target: customer-service-1:8080
+        weight: 100
+      - target: customer-service-2:8080
+        weight: 100
+
+  - name: product-service-upstream
+    algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        timeout: 5
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+          http_statuses:
+            - 200
+            - 302
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 3
+          http_failures: 3
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+    targets:
+      - target: product-service-1:8080
+        weight: 100
+      - target: product-service-2:8080
+        weight: 100
+
+  - name: order-service-upstream
+    algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        timeout: 5
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+          http_statuses:
+            - 200
+            - 302
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 3
+          http_failures: 3
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+    targets:
+      - target: order-service-1:8080
+        weight: 100
+      - target: order-service-2:8080
+        weight: 100
+
+  - name: underwriting-service-upstream
+    algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        timeout: 5
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+          http_statuses:
+            - 200
+            - 302
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 3
+          http_failures: 3
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+    targets:
+      - target: underwriting-service-1:8080
+        weight: 100
+      - target: underwriting-service-2:8080
+        weight: 100
+
+  - name: claims-service-upstream
+    algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        timeout: 5
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+          http_statuses:
+            - 200
+            - 302
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 3
+          http_failures: 3
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+    targets:
+      - target: claims-service-1:8080
+        weight: 100
+      - target: claims-service-2:8080
+        weight: 100
+
+  - name: billing-service-upstream
+    algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        timeout: 5
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+          http_statuses:
+            - 200
+            - 302
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 3
+          http_failures: 3
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+    targets:
+      - target: billing-service-1:8080
+        weight: 100
+      - target: billing-service-2:8080
+        weight: 100
+
+  - name: notification-service-upstream
+    algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        timeout: 5
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+          http_statuses:
+            - 200
+            - 302
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 3
+          http_failures: 3
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+    targets:
+      - target: notification-service-1:8080
+        weight: 100
+      - target: notification-service-2:8080
+        weight: 100
+
+  - name: pricing-service-upstream
+    algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /health
+        timeout: 5
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+          http_statuses:
+            - 200
+            - 302
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 3
+          http_failures: 3
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+    targets:
+      - target: pricing-service-1:8000
+        weight: 100
+      - target: pricing-service-2:8000
+        weight: 100
