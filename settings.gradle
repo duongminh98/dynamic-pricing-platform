@@ -8,11 +8,11 @@ pluginManagement {
 rootProject.name = 'dynamic-pricing-platform'
 
 include 'services:common'
+include 'services:customer-service'
 // Future subprojects — uncomment as they are created:
 // include 'services:product-service'
 // include 'services:order-service'
 // include 'services:billing-service'
 // include 'services:claims-service'
-// include 'services:customer-service'
 // include 'services:notification-service'
 // include 'services:underwriting-service'

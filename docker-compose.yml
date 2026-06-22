@@ -259,6 +259,41 @@ services:
       retries: 8
       start_period: 30s
 
+  # Checkpoint-only stand-in backend (task 3). Enabled via `--profile checkpoint`.
+  # Joins the network under every Kong upstream target hostname so gateway routes
+  # resolve to a healthy backend before the real services exist (tasks 4+).
+  health-stub:
+    image: ${NGINX_IMAGE:-nginx:1.27-alpine}
+    container_name: dpp-health-stub
+    profiles: ["checkpoint"]
+    volumes:
+      - ./infra/health-stub/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      dpp-network:
+        aliases:
+          - customer-service-1
+          - customer-service-2
+          - product-service-1
+          - product-service-2
+          - order-service-1
+          - order-service-2
+          - underwriting-service-1
+          - underwriting-service-2
+          - claims-service-1
+          - claims-service-2
+          - billing-service-1
+          - billing-service-2
+          - notification-service-1
+          - notification-service-2
+          - pricing-service-1
+          - pricing-service-2
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 networks:
   dpp-network:
     name: dynamic-pricing-platform-network

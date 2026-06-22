@@ -14,6 +14,7 @@ public enum ErrorCode {
     INVALID_EMAIL_FORMAT(400, "Invalid email format"),
     INVALID_PASSWORD_LENGTH(400, "Invalid password length"),
     ACCOUNT_LOCKED(423, "Account is locked"),
+    INVALID_CREDENTIALS(401, "Invalid credentials"),
 
     // ── Profile (R2) ──
     PROFILE_FIELD_OUT_OF_RANGE(400, "Field value out of allowed range"),

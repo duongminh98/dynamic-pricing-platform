@@ -2,10 +2,14 @@ package dpp.common.outbox;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.core.MessageDeliveryMode;
+import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -21,6 +25,11 @@ import java.util.List;
  * <p>The relay runs asynchronously from the business transaction. The outbox
  * pattern works because business write + outbox INSERT happen atomically in
  * the service layer, then this relay polls and publishes asynchronously.</p>
+ *
+ * <p>Events are published to the shared topic exchange {@code platform.events}
+ * (declared in {@code infra/rabbitmq/definitions.json}, §2.4.2) using the event
+ * type as the routing key; queues bind by routing key and dead-letter to
+ * {@code platform.events.dlx} after {@code x-delivery-limit} redeliveries.</p>
  */
 @Component
 public class OutboxRelay {
@@ -30,10 +39,15 @@ public class OutboxRelay {
     private final OutboxRepository outboxRepository;
     private final RabbitTemplate rabbitTemplate;
 
+    /** Shared topic exchange that fans events out to per-event-type queues (§2.4.2). */
+    private final String eventsExchange;
+
     public OutboxRelay(OutboxRepository outboxRepository,
-                       RabbitTemplate rabbitTemplate) {
+                       RabbitTemplate rabbitTemplate,
+                       @Value("${dpp.events.exchange:platform.events}") String eventsExchange) {
         this.outboxRepository = outboxRepository;
         this.rabbitTemplate = rabbitTemplate;
+        this.eventsExchange = eventsExchange;
     }
 
     /**
@@ -67,15 +81,22 @@ public class OutboxRelay {
     }
 
     private void publishEvent(OutboxEntity entry) {
-        // Exchange = event_type (each event type has its own exchange per §2.4.2)
-        String exchange = entry.getEventType();
+        // Publish to the shared topic exchange; the event type is the routing key
+        // so queues bound by routing key receive it (§2.4.2, definitions.json).
         String routingKey = entry.getEventType();
 
-        rabbitTemplate.convertAndSend(exchange, routingKey, entry.getPayload(), message -> {
-            message.getMessageProperties().setCorrelationId(entry.getEventId());
-            message.getMessageProperties().setHeader("X-Event-Id", entry.getEventId());
-            message.getMessageProperties().setHeader("X-Event-Type", entry.getEventType());
-            message.getMessageProperties().setHeader("X-Created-At", entry.getCreatedAt().toString());
+        rabbitTemplate.convertAndSend(eventsExchange, routingKey, entry.getPayload(), message -> {
+            MessageProperties props = message.getMessageProperties();
+            // Payload is a JSON string (jsonb column) — tag it so consumers deserialize correctly.
+            props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+            props.setContentEncoding(StandardCharsets.UTF_8.name());
+            // Survive broker restarts to match the durable quorum queues.
+            props.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
+            props.setMessageId(entry.getEventId());
+            props.setCorrelationId(entry.getEventId());
+            props.setHeader("X-Event-Id", entry.getEventId());
+            props.setHeader("X-Event-Type", entry.getEventType());
+            props.setHeader("X-Created-At", entry.getCreatedAt().toString());
             return message;
         });
     }

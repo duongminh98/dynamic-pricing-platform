@@ -211,5 +211,71 @@
         "access.token.lifespan": "1800"
       }
     }
+  ],
+  "users": [
+    {
+      "username": "demo.customer",
+      "email": "demo.customer@example.com",
+      "firstName": "Demo",
+      "lastName": "Customer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo_customer_dev_only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["Customer"]
+    },
+    {
+      "username": "demo.admin",
+      "email": "demo.admin@example.com",
+      "firstName": "Demo",
+      "lastName": "Administrator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo_admin_dev_only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["Administrator"]
+    },
+    {
+      "username": "demo.underwriter",
+      "email": "demo.underwriter@example.com",
+      "firstName": "Demo",
+      "lastName": "Underwriter",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo_underwriter_dev_only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["Underwriter"]
+    },
+    {
+      "username": "demo.claims",
+      "email": "demo.claims@example.com",
+      "firstName": "Demo",
+      "lastName": "ClaimsHandler",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo_claims_dev_only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["Claims_Handler"]
+    }
   ]
 }

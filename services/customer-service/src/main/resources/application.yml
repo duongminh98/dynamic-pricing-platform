@@ -1,0 +1,36 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: customer-service
+  datasource:
+    url: jdbc:postgresql://${CUSTOMER_DB_HOST:localhost}:${CUSTOMER_DB_PORT:5433}/${CUSTOMER_DB_NAME:customer_db}
+    username: ${POSTGRES_USER:platform_user}
+    password: ${POSTGRES_PASSWORD:platform_password_dev_only}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+dpp:
+  keycloak:
+    auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:8080}
+    realm: ${KEYCLOAK_REALM:dynamic-pricing}
+    admin-username: ${KEYCLOAK_ADMIN:admin}
+    admin-password: ${KEYCLOAK_ADMIN_PASSWORD:change-me}
+    login-client-id: mini-app
