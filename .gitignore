@@ -56,9 +56,8 @@ kong*.log
 .cache
 .history
 
-# Local Kiro/Claude scratch
-.kiro/.cache/
-plans/
+# Kiro spec/scratch
+.kiro/
 
 # Any local docker volume dumps if mounted
 **/postgres-data/
