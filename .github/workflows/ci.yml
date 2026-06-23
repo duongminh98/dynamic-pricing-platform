@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  java:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+      - name: Build and test Java services
+        run: ./gradlew build test
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - name: Install pricing dependencies
+        run: |
+          pip install -r pricing/requirements.txt
+          pip install pytest hypothesis prometheus_client httpx pytest-asyncio
+      - name: Run pricing tests
+        working-directory: pricing
+        run: |
+          python -m pytest tests/ -q
+          python -m pytest common/tests/ -q

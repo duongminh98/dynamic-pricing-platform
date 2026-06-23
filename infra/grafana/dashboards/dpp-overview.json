@@ -1,0 +1,9 @@
+{
+  "title": "DPP Overview - p95 latency, throughput, error rate",
+  "schemaVersion": 39,
+  "panels": [
+    {"title": "p95 latency", "targets": [{"expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, application))"}]},
+    {"title": "throughput", "targets": [{"expr": "sum(rate(http_server_requests_seconds_count[5m])) by (application)"}]},
+    {"title": "error rate", "targets": [{"expr": "sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application)"}]}
+  ]
+}
