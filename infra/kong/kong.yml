@@ -98,6 +98,7 @@ services:
         paths:
           - /orders
           - /policies
+          - /admin/orders
         strip_path: false
         preserve_host: false
 
