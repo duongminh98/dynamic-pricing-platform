@@ -47,12 +47,11 @@ class ErrorCode(Enum):
     MISSING_FEATURES = ("MISSING_FEATURES", 400, "Missing input features")
     UNSUPPORTED_LINE = ("UNSUPPORTED_LINE", 400, "Unsupported product line")
     MISSING_CHAMPION = ("MISSING_CHAMPION", 400, "No champion model configured for line")
-    CHALLENGER_NOT_CONFIGURED = ("CHALLENGER_NOT_CONFIGURED", 409, "Challenger not configured for line")
 
     # ── Order (R6) ──
     QUOTE_EXPIRED = ("QUOTE_EXPIRED", 409, "Quote has expired")
     QUOTE_ALREADY_USED = ("QUOTE_ALREADY_USED", 409, "Quote has already been used")
-    UNDERWRITING_NOT_ELIGIBLE = ("UNDERWRITING_NOT_ELIGIBLE", 409, "Profile not eligible for underwriting")
+    ORDER_NOT_APPROVED = ("ORDER_NOT_APPROVED", 409, "Order not approved")
 
     # ── Billing (R33) ──
     PAYMENT_FAILED = ("PAYMENT_FAILED", 402, "Payment failed")
