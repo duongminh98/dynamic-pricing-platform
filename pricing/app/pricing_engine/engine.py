@@ -24,6 +24,31 @@ from .explain import explain
 QUOTE_VALIDITY_DAYS = 7
 
 
+# Allowed ranges for core numeric profile fields (R1.2-R1.4, R2.6, R2.17).
+PROFILE_RANGES = {
+    "age": (18, 100),
+    "height_cm": (100, 220),
+    "weight_kg": (30, 200),
+    "annual_mileage_km": (0, 200_000),
+    "vehicle_age": (0, 50),
+}
+
+
+def validate_profile(profile: dict) -> None:
+    """Reject numeric profile fields outside their allowed range (Property 6)."""
+    merged = dict(profile)
+    merged.update(profile.get("line_attributes", {}) or {})
+    for field, (lo, hi) in PROFILE_RANGES.items():
+        if field in merged:
+            try:
+                val = float(merged[field])
+            except (TypeError, ValueError):
+                raise ServiceException(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE,
+                                       details={"field": field})
+            if not (lo <= val <= hi):
+                raise ServiceException(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE,
+                                       details={"field": field, "min": lo, "max": hi})
+
 def compute_final_premium(pure_premium: float, loading_factor: float,
                           admin_fee: float) -> tuple[int, int]:
     """Pure formula (Property 1). Both results are >= 0 VND integers."""
@@ -53,6 +78,7 @@ def quote(db, product_id: str, profile: dict, model: str | None = None,
           loading_factor: float = 1.0) -> dict:
     """Compute a quote. ``db`` is an optional SQLAlchemy session for audit."""
     ensure_loaded()
+    validate_profile(profile)
     line = get_line_for_product(product_id)
     if line not in LINES:
         raise ServiceException(ErrorCode.UNSUPPORTED_LINE, details={"line": line})
