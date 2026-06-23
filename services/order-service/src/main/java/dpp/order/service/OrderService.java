@@ -2,49 +2,46 @@ package dpp.order.service;
 
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
-import dpp.order.dto.CreateOrderRequest;
-import dpp.order.dto.OrderResponse;
-import dpp.order.entity.OrderEntity;
-import dpp.order.entity.OrderStatus;
-import dpp.order.client.PricingClient;
-import dpp.order.repository.OrderRepository;
+import dpp.order.dto.*;
+import dpp.order.entity.*;
+import dpp.order.client.*;
+import dpp.order.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderService {
 
     private final OrderRepository orderRepository;
     private final PricingClient pricingClient;
+    private final BillingClient billingClient;
 
-    public OrderService(OrderRepository orderRepository, PricingClient pricingClient) {
+    public OrderService(OrderRepository orderRepository, PricingClient pricingClient, BillingClient billingClient) {
         this.orderRepository = orderRepository;
         this.pricingClient = pricingClient;
+        this.billingClient = billingClient;
     }
 
     @Transactional
     public OrderResponse createOrder(String keycloakSubject, CreateOrderRequest request) {
         UUID quoteId = request.getQuoteId();
-
         if (orderRepository.findByQuoteId(quoteId).isPresent()) {
             throw new ServiceException(ErrorCode.QUOTE_ALREADY_USED);
         }
-
         Map<String, Object> quote = pricingClient.getQuote(quoteId);
         String expiresAtStr = String.valueOf(quote.get("expires_at"));
         OffsetDateTime expiresAt = OffsetDateTime.parse(expiresAtStr);
-
         if (expiresAt.isBefore(OffsetDateTime.now())) {
             throw new ServiceException(ErrorCode.QUOTE_EXPIRED);
         }
-
         long finalPremiumVnd = ((Number) quote.get("final_premium_vnd")).longValue();
         String productId = String.valueOf(quote.get("product_id"));
-
         OrderEntity order = new OrderEntity();
         order.setOrderId(UUID.randomUUID());
         order.setQuoteId(quoteId);
@@ -53,13 +50,71 @@ public class OrderService {
         order.setFinalPremiumVnd(finalPremiumVnd);
         order.setStatus(OrderStatus.PENDING_REVIEW);
         order.setCreatedAt(OffsetDateTime.now());
-
         order = orderRepository.save(order);
         return toResponse(order);
     }
 
+    @Transactional(readOnly = true)
+    public List<ReviewQueueItem> reviewQueue() {
+        return orderRepository.findByStatusOrderByCreatedAtAsc(OrderStatus.PENDING_REVIEW).stream()
+                .map(this::toQueueItem).collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public OrderResponse getOrder(UUID orderId) {
+        return toResponse(findOrder(orderId));
+    }
+
+    @Transactional
+    public OrderResponse approve(UUID orderId, String reviewer) {
+        OrderEntity order = findOrder(orderId);
+        if (order.getStatus() != OrderStatus.PENDING_REVIEW) {
+            throw new ServiceException(ErrorCode.ORDER_NOT_APPROVED);
+        }
+        order.setReviewDecision(ReviewDecision.APPROVE);
+        order.setReviewedBy(reviewer);
+        order.setReviewedAt(OffsetDateTime.now());
+        order.setStatus(OrderStatus.PENDING_PAYMENT);
+        order = orderRepository.save(order);
+
+        billingClient.createInvoice(order.getOrderId(), null, order.getFinalPremiumVnd());
+        return toResponse(order);
+    }
+
+    @Transactional
+    public OrderResponse reject(UUID orderId, String reason, String reviewer) {
+        OrderEntity order = findOrder(orderId);
+        if (order.getStatus() != OrderStatus.PENDING_REVIEW) {
+            throw new ServiceException(ErrorCode.ORDER_NOT_APPROVED);
+        }
+        order.setReviewDecision(ReviewDecision.REJECT);
+        order.setReviewReason(reason);
+        order.setReviewedBy(reviewer);
+        order.setReviewedAt(OffsetDateTime.now());
+        order.setStatus(OrderStatus.REJECTED);
+        order = orderRepository.save(order);
+        return toResponse(order);
+    }
+
+    @Transactional(readOnly = true)
+    public OrderEntity findOrder(UUID orderId) {
+        return orderRepository.findById(orderId)
+                .orElseThrow(() -> new ServiceException(ErrorCode.BAD_REQUEST, "Order not found", null));
+    }
+
     private UUID resolveCustomerId(String keycloakSubject) {
         return UUID.nameUUIDFromBytes(keycloakSubject.getBytes());
+    }
+
+    private ReviewQueueItem toQueueItem(OrderEntity order) {
+        ReviewQueueItem item = new ReviewQueueItem();
+        item.setOrderId(order.getOrderId());
+        item.setCustomerId(order.getCustomerId());
+        item.setProductId(order.getProductId());
+        item.setFinalPremiumVnd(order.getFinalPremiumVnd());
+        item.setStatus(order.getStatus());
+        item.setCreatedAt(order.getCreatedAt());
+        return item;
     }
 
     private OrderResponse toResponse(OrderEntity order) {
