@@ -9,8 +9,8 @@ rootProject.name = 'dynamic-pricing-platform'
 
 include 'services:common'
 include 'services:customer-service'
-// Future subprojects — uncomment as they are created:
-// include 'services:product-service'
+include 'services:product-service'
+// Future subprojects ? uncomment as they are created:
 // include 'services:order-service'
 // include 'services:billing-service'
 // include 'services:claims-service'
