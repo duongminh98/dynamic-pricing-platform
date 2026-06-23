@@ -1,0 +1,138 @@
+{
+  "Ha Noi": [
+    "Red River Delta",
+    "tier1"
+  ],
+  "Hai Phong": [
+    "Red River Delta",
+    "tier1"
+  ],
+  "Hue": [
+    "North Central Coast",
+    "tier1"
+  ],
+  "Da Nang": [
+    "South Central Coast",
+    "tier1"
+  ],
+  "TP Ho Chi Minh": [
+    "Southeast",
+    "tier1"
+  ],
+  "Can Tho": [
+    "Mekong Delta",
+    "tier1"
+  ],
+  "Tuyen Quang": [
+    "Northern Midlands",
+    "rural"
+  ],
+  "Lao Cai": [
+    "Northern Midlands",
+    "rural"
+  ],
+  "Thai Nguyen": [
+    "Northern Midlands",
+    "rural"
+  ],
+  "Phu Tho": [
+    "Northern Midlands",
+    "rural"
+  ],
+  "Bac Ninh": [
+    "Red River Delta",
+    "urban"
+  ],
+  "Hung Yen": [
+    "Red River Delta",
+    "urban"
+  ],
+  "Ninh Binh": [
+    "Red River Delta",
+    "rural"
+  ],
+  "Quang Tri": [
+    "North Central Coast",
+    "rural"
+  ],
+  "Nghe An": [
+    "North Central Coast",
+    "rural"
+  ],
+  "Ha Tinh": [
+    "North Central Coast",
+    "rural"
+  ],
+  "Quang Ngai": [
+    "South Central Coast",
+    "rural"
+  ],
+  "Gia Lai": [
+    "Central Highlands",
+    "rural"
+  ],
+  "Khanh Hoa": [
+    "South Central Coast",
+    "urban"
+  ],
+  "Lam Dong": [
+    "Central Highlands",
+    "rural"
+  ],
+  "Dak Lak": [
+    "Central Highlands",
+    "rural"
+  ],
+  "Dong Nai": [
+    "Southeast",
+    "urban"
+  ],
+  "Tay Ninh": [
+    "Southeast",
+    "urban"
+  ],
+  "Vinh Long": [
+    "Mekong Delta",
+    "rural"
+  ],
+  "Dong Thap": [
+    "Mekong Delta",
+    "rural"
+  ],
+  "An Giang": [
+    "Mekong Delta",
+    "rural"
+  ],
+  "Ca Mau": [
+    "Mekong Delta",
+    "rural"
+  ],
+  "Lang Son": [
+    "Northern Midlands",
+    "rural"
+  ],
+  "Cao Bang": [
+    "Northern Midlands",
+    "rural"
+  ],
+  "Dien Bien": [
+    "Northern Midlands",
+    "rural"
+  ],
+  "Lai Chau": [
+    "Northern Midlands",
+    "rural"
+  ],
+  "Son La": [
+    "Northern Midlands",
+    "rural"
+  ],
+  "Thanh Hoa": [
+    "North Central Coast",
+    "urban"
+  ],
+  "Quang Ninh": [
+    "Red River Delta",
+    "urban"
+  ]
+}

@@ -13,6 +13,17 @@ import numpy as np
 import pandas as pd
 
 # Vietnamese labels for the most important features.
+_EXPLAINER_CACHE: dict = {}
+
+
+def _get_tree_explainer(est):
+    """Cache SHAP TreeExplainer per model to avoid recomputing tree paths."""
+    key = id(est)
+    if key not in _EXPLAINER_CACHE:
+        import shap
+        _EXPLAINER_CACHE[key] = shap.TreeExplainer(est)
+    return _EXPLAINER_CACHE[key]
+
 LABEL_VI = {
     "age": "Tuoi",
     "gender": "Gioi tinh",
@@ -71,7 +82,7 @@ def explain(model, feature_df: "pd.DataFrame") -> dict:
                    or "tree" in est_name)
         if is_tree:
             try:
-                explainer = shap.TreeExplainer(est)
+                explainer = _get_tree_explainer(est)
                 values = explainer.shap_values(feature_df)
             except Exception:
                 values = None
