@@ -69,3 +69,6 @@ docs-html/
 
 .kiro/
 .agents/
+
+token_*.json
+*.token
