@@ -17,6 +17,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Pricing Service", lifespan=lifespan)
 
 from .routers import router as api_router
+from common.health import health_router
+app.include_router(health_router)
 app.include_router(api_router)
 
 # Simulate setup_common_middleware
