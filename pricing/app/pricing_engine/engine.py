@@ -18,7 +18,6 @@ from .loader import (
 )
 from .features import build_features, feature_set_for_audit
 from .selection import select_model
-from .segment import get_risk_segment
 from .explain import explain
 
 QUOTE_VALIDITY_DAYS = 7
@@ -106,8 +105,6 @@ def quote(db, product_id: str, profile: dict, model: str | None = None,
     rate_version_id = str(uuid.uuid4())
 
     explanation = explain(selection["model"], feature_df)
-    risk_segment = get_risk_segment(line, profile)
-
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
 
     if db is not None:
@@ -126,7 +123,6 @@ def quote(db, product_id: str, profile: dict, model: str | None = None,
         "expires_at": expires_at.isoformat(),
         "created_at": created_at.isoformat(),
         "explanation": explanation,
-        "risk_segment": risk_segment,
         "model_version": selection["model_version"],
         "rate_version": rate_version_id,
         "loading_factor": float(loading_factor),
@@ -165,7 +161,6 @@ def quote_freq_sev(db, product_id: str, profile: dict,
     quote_id = str(uuid.uuid4())
     rate_version_id = str(uuid.uuid4())
     explanation = explain(freq_model, feature_df)
-    risk_segment = get_risk_segment(line, profile)
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
     if db is not None:
         from ..services.audit import record_audit
@@ -183,7 +178,6 @@ def quote_freq_sev(db, product_id: str, profile: dict,
         "expires_at": expires_at.isoformat(),
         "created_at": created_at.isoformat(),
         "explanation": explanation,
-        "risk_segment": risk_segment,
         "model_version": "freq_sev",
         "rate_version": rate_version_id,
         "loading_factor": float(loading_factor),

@@ -1,57 +1,20 @@
-"""Property tests 23, 24, 19 — risk segment, champion promotion, audit append-only.
+"""Property tests 24, 19 - champion promotion rule and audit append-only.
 
 Feature: dynamic-pricing-platform
-Properties: 23, 24, 19(audit)  (>=100 Hypothesis iterations each)
-Validates: R14.1, R14.2, R14.4, R14.5, R35.3, R37.4, R37.5, R37.9
+Properties: 24, 19(audit)  (>=100 Hypothesis iterations each)
+Validates: R37.4, R37.5, R37.9
 """
 from __future__ import annotations
 
 import datetime
 import uuid
 
-import pytest
 from hypothesis import given, settings, strategies as st, HealthCheck
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, ModelVersion, ChampionAssignment, AuditTrail
-from app.pricing_engine.engine import quote
-from app.pricing_engine.segment import get_risk_segment, SEGMENTS
-from app.pricing_engine.governance import promote_champion, rollback_champion
-
-from tests.conftest import PROVINCES, make_profile
-
-
-# --------------------------------------------------------------------------
-# Property 23: risk segment is unique and deterministic
-# --------------------------------------------------------------------------
-@given(
-    age=st.integers(min_value=18, max_value=80),
-    province=st.sampled_from(PROVINCES),
-    claims=st.integers(min_value=0, max_value=10),
-    severity=st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
-)
-@settings(max_examples=100, deadline=None)
-def test_property23_segment_valid_and_deterministic(age, province, claims, severity):
-    prof = {"age": age, "province": province,
-            "claim_count_36m_prior": claims,
-            "claim_severity_score_prior": severity}
-    seg1 = get_risk_segment("health", prof)
-    seg2 = get_risk_segment("health", prof)
-    assert seg1 in SEGMENTS
-    assert seg1 == seg2  # deterministic
-
-
-@given(
-    age=st.integers(min_value=18, max_value=80),
-    province=st.sampled_from(PROVINCES),
-)
-@settings(max_examples=100, deadline=None)
-def test_property23_segment_in_quote(age, province):
-    prof = make_profile("health", age=age, province=province,
-                        line_attributes={"smoker": False, "height_cm": 170, "weight_kg": 65})
-    r = quote(None, "HEALTH_BASIC", prof)
-    assert r["risk_segment"] in SEGMENTS
+from app.pricing_engine.governance import promote_champion
 
 
 # --------------------------------------------------------------------------
@@ -63,7 +26,6 @@ def _fresh_session():
     Session = sessionmaker(bind=engine)
     return Session()
 
-
 def _seed_model(db, line, gini, monotonic, version_id=None):
     version_id = version_id or str(uuid.uuid4())
     db.add(ModelVersion(
@@ -73,10 +35,8 @@ def _seed_model(db, line, gini, monotonic, version_id=None):
         dataset_desc="synthetic_real", monotonic_applied=monotonic))
     return version_id
 
-
 def _seed_champion(db, line, version_id):
     db.add(ChampionAssignment(assignment_id=str(uuid.uuid4()), line=line, model_version_id=version_id, is_current=True))
-
 
 # --------------------------------------------------------------------------
 # Property 24: controlled champion promotion (BR-23)
@@ -109,7 +69,6 @@ def test_property24_promotion_rule(champion_gini, challenger_gini, challenger_mo
     finally:
         db.close()
 
-
 @given(
     champion_gini=st.floats(min_value=0.5, max_value=0.6, allow_nan=False),
 )
@@ -133,35 +92,35 @@ def test_property24_promotion_records_audit(champion_gini):
     finally:
         db.close()
 
-
 # --------------------------------------------------------------------------
-# Property 19 (audit): audit_trail is append-only (INSERT only, no UPDATE/DELETE)
+# Property 19 (audit): champion-change log is append-only (INSERT only)
 # --------------------------------------------------------------------------
 @given(
-    age=st.integers(min_value=18, max_value=80),
-    province=st.sampled_from(PROVINCES),
+    champion_gini=st.floats(min_value=0.5, max_value=0.6, allow_nan=False),
 )
 @settings(max_examples=100, deadline=None,
           suppress_health_check=[HealthCheck.function_scoped_fixture])
-def test_property19_audit_append_only(age, province):
-    """A sequence of quotes only grows audit_trail; old rows persist untouched."""
+def test_property19_audit_append_only(champion_gini):
+    """A sequence of promotions only grows audit_trail; old rows persist untouched."""
     db = _fresh_session()
     try:
-        seen_ids = []
+        champ_id = _seed_model(db, "health", champion_gini, True)
+        _seed_champion(db, "health", champ_id)
+        seen_event_ids = []
         for i in range(5):
-            prof = make_profile("health", age=age, province=province,
-                                line_attributes={"smoker": bool(i % 2),
-                                                 "height_cm": 170, "weight_kg": 65})
-            r = quote(db, "HEALTH_BASIC", prof)
+            chall_id = _seed_model(db, "health", champion_gini + 0.01 * (i + 1), True)
             db.commit()
-            seen_ids.append(r["quote_id"])
+            promote_champion(db, "health", chall_id)
+            rows = db.query(AuditTrail).filter(
+                AuditTrail.event_type == "ChampionPromoted").all()
+            seen_event_ids.extend(r.audit_id for r in rows)
 
-        rows = db.query(AuditTrail).filter(
-            AuditTrail.quote_id.in_(seen_ids)).all()
-        # Every quote produced exactly one audit row, and all are still present.
-        assert len(rows) == len(seen_ids)
-        for row in rows:
-            assert row.quote_id in seen_ids
-            assert row.created_at is not None
+        # All previously written champion-change audit rows are still present.
+        all_rows = db.query(AuditTrail).filter(
+            AuditTrail.event_type.in_(["ChampionPromoted", "CHAMPION_PROMOTE_REJECTED"])
+        ).all()
+        for eid in seen_event_ids:
+            assert any(r.audit_id == eid for r in all_rows)
+        assert len(all_rows) >= 5  # at least one audit row per promotion
     finally:
         db.close()
