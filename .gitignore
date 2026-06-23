@@ -64,3 +64,5 @@ kong*.log
 **/rabbitmq-data/
 
 .jqwik-database
+
+docs-html/
