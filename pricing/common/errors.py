@@ -29,7 +29,7 @@ from .correlation import get_correlation_id, HEADER_NAME
 # ── Error codes per design §7.2 ──────────────────────────────────
 
 
-class ErrorCode(str, Enum):
+class ErrorCode(Enum):
     """Canonical error codes with HTTP status and default message."""
 
     # ── Customer (R1) ──

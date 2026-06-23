@@ -1,0 +1,775 @@
+{
+  "health": {
+    "exposure_id": [
+      "SEG000000001",
+      "SEG000000002",
+      "SEG000000003",
+      "SEG000000004",
+      "SEG000000005",
+      "SEG000000006",
+      "SEG000000007",
+      "SEG000000008"
+    ],
+    "policy_id": [
+      "POL00000001",
+      "POL00000002",
+      "POL00000003",
+      "POL00000004",
+      "POL00000005",
+      "POL00000006",
+      "POL00000007",
+      "POL00000008"
+    ],
+    "customer_id": [
+      "C0000001",
+      "C0000002",
+      "C0000003",
+      "C0000004",
+      "C0000008",
+      "C0000011",
+      "C0000012",
+      "C0000013"
+    ],
+    "line": [
+      "health"
+    ],
+    "product_id": [
+      "HEALTH_BASIC",
+      "HEALTH_STANDARD",
+      "HEALTH_PREMIUM"
+    ],
+    "policy_effective_date": [
+      "2022-07-29",
+      "2023-01-31",
+      "2024-01-31",
+      "2025-01-31",
+      "2023-12-18",
+      "2024-12-18",
+      "2025-12-18",
+      "2021-04-27"
+    ],
+    "policy_expiration_date": [
+      "2023-07-29",
+      "2024-01-31",
+      "2025-01-31",
+      "2026-01-31",
+      "2024-12-18",
+      "2025-12-18",
+      "2026-12-18",
+      "2022-04-27"
+    ],
+    "gender": [
+      "Male",
+      "Female"
+    ],
+    "province": [
+      "Da Nang",
+      "Ha Noi",
+      "Khanh Hoa",
+      "Dong Nai",
+      "Ca Mau",
+      "Quang Ninh",
+      "Tay Ninh",
+      "Ha Tinh"
+    ],
+    "region": [
+      "South Central Coast",
+      "Red River Delta",
+      "Southeast",
+      "Mekong Delta",
+      "North Central Coast",
+      "Northern Midlands",
+      "Central Highlands"
+    ],
+    "urban_tier": [
+      "tier1",
+      "urban",
+      "rural"
+    ],
+    "occupation": [
+      "engineer",
+      "office_worker",
+      "healthcare_worker",
+      "farmer",
+      "business_owner",
+      "driver",
+      "retired",
+      "student"
+    ],
+    "income_level": [
+      "middle",
+      "high",
+      "low",
+      "lower_middle",
+      "upper_middle"
+    ],
+    "marital_status": [
+      "single",
+      "married",
+      "divorced_widowed"
+    ]
+  },
+  "car": {
+    "exposure_id": [
+      "SEG002820050",
+      "SEG002820051",
+      "SEG002820052",
+      "SEG002820053",
+      "SEG002820054",
+      "SEG002820055",
+      "SEG002820056",
+      "SEG002820057"
+    ],
+    "policy_id": [
+      "POL02601676",
+      "POL02601677",
+      "POL02601678",
+      "POL02601679",
+      "POL02601680",
+      "POL02601681",
+      "POL02601682",
+      "POL02601683"
+    ],
+    "customer_id": [
+      "C0000001",
+      "C0000002",
+      "C0000004",
+      "C0000008",
+      "C0000010",
+      "C0000011",
+      "C0000012",
+      "C0000018"
+    ],
+    "line": [
+      "car"
+    ],
+    "product_id": [
+      "CAR_TPL",
+      "CAR_PHYSICAL_BASIC",
+      "CAR_PHYSICAL_PREMIUM"
+    ],
+    "policy_effective_date": [
+      "2023-09-02",
+      "2024-09-02",
+      "2025-09-02",
+      "2023-06-19",
+      "2024-03-20",
+      "2021-09-16",
+      "2022-02-11",
+      "2022-08-05"
+    ],
+    "policy_expiration_date": [
+      "2024-09-02",
+      "2025-09-02",
+      "2026-09-02",
+      "2024-03-20",
+      "2024-06-19",
+      "2022-02-11",
+      "2022-09-16",
+      "2023-08-05"
+    ],
+    "gender": [
+      "Male",
+      "Female"
+    ],
+    "province": [
+      "Da Nang",
+      "Ha Noi",
+      "Dong Nai",
+      "Ca Mau",
+      "Lao Cai",
+      "Dong Thap",
+      "Can Tho",
+      "Hue"
+    ],
+    "region": [
+      "South Central Coast",
+      "Red River Delta",
+      "Southeast",
+      "Mekong Delta",
+      "Northern Midlands",
+      "North Central Coast",
+      "Central Highlands"
+    ],
+    "urban_tier": [
+      "tier1",
+      "urban",
+      "rural"
+    ],
+    "occupation": [
+      "engineer",
+      "office_worker",
+      "farmer",
+      "business_owner",
+      "factory_worker",
+      "driver",
+      "teacher",
+      "retired"
+    ],
+    "income_level": [
+      "middle",
+      "high",
+      "lower_middle",
+      "upper_middle",
+      "low"
+    ],
+    "vehicle_brand": [
+      "Ford",
+      "Hyundai",
+      "VinFast",
+      "Kia",
+      "Toyota",
+      "Mercedes",
+      "Honda",
+      "Mazda"
+    ],
+    "vehicle_model": [
+      "suv",
+      "sedan",
+      "hatchback",
+      "mpv",
+      "pickup"
+    ],
+    "vehicle_segment": [
+      "premium",
+      "mid",
+      "economy",
+      "luxury"
+    ],
+    "parking_location": [
+      "street",
+      "yard",
+      "garage"
+    ],
+    "primary_use": [
+      "commute",
+      "personal",
+      "business",
+      "ride_hailing"
+    ],
+    "garage_repair_option": [
+      "authorized",
+      "standard"
+    ]
+  },
+  "motorbike": {
+    "exposure_id": [
+      "SEG001108056",
+      "SEG001108057",
+      "SEG001108058",
+      "SEG001108059",
+      "SEG001108060",
+      "SEG001108061",
+      "SEG001108062",
+      "SEG001108063"
+    ],
+    "policy_id": [
+      "POL01045370",
+      "POL01045371",
+      "POL01045372",
+      "POL01045373",
+      "POL01045374",
+      "POL01045375",
+      "POL01045376",
+      "POL01045377"
+    ],
+    "customer_id": [
+      "C0000001",
+      "C0000002",
+      "C0000004",
+      "C0000005",
+      "C0000006",
+      "C0000007",
+      "C0000008",
+      "C0000010"
+    ],
+    "line": [
+      "motorbike"
+    ],
+    "product_id": [
+      "MOTORBIKE_THEFT_FIRE",
+      "MOTORBIKE_TPL",
+      "MOTORBIKE_COMPREHENSIVE"
+    ],
+    "policy_effective_date": [
+      "2023-09-15",
+      "2024-09-15",
+      "2023-09-08",
+      "2024-09-08",
+      "2022-03-07",
+      "2023-03-07",
+      "2023-06-02",
+      "2021-06-07"
+    ],
+    "policy_expiration_date": [
+      "2024-09-15",
+      "2025-09-15",
+      "2024-09-08",
+      "2025-09-08",
+      "2023-03-07",
+      "2023-06-02",
+      "2024-03-07",
+      "2022-06-07"
+    ],
+    "gender": [
+      "Male",
+      "Female"
+    ],
+    "province": [
+      "Da Nang",
+      "Ha Noi",
+      "Dong Nai",
+      "Nghe An",
+      "Lao Cai",
+      "Ca Mau",
+      "Quang Ninh",
+      "Tay Ninh"
+    ],
+    "region": [
+      "South Central Coast",
+      "Red River Delta",
+      "Southeast",
+      "North Central Coast",
+      "Northern Midlands",
+      "Mekong Delta",
+      "Central Highlands"
+    ],
+    "urban_tier": [
+      "tier1",
+      "urban",
+      "rural"
+    ],
+    "occupation": [
+      "engineer",
+      "office_worker",
+      "teacher",
+      "freelancer",
+      "farmer",
+      "business_owner",
+      "driver",
+      "construction_worker"
+    ],
+    "income_level": [
+      "middle",
+      "high",
+      "lower_middle",
+      "upper_middle",
+      "low"
+    ],
+    "vehicle_brand": [
+      "Honda",
+      "VinFast",
+      "Suzuki",
+      "Yamaha",
+      "SYM",
+      "Piaggio"
+    ],
+    "vehicle_model": [
+      "commuter",
+      "scooter",
+      "electric",
+      "sport"
+    ],
+    "vehicle_segment": [
+      "standard",
+      "mid",
+      "premium"
+    ],
+    "parking_location": [
+      "yard",
+      "indoor",
+      "street"
+    ],
+    "primary_use": [
+      "personal",
+      "commute",
+      "delivery"
+    ]
+  },
+  "home": {
+    "exposure_id": [
+      "SEG003589961",
+      "SEG003589962",
+      "SEG003589963",
+      "SEG003589964",
+      "SEG003589965",
+      "SEG003589966",
+      "SEG003589967",
+      "SEG003589968"
+    ],
+    "policy_id": [
+      "POL03276842",
+      "POL03276843",
+      "POL03276844",
+      "POL03276845",
+      "POL03276846",
+      "POL03276847",
+      "POL03276848",
+      "POL03276849"
+    ],
+    "customer_id": [
+      "C0000001",
+      "C0000002",
+      "C0000007",
+      "C0000008",
+      "C0000009",
+      "C0000011",
+      "C0000023",
+      "C0000024"
+    ],
+    "line": [
+      "home"
+    ],
+    "product_id": [
+      "HOME_FIRE_FLOOD_BASIC",
+      "HOME_FIRE_FLOOD_PREMIUM"
+    ],
+    "policy_effective_date": [
+      "2024-04-30",
+      "2025-04-30",
+      "2023-07-30",
+      "2024-04-23",
+      "2023-08-12",
+      "2021-10-13",
+      "2022-04-27",
+      "2022-12-09"
+    ],
+    "policy_expiration_date": [
+      "2025-04-30",
+      "2026-04-30",
+      "2024-04-23",
+      "2024-07-30",
+      "2024-08-12",
+      "2022-10-13",
+      "2022-12-09",
+      "2023-04-27"
+    ],
+    "gender": [
+      "Male",
+      "Female"
+    ],
+    "province": [
+      "Da Nang",
+      "Ha Noi",
+      "Lao Cai",
+      "Ca Mau",
+      "Quang Tri",
+      "Hai Phong",
+      "Dong Thap",
+      "Can Tho"
+    ],
+    "region": [
+      "South Central Coast",
+      "Red River Delta",
+      "Northern Midlands",
+      "Mekong Delta",
+      "North Central Coast",
+      "Central Highlands",
+      "Southeast"
+    ],
+    "urban_tier": [
+      "tier1",
+      "rural",
+      "urban"
+    ],
+    "occupation": [
+      "engineer",
+      "office_worker",
+      "freelancer",
+      "farmer",
+      "teacher",
+      "retired",
+      "driver",
+      "factory_worker"
+    ],
+    "income_level": [
+      "middle",
+      "high",
+      "lower_middle",
+      "upper_middle",
+      "low"
+    ],
+    "property_type": [
+      "rural_house",
+      "detached_house",
+      "townhouse",
+      "apartment"
+    ],
+    "construction_type": [
+      "brick",
+      "reinforced_concrete",
+      "mixed",
+      "wood"
+    ],
+    "roof_type": [
+      "tile",
+      "concrete",
+      "metal",
+      "mixed"
+    ],
+    "flood_risk_zone": [
+      "medium",
+      "low",
+      "high"
+    ]
+  },
+  "accident": {
+    "exposure_id": [
+      "SEG004295723",
+      "SEG004295724",
+      "SEG004295725",
+      "SEG004295726",
+      "SEG004295727",
+      "SEG004295728",
+      "SEG004295729",
+      "SEG004295730"
+    ],
+    "policy_id": [
+      "POL03918398",
+      "POL03918399",
+      "POL03918400",
+      "POL03918401",
+      "POL03918402",
+      "POL03918403",
+      "POL03918404",
+      "POL03918405"
+    ],
+    "customer_id": [
+      "C0000005",
+      "C0000013",
+      "C0000019",
+      "C0000020",
+      "C0000021",
+      "C0000027",
+      "C0000031",
+      "C0000037"
+    ],
+    "line": [
+      "accident"
+    ],
+    "product_id": [
+      "ACCIDENT_BASIC",
+      "ACCIDENT_STANDARD",
+      "ACCIDENT_PREMIUM"
+    ],
+    "policy_effective_date": [
+      "2021-01-17",
+      "2022-03-12",
+      "2023-03-12",
+      "2022-03-05",
+      "2023-03-05",
+      "2024-03-05",
+      "2023-01-14",
+      "2024-02-15"
+    ],
+    "policy_expiration_date": [
+      "2022-01-17",
+      "2023-03-12",
+      "2024-03-12",
+      "2023-03-05",
+      "2024-03-05",
+      "2025-03-05",
+      "2024-01-14",
+      "2025-02-15"
+    ],
+    "gender": [
+      "Female",
+      "Male"
+    ],
+    "province": [
+      "Nghe An",
+      "Quang Ninh",
+      "Ninh Binh",
+      "Da Nang",
+      "Lao Cai",
+      "TP Ho Chi Minh",
+      "Lam Dong",
+      "Hung Yen"
+    ],
+    "region": [
+      "North Central Coast",
+      "Red River Delta",
+      "South Central Coast",
+      "Northern Midlands",
+      "Southeast",
+      "Central Highlands",
+      "Mekong Delta"
+    ],
+    "urban_tier": [
+      "rural",
+      "urban",
+      "tier1"
+    ],
+    "occupation": [
+      "office_worker",
+      "business_owner",
+      "farmer",
+      "factory_worker",
+      "retired",
+      "student",
+      "healthcare_worker",
+      "engineer"
+    ],
+    "income_level": [
+      "upper_middle",
+      "low",
+      "middle",
+      "lower_middle",
+      "high"
+    ],
+    "occupation_class": [
+      "low",
+      "medium",
+      "medium_high",
+      "high"
+    ],
+    "workplace_risk_level": [
+      "low",
+      "medium",
+      "medium_high",
+      "high"
+    ],
+    "commute_mode": [
+      "motorbike",
+      "public_transport",
+      "car",
+      "walk_bicycle"
+    ],
+    "sport_risk_level": [
+      "none",
+      "low",
+      "high",
+      "medium"
+    ]
+  },
+  "travel": {
+    "exposure_id": [
+      "SEG004854654",
+      "SEG004854655",
+      "SEG004854656",
+      "SEG004854657",
+      "SEG004854658",
+      "SEG004854659",
+      "SEG004854660",
+      "SEG004854661"
+    ],
+    "policy_id": [
+      "POL04450598",
+      "POL04450599",
+      "POL04450600",
+      "POL04450601",
+      "POL04450602",
+      "POL04450603",
+      "POL04450604",
+      "POL04450605"
+    ],
+    "customer_id": [
+      "C0000001",
+      "C0000006",
+      "C0000013",
+      "C0000027",
+      "C0000029",
+      "C0000032",
+      "C0000036",
+      "C0000040"
+    ],
+    "line": [
+      "travel"
+    ],
+    "product_id": [
+      "TRAVEL_DOMESTIC",
+      "TRAVEL_INTERNATIONAL"
+    ],
+    "policy_effective_date": [
+      "2023-04-05",
+      "2021-03-17",
+      "2023-11-16",
+      "2021-04-03",
+      "2023-09-10",
+      "2023-03-20",
+      "2021-07-17",
+      "2022-07-29"
+    ],
+    "policy_expiration_date": [
+      "2023-04-09",
+      "2021-03-19",
+      "2023-12-06",
+      "2021-04-16",
+      "2023-09-15",
+      "2023-03-29",
+      "2021-07-27",
+      "2022-08-03"
+    ],
+    "gender": [
+      "Male",
+      "Female"
+    ],
+    "province": [
+      "Da Nang",
+      "Ha Noi",
+      "Quang Ninh",
+      "TP Ho Chi Minh",
+      "Thai Nguyen",
+      "Gia Lai",
+      "Ninh Binh",
+      "Tay Ninh"
+    ],
+    "region": [
+      "South Central Coast",
+      "Red River Delta",
+      "Southeast",
+      "Northern Midlands",
+      "Central Highlands",
+      "North Central Coast",
+      "Mekong Delta"
+    ],
+    "urban_tier": [
+      "tier1",
+      "urban",
+      "rural"
+    ],
+    "occupation": [
+      "engineer",
+      "teacher",
+      "business_owner",
+      "factory_worker",
+      "driver",
+      "office_worker",
+      "farmer",
+      "construction_worker"
+    ],
+    "income_level": [
+      "middle",
+      "low",
+      "upper_middle",
+      "high",
+      "lower_middle"
+    ],
+    "domestic_or_international": [
+      "domestic",
+      "international"
+    ],
+    "destination_region": [
+      "Vietnam",
+      "East Asia",
+      "ASEAN",
+      "Europe",
+      "Australia",
+      "North America"
+    ],
+    "destination_country": [
+      "Vietnam",
+      "East Asia",
+      "ASEAN",
+      "Europe",
+      "Australia",
+      "North America"
+    ],
+    "travel_purpose": [
+      "leisure",
+      "study",
+      "business",
+      "family"
+    ]
+  }
+}
