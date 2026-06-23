@@ -62,3 +62,5 @@ kong*.log
 # Any local docker volume dumps if mounted
 **/postgres-data/
 **/rabbitmq-data/
+
+.jqwik-database

@@ -97,6 +97,7 @@ public class KeycloakClient {
 
         try {
             assignRealmRole(userId, adminToken);
+            clearRequiredActions(userId, adminToken);
         } catch (Exception e) {
             log.warn("Failed to assign role to Keycloak user {}, cleaning up: {}", userId, e.getMessage());
             deleteUser(userId);
@@ -153,6 +154,19 @@ public class KeycloakClient {
         restTemplate.postForLocation(mappingUrl, new HttpEntity<>(rolePayload, headers));
     }
 
+
+    private void clearRequiredActions(String userId, String adminToken) {
+        try {
+            String url = authServerUrl + "/admin/realms/" + realm + "/users/" + userId;
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(adminToken);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            Map<String, Object> update = Map.of("requiredActions", List.of());
+            restTemplate.exchange(url, HttpMethod.PUT, new HttpEntity<>(update, headers), Void.class);
+        } catch (Exception e) {
+            log.warn("Failed to clear required actions for user {}: {}", userId, e.getMessage());
+        }
+    }
     public void deleteUser(String keycloakUserId) {
         try {
             String adminToken = getAdminToken();

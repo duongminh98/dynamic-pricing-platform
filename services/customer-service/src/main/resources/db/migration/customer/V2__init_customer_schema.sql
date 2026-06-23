@@ -1,5 +1,5 @@
--- V1__init_customer_schema.sql
--- Customer DB schema per design §5.1
+-- V2__init_customer_schema.sql
+-- Customer DB schema per design 5.1
 
 CREATE TABLE account (
     account_id       UUID        PRIMARY KEY,
@@ -27,7 +27,7 @@ CREATE TABLE customer_profile (
     marital_status    VARCHAR(20) NOT NULL,
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_profile_age CHECK (age BETWEEN 18 AND 100),
-    CONSTRAINT chk_profile_gender CHECK (gender IN ('nam', 'nữ', 'khác')),
+    CONSTRAINT chk_profile_gender CHECK (gender IN ('male', 'female', 'other')),
     CONSTRAINT chk_profile_income CHECK (monthly_income_vnd BETWEEN 0 AND 999999999999)
 );
 
