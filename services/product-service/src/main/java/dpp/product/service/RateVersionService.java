@@ -7,7 +7,6 @@ import dpp.product.entity.LoadingFactor;
 import dpp.product.entity.RateVersion;
 import dpp.product.repository.LoadingFactorRepository;
 import dpp.product.repository.RateVersionRepository;
-import dpp.product.repository.EligibilityRuleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,7 +30,6 @@ public class RateVersionService {
 
     private final RateVersionRepository rateVersionRepository;
     private final LoadingFactorRepository loadingFactorRepository;
-    private final EligibilityRuleRepository eligibilityRuleRepository;
 
     public RateVersion createNewRateVersion(String createdBy) {
         // Set all current versions to false (append-only: never DELETE old ones)
@@ -77,25 +75,8 @@ public class RateVersionService {
         return loadingFactorRepository.save(lf);
     }
 
-    public void addEligibilityRule(UUID rateVersionId, String line, String ruleType,
-                                    String params, String action) {
-        if (!VALID_LINES.contains(line)) {
-            throw new ServiceException(ErrorCode.BAD_REQUEST,
-                    Map.of("line", line, "valid_lines", VALID_LINES));
-        }
-        if (!Set.of("age_limit", "coverage_cap", "health_combo", "vehicle_limit").contains(ruleType)) {
-            throw new ServiceException(ErrorCode.BAD_REQUEST,
-                    Map.of("rule_type", ruleType, "reason", "invalid rule type"));
-        }
-        if (!Set.of("ACCEPT", "REFER", "DECLINE").contains(action)) {
-            throw new ServiceException(ErrorCode.BAD_REQUEST,
-                    Map.of("action", action, "reason", "invalid action"));
-        }
-
-        rateVersionRepository.findById(rateVersionId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.BAD_REQUEST,
-                        Map.of("rate_version_id", rateVersionId.toString(), "reason", "not found")));
-    }
+    // Eligibility rules have been removed from the product scope (R26 automatic
+    // rules dropped). Rate_Version now covers loading factors + product config only.
 }
 
 

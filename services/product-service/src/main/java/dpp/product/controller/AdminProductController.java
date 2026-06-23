@@ -3,7 +3,6 @@ package dpp.product.controller;
 import dpp.product.dto.RateVersionResponse;
 import dpp.product.entity.LoadingFactor;
 import dpp.product.entity.Product;
-import dpp.product.entity.RateVersion;
 import dpp.product.repository.ProductRepository;
 import dpp.product.service.ProductService;
 import dpp.product.service.RateVersionService;
@@ -44,18 +43,6 @@ public class AdminProductController {
         Double loadingValue = ((Number) body.get("loading_value")).doubleValue();
         LoadingFactor lf = rateVersionService.addLoadingFactor(rateVersionId, line, loadingValue);
         return ResponseEntity.ok(lf);
-    }
-
-    @PutMapping("/eligibility-rules")
-    public ResponseEntity<Void> updateEligibilityRule(
-            @RequestBody Map<String, Object> body) {
-        UUID rateVersionId = UUID.fromString((String) body.get("rate_version_id"));
-        String line = (String) body.get("line");
-        String ruleType = (String) body.get("rule_type");
-        String params = (String) body.getOrDefault("params", "{}");
-        String action = (String) body.get("action");
-        rateVersionService.addEligibilityRule(rateVersionId, line, ruleType, params, action);
-        return ResponseEntity.ok().build();
     }
 
     @GetMapping("/rate-versions")
