@@ -1,0 +1,42 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: order-service
+  datasource:
+    url: jdbc:postgresql://${ORDER_DB_HOST:localhost}:${ORDER_DB_PORT:5435}/${ORDER_DB_NAME:order_db}
+    username: ${POSTGRES_USER:platform_user}
+    password: ${POSTGRES_PASSWORD:platform_password_dev_only}
+    hikari:
+      maximum-pool-size: 10
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8080/realms/dynamic-pricing/protocol/openid-connect/certs}
+  jpa:
+    hibernate:
+      $l-auto: none
+    open-in-view: false
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:platform_user}
+    password: ${RABBITMQ_PASSWORD:platform_password_dev_only}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/order
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+dpp:
+  pricing:
+    base-url: ${PRICING_BASE_URL:http://localhost:8000}
