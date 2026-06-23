@@ -1,8 +1,0 @@
-interface:
-  display_name: "Build Task"
-  short_description: "Build and verify a task end-to-end"
-  brand_color: "#3B82F6"
-  default_prompt: "Use $build-task to implement and verify task"
-
-policy:
-  allow_implicit_invocation: true

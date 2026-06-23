@@ -66,3 +66,6 @@ kong*.log
 .jqwik-database
 
 docs-html/
+
+.kiro/
+.agents/
