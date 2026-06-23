@@ -1,21 +1,107 @@
 package dpp.order;
 
+import dpp.common.outbox.OutboxPublisher;
+import dpp.order.dto.PolicyResponse;
+import dpp.order.entity.Policy;
+import dpp.order.entity.PolicyStatus;
+import dpp.order.repository.ExposureSegmentRepository;
+import dpp.order.repository.PolicyDocumentRepository;
+import dpp.order.repository.PolicyRepository;
+import dpp.order.service.PolicyLifecycleService;
 import net.jqwik.api.*;
+import net.jqwik.api.constraints.IntRange;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.time.OffsetDateTime;
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @Tag("Feature: dynamic-pricing-platform, Property 18")
 class RenewalChainPropertyTest {
 
+    private Policy basePolicy(UUID customerId, int renewalNumber) {
+        Policy p = new Policy();
+        p.setPolicyId(UUID.randomUUID());
+        p.setCustomerId(customerId);
+        p.setProductId("motor-001");
+        p.setStatus(PolicyStatus.active);
+        p.setPolicyEffectiveDate(OffsetDateTime.now().minusDays(365));
+        p.setPolicyExpirationDate(OffsetDateTime.now().minusDays(1));
+        p.setRenewalNumber(renewalNumber);
+        p.setRenewal(renewalNumber > 0);
+        p.setYearsSinceFirstPolicy(renewalNumber);
+        p.setPolicyCountPrior(renewalNumber);
+        p.setFinalPremiumVnd(1_000_000L);
+        return p;
+    }
+
+    private PolicyLifecycleService newService(PolicyRepository repo) {
+        return new PolicyLifecycleService(repo, mock(ExposureSegmentRepository.class),
+                mock(PolicyDocumentRepository.class), mock(OutboxPublisher.class));
+    }
+
     @Property(tries = 100)
-    void property18_invariant(@ForAll int seed) {
-        assertTrue(true, "Property 18 placeholder - validates Requirements 22.6, 24.3");
+    void renewalIncrementsNumberAndPreservesIdentity(
+            @ForAll @IntRange(min = 0, max = 10) int oldRenewalNumber) {
+        String subject = "customer-subject";
+        UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
+        UUID policyId = UUID.randomUUID();
+
+        PolicyRepository repo = mock(PolicyRepository.class);
+        when(repo.findById(policyId)).thenReturn(Optional.of(basePolicy(customerId, oldRenewalNumber)));
+        when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PolicyLifecycleService svc = newService(repo);
+        PolicyResponse resp = svc.renew(policyId, subject);
+
+        assertEquals(oldRenewalNumber + 1, resp.getRenewalNumber());
+        assertTrue(resp.isRenewal());
+        assertEquals(customerId, resp.getCustomerId());
+
+        ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
+        verify(repo, times(1)).save(captor.capture());
+        Policy saved = captor.getValue();
+        assertEquals(oldRenewalNumber + 1, saved.getRenewalNumber());
+        assertTrue(saved.isRenewal());
+        assertEquals(customerId, saved.getCustomerId());
+    }
+
+    @Property(tries = 100)
+    void firstPolicyHasZeroRenewalNumberAndNotRenewal(@ForAll int seed) {
+        String subject = "customer-subject";
+        UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
+        UUID policyId = UUID.randomUUID();
+
+        PolicyRepository repo = mock(PolicyRepository.class);
+        when(repo.findById(policyId)).thenReturn(Optional.of(basePolicy(customerId, 0)));
+        when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PolicyLifecycleService svc = newService(repo);
+        PolicyResponse resp = svc.renew(policyId, subject);
+
+        assertEquals(1, resp.getRenewalNumber());
+        assertTrue(resp.isRenewal());
+        assertEquals(customerId, resp.getCustomerId());
     }
 
     @Test
     void property18_sanity() {
-        assertTrue(true, "Property 18 sanity check");
+        String subject = "customer-subject";
+        UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
+        UUID policyId = UUID.randomUUID();
+
+        PolicyRepository repo = mock(PolicyRepository.class);
+        when(repo.findById(policyId)).thenReturn(Optional.of(basePolicy(customerId, 3)));
+        when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PolicyLifecycleService svc = newService(repo);
+        PolicyResponse resp = svc.renew(policyId, subject);
+        assertEquals(4, resp.getRenewalNumber());
+        assertTrue(resp.isRenewal());
     }
 }
