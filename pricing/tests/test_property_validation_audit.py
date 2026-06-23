@@ -162,23 +162,15 @@ def test_property20_audit_roundtrip(age, province):
 
 
 # --------------------------------------------------------------------------
-# Property 22: model selection (champion / challenger)
+# Property 22: model selection (Champion_Model only)
 # --------------------------------------------------------------------------
 @given(line=st.sampled_from(["health", "car", "travel"]))
 @settings(max_examples=100, deadline=None)
-def test_property22_none_uses_champion(line):
-    sel = select_model(line, None)
+def test_property22_uses_champion(line):
+    sel = select_model(line)
     assert sel["model_version"]  # champion resolved
     assert sel["model"] is not None
 
-
-@given(line=st.sampled_from(ALL_LINES))
-@settings(max_examples=100, deadline=None)
-def test_property22_unconfigured_challenger_rejected(line):
-    """A challenger not configured for the line is rejected (no silent fallback)."""
-    with pytest.raises(ServiceException) as exc:
-        select_model(line, "nonexistent-version-0000")
-    assert exc.value.error_code == ErrorCode.CHALLENGER_NOT_CONFIGURED
 
 
 def test_property22_missing_champion_rejected():
@@ -190,7 +182,7 @@ def test_property22_missing_champion_rejected():
             k: v for k, v in original.items() if k != "health"
         }
         with pytest.raises(ServiceException) as exc:
-            select_model("health", None)
+            select_model("health")
         assert exc.value.error_code == ErrorCode.MISSING_CHAMPION
     finally:
         loader.champion_config["champion_by_line"] = original

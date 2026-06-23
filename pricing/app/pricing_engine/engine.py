@@ -78,7 +78,7 @@ def _predict_pure_premium(selection: dict, feature_df) -> float:
     return float(model.predict(feature_df)[0])
 
 
-def quote(db, product_id: str, profile: dict, model: str | None = None,
+def quote(db, product_id: str, profile: dict,
           loading_factor: float = 1.0) -> dict:
     """Compute a quote. ``db`` is an optional SQLAlchemy session for audit."""
     ensure_loaded()
@@ -87,7 +87,7 @@ def quote(db, product_id: str, profile: dict, model: str | None = None,
     if line not in LINES:
         raise ServiceException(ErrorCode.UNSUPPORTED_LINE, details={"line": line})
 
-    selection = select_model(line, model)
+    selection = select_model(line)
     feature_names = required_columns(line)
 
     # Validate that required monotonic / core features can be resolved.

@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db, Quote
 from pydantic import BaseModel
-from typing import Optional
 import datetime
 
 router = APIRouter(prefix="/pricing", tags=["pricing"])
@@ -13,7 +12,6 @@ quote_semaphore = asyncio.Semaphore(100)
 class QuoteRequest(BaseModel):
     product_id: str
     profile: dict
-    model: Optional[str] = None
 
 
 @router.post("/quote")
@@ -24,7 +22,7 @@ async def create_quote(request: QuoteRequest, db: Session = Depends(get_db)):
     async with quote_semaphore:
         try:
             from ..pricing_engine.engine import quote
-            result = quote(db, request.product_id, request.profile, request.model)
+            result = quote(db, request.product_id, request.profile)
 
             db_quote = Quote(
                 quote_id=result["quote_id"],
