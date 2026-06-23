@@ -13,6 +13,14 @@ import json
 import pathlib
 import warnings
 
+import sys as _sys
+import sklearn._loss._loss as _skloss
+# Compatibility shim: some LightGBM artifacts were pickled with an older
+# scikit-learn that stored the loss module as the top-level name `_loss`.
+# scikit-learn >=1.4 moved it under `sklearn._loss._loss`; alias the old
+# import path so joblib.load can unpickle the models (R11.4).
+_sys.modules.setdefault("_loss", _skloss)
+
 import joblib
 import pandas as pd
 
