@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 import uuid
 import datetime
@@ -15,6 +15,9 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Pricing Service", lifespan=lifespan)
+
+from .routers import router as api_router
+app.include_router(api_router)
 
 # Simulate setup_common_middleware
 @app.middleware("http")
