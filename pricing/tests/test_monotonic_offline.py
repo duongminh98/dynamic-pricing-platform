@@ -11,7 +11,7 @@ feature column order, enforcing BR-19 / C-8:
 
 Feature: dynamic-pricing-platform
 Not a property-based test (deterministic artifact inspection).
-Validates: R4.7, R12.7, R29.5, R30.5, R31.3, R31.4 (BR-19/C-8)
+Validates: R4.7, R12.7, R29.5, R30.5 (BR-19/C-8)
 """
 from __future__ import annotations
 

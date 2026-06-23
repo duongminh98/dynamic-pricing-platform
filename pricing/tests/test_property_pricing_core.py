@@ -3,7 +3,7 @@ monotonicity, and risk discrimination.
 
 Feature: dynamic-pricing-platform
 Properties: 1, 2, 3, 4, 5  (>=100 Hypothesis iterations each)
-Validates: R4.1-R4.3, R4.7-R4.8, R8.3, R11.1, R12.7, R14.5, R29.5, R30.5, R31.3, R31.4
+Validates: R4.1-R4.3, R4.7-R4.8, R8.3, R11.1, R29.5, R30.5
 """
 from __future__ import annotations
 
