@@ -1,0 +1,110 @@
+package dpp.order.service;
+
+import dpp.common.outbox.OutboxPublisher;
+import dpp.order.entity.*;
+import dpp.order.repository.*;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+
+@Service
+public class PolicyIssuanceService {
+
+    private final OrderRepository orderRepository;
+    private final PolicyRepository policyRepository;
+    private final ExposureSegmentRepository segmentRepository;
+    private final PolicyDocumentRepository documentRepository;
+    private final OutboxPublisher outboxPublisher;
+    private final ObjectMapper objectMapper;
+
+    public PolicyIssuanceService(OrderRepository orderRepository, PolicyRepository policyRepository,
+                                  ExposureSegmentRepository segmentRepository, PolicyDocumentRepository documentRepository,
+                                  OutboxPublisher outboxPublisher) {
+        this.orderRepository = orderRepository;
+        this.policyRepository = policyRepository;
+        this.segmentRepository = segmentRepository;
+        this.documentRepository = documentRepository;
+        this.outboxPublisher = outboxPublisher;
+        this.objectMapper = new ObjectMapper();
+    }
+
+    @Transactional
+    public void issuePolicy(UUID orderId, UUID policyIdFromInvoice) {
+        OrderEntity order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("Order not found for policy issuance"));
+
+        if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            return;
+        }
+
+        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime expiration = now.plus(365, ChronoUnit.DAYS);
+
+        Policy policy = new Policy();
+        UUID policyId = UUID.randomUUID();
+        policy.setPolicyId(policyId);
+        policy.setOrderId(orderId);
+        policy.setCustomerId(order.getCustomerId());
+        policy.setProductId(order.getProductId());
+        policy.setStatus(PolicyStatus.active);
+        policy.setPolicyEffectiveDate(now);
+        policy.setPolicyExpirationDate(expiration);
+        policy.setRenewalNumber(0);
+        policy.setRenewal(false);
+        policy.setYearsSinceFirstPolicy(0);
+        policy.setPolicyCountPrior(0);
+        policy.setFinalPremiumVnd(order.getFinalPremiumVnd());
+        policy.setCreatedAt(now);
+        policyRepository.save(policy);
+
+        ExposureSegment segment = new ExposureSegment();
+        segment.setSegmentId(UUID.randomUUID());
+        segment.setPolicyId(policyId);
+        segment.setExposureSegmentSeq(0);
+        segment.setSegmentStart(now);
+        segment.setSegmentEnd(expiration);
+        long days = ChronoUnit.DAYS.between(now, expiration);
+        segment.setEarnedExposureYears(days / 365.25);
+        segment.setCoverageAmountVnd(0);
+        segment.setDeductibleVnd(0);
+        segment.setRiskSnapshot("{}");
+        segmentRepository.save(segment);
+
+        PolicyDocument doc = new PolicyDocument();
+        doc.setDocumentId(UUID.randomUUID());
+        doc.setPolicyId(policyId);
+        doc.setVersion(1);
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("customer_id", order.getCustomerId().toString());
+        content.put("product_id", order.getProductId());
+        content.put("premium_vnd", order.getFinalPremiumVnd());
+        content.put("effective", now.toString());
+        content.put("expiration", expiration.toString());
+        try {
+            doc.setContent(objectMapper.writeValueAsString(content));
+        } catch (Exception e) {
+            doc.setContent("{}");
+        }
+        doc.setCreatedAt(now);
+        documentRepository.save(doc);
+
+        order.setStatus(OrderStatus.COMPLETED);
+        orderRepository.save(order);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("policy_id", policyId.toString());
+        payload.put("customer_id", order.getCustomerId().toString());
+        try {
+            outboxPublisher.enqueue("PolicyIssued", objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to enqueue PolicyIssued", e);
+        }
+    }
+}
