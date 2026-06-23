@@ -50,3 +50,20 @@ async def create_quote(request: QuoteRequest, db: Session = Depends(get_db)):
                                             "message": exc.message,
                                             "details": exc.details})
             raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get('/quote/{quote_id}')
+async def get_quote(quote_id: str, db: Session = Depends(get_db)):
+    db_quote = db.query(Quote).filter(Quote.quote_id == quote_id).first()
+    if db_quote is None:
+        raise HTTPException(status_code=404, detail={'error_code': 'QUOTE_NOT_FOUND', 'message': 'Quote not found'})
+    return {
+        'quote_id': db_quote.quote_id,
+        'product_id': db_quote.product_id,
+        'line': db_quote.line,
+        'pure_premium_vnd': db_quote.pure_premium_vnd,
+        'final_premium_vnd': db_quote.final_premium_vnd,
+        'expires_at': db_quote.expires_at.isoformat(),
+        'created_at': db_quote.created_at.isoformat(),
+    }
+
