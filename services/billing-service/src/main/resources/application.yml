@@ -1,0 +1,38 @@
+server:
+  port: 8086
+
+spring:
+  application:
+    name: billing-service
+  datasource:
+    url: jdbc:postgresql://${BILLING_DB_HOST:localhost}:${BILLING_DB_PORT:5438}/${BILLING_DB_NAME:billing_db}
+    username: ${POSTGRES_USER:platform_user}
+    password: ${POSTGRES_PASSWORD:platform_password_dev_only}
+    hikari:
+      maximum-pool-size: 10
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8080/realms/dynamic-pricing/protocol/openid-connect/certs}
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:platform_user}
+    password: ${RABBITMQ_PASSWORD:platform_password_dev_only}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/billing
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
