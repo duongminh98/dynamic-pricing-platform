@@ -123,7 +123,7 @@ def test_property17_no_claim_defaults_when_empty(line):
 
 
 # --------------------------------------------------------------------------
-# Property 20: audit round-trip (feature_set / model_version recoverable)
+# Property 20: audit round-trip (bonus - per-quote audit gated, R35)
 # --------------------------------------------------------------------------
 @given(
     age=st.integers(min_value=18, max_value=80),
@@ -132,8 +132,12 @@ def test_property17_no_claim_defaults_when_empty(line):
 @settings(max_examples=100, deadline=None,
           suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_property20_audit_roundtrip(age, province):
-    """Each generated input gets a fresh in-memory DB so audit rows do not leak."""
+    """Bonus (R35): per-quote audit is gated behind PRICING_BONUS_QUOTE_AUDIT_ENABLED.
+    This test enables the flag to verify the round-trip when the bonus is on."""
     from app.database import AuditTrail
+    import app.config as config
+    saved = config.QUOTE_AUDIT_ENABLED
+    config.QUOTE_AUDIT_ENABLED = True
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
@@ -154,6 +158,7 @@ def test_property20_audit_roundtrip(age, province):
         assert fs.get("coverage_amount_vnd") is not None
     finally:
         db_session.close()
+        config.QUOTE_AUDIT_ENABLED = saved
 
 
 # --------------------------------------------------------------------------

@@ -22,6 +22,11 @@ from .explain import explain
 
 QUOTE_VALIDITY_DAYS = 7
 
+def _quote_audit_enabled() -> bool:
+    """Read the bonus flag dynamically so tests/deployments can toggle it at runtime."""
+    from .. import config
+    return config.QUOTE_AUDIT_ENABLED
+
 
 # Allowed ranges for core numeric profile fields (R1.2-R1.4, R2.6, R2.17).
 PROFILE_RANGES = {
@@ -107,7 +112,7 @@ def quote(db, product_id: str, profile: dict, model: str | None = None,
     explanation = explain(selection["model"], feature_df)
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
 
-    if db is not None:
+    if db is not None and _quote_audit_enabled():
         from ..services.audit import record_audit
         record_audit(db, quote_id, feature_set, selection["model_version"], rate_version_id)
 
@@ -162,7 +167,7 @@ def quote_freq_sev(db, product_id: str, profile: dict,
     rate_version_id = str(uuid.uuid4())
     explanation = explain(freq_model, feature_df)
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
-    if db is not None:
+    if db is not None and _quote_audit_enabled():
         from ..services.audit import record_audit
         record_audit(db, quote_id, feature_set, "freq_sev", rate_version_id)
 

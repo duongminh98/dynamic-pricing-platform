@@ -2,7 +2,7 @@ import json
 import pathlib
 from fastapi import APIRouter, HTTPException
 
-from ..config import VALIDATION_ENDPOINTS_ENABLED
+from .. import config
 
 router = APIRouter(prefix="/pricing", tags=["reports"])
 
@@ -11,7 +11,7 @@ REPORTS_DIR = ROOT / "reports" / "modeling_real"
 
 @router.get("/validation/{line}")
 async def get_validation_report(line: str):
-    if not VALIDATION_ENDPOINTS_ENABLED:
+    if not config.VALIDATION_ENDPOINTS_ENABLED:
         raise HTTPException(status_code=404, detail="VALIDATION_REPORT_UNAVAILABLE")
     report_path = REPORTS_DIR / f"{line}_validation.json"
     if not report_path.exists():
@@ -22,7 +22,7 @@ async def get_validation_report(line: str):
 
 @router.get("/fairness/{line}")
 async def get_fairness_report(line: str):
-    if not VALIDATION_ENDPOINTS_ENABLED:
+    if not config.VALIDATION_ENDPOINTS_ENABLED:
         raise HTTPException(status_code=404, detail="VALIDATION_REPORT_UNAVAILABLE")
     report_path = REPORTS_DIR / f"{line}_fairness.json"
     if not report_path.exists():
