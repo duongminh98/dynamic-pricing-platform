@@ -52,14 +52,6 @@
       {
         "name": "Administrator",
         "description": "Platform administrator"
-      },
-      {
-        "name": "Underwriter",
-        "description": "Underwriting user"
-      },
-      {
-        "name": "Claims_Handler",
-        "description": "Claims handling user"
       }
     ]
   },
@@ -259,42 +251,6 @@
       ],
       "realmRoles": [
         "Administrator"
-      ]
-    },
-    {
-      "username": "demo.underwriter",
-      "email": "demo.underwriter@example.com",
-      "firstName": "Demo",
-      "lastName": "Underwriter",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "demo_underwriter_dev_only",
-          "temporary": false
-        }
-      ],
-      "realmRoles": [
-        "Underwriter"
-      ]
-    },
-    {
-      "username": "demo.claims",
-      "email": "demo.claims@example.com",
-      "firstName": "Demo",
-      "lastName": "ClaimsHandler",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "demo_claims_dev_only",
-          "temporary": false
-        }
-      ],
-      "realmRoles": [
-        "Claims_Handler"
       ]
     }
   ],
