@@ -42,3 +42,9 @@ dpp:
     base-url: ${PRICING_BASE_URL:http://localhost:8000}
   billing:
     base-url: ${BILLING_BASE_URL:http://localhost:8000}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
