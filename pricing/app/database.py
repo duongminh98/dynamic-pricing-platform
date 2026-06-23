@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 import datetime
 from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Float, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
@@ -58,7 +58,8 @@ class ModelVersion(Base):
 
 class ChampionAssignment(Base):
     __tablename__ = 'champion_assignment'
-    
-    line = Column(String, primary_key=True)
+
+    assignment_id = Column(String, primary_key=True)
+    line = Column(String, nullable=False)
     model_version_id = Column(String, nullable=False)
     is_current = Column(Boolean, nullable=False)

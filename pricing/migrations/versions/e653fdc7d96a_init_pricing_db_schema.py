@@ -34,11 +34,13 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('audit_id')
     )
     op.create_table('champion_assignment',
+    sa.Column('assignment_id', sa.String(), nullable=False),
     sa.Column('line', sa.String(), nullable=False),
     sa.Column('model_version_id', sa.String(), nullable=False),
     sa.Column('is_current', sa.Boolean(), nullable=False),
-    sa.PrimaryKeyConstraint('line')
+    sa.PrimaryKeyConstraint('assignment_id')
     )
+    op.create_index('ix_champion_assignment_line', 'champion_assignment', ['line'])
     op.create_table('model_version',
     sa.Column('model_version_id', sa.String(), nullable=False),
     sa.Column('line', sa.String(), nullable=False),
