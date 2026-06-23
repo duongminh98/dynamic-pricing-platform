@@ -9,6 +9,26 @@ on:
 jobs:
   java:
     runs-on: ubuntu-latest
+    services:
+      postgres-product:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: product_db
+          POSTGRES_USER: platform_user
+          POSTGRES_PASSWORD: platform_password_dev_only
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U platform_user -d product_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PRODUCT_DB_HOST: localhost
+      PRODUCT_DB_PORT: 5434
+      PRODUCT_DB_NAME: product_db
+      POSTGRES_USER: platform_user
+      POSTGRES_PASSWORD: platform_password_dev_only
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
