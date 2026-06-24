@@ -22,6 +22,7 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/health", "/actuator/prometheus", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/billing/invoices").permitAll()
                 .requestMatchers(HttpMethod.POST, "/billing/invoices/*/pay").permitAll()
+                .requestMatchers("/billing/vnpay/return", "/billing/vnpay/ipn").permitAll()
                 .anyRequest().authenticated()
         );
         http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(KeycloakRoleConverter.create())));

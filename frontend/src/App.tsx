@@ -6,6 +6,8 @@ import Quote from './pages/Quote';
 import Products from './pages/Products';
 import Policies from './pages/Policies';
 import Notifications from './pages/Notifications';
+import Checkout from './pages/Checkout';
+import PaymentResult from './pages/PaymentResult';
 import AdminConsole from './pages/admin/AdminConsole';
 
 export default function App() {
@@ -14,7 +16,7 @@ export default function App() {
     <div>
       <nav>
         <Link to='/'>Home</Link> | <Link to='/products'>Products</Link>
-        {isLoggedIn && <> | <Link to='/quote'>Quote</Link> | <Link to='/policies'>Policies</Link> | <Link to='/notifications'>Notifications</Link></>}
+        {isLoggedIn && <> | <Link to='/quote'>Quote</Link> | <Link to='/policies'>Policies</Link> | <Link to='/checkout'>Checkout</Link> | <Link to='/notifications'>Notifications</Link></>}
         {isAdmin && <> | <Link to='/admin'>Admin</Link></>}
         {!isLoggedIn && <> | <Link to='/login'>Login</Link> | <Link to='/register'>Register</Link></>}
         {isLoggedIn && <> | <button onClick={logout}>Logout</button></>}
@@ -26,6 +28,8 @@ export default function App() {
         <Route path='/products' element={<Products />} />
         <Route path='/quote' element={isLoggedIn ? <Quote /> : <Navigate to='/login' replace />} />
         <Route path='/policies' element={isLoggedIn ? <Policies /> : <Navigate to='/login' replace />} />
+        <Route path='/checkout' element={isLoggedIn ? <Checkout /> : <Navigate to='/login' replace />} />
+        <Route path='/payment-result' element={<PaymentResult />} />
         <Route path='/notifications' element={isLoggedIn ? <Notifications /> : <Navigate to='/login' replace />} />
         <Route path='/admin' element={isAdmin ? <AdminConsole /> : <Navigate to='/' replace />} />
       </Routes>

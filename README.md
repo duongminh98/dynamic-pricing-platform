@@ -246,6 +246,57 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on push/PR to `mas
 └── .github/workflows/ci.yml  # CI/CD pipeline
 ```
 
+
+## VNPAY Payment Integration (Sandbox)
+
+The Billing_Service integrates VNPAY (sandbox) for real payment processing via
+the redirect + IPN flow (R33.2/R33.3). The existing `InvoicePaid` event contract
+is unchanged ? VNPAY only replaces the "confirm payment" step.
+
+### Setup
+
+1. Register at https://sandbox.vnpayment.vn/devreg/ to get `TmnCode` + `HashSecret`
+2. Set in `.env`:
+   ```
+   VNP_TMN_CODE=your_tmn_code
+   VNP_HASH_SECRET=your_hash_secret
+   VNP_RETURN_URL=http://localhost:3001/payment-result
+   ```
+3. The IPN endpoint (`/billing/vnpay/ipn`) must be publicly reachable for VNPAY
+   to call back. For local testing, use ngrok or cloudflared to expose port 8000.
+
+### Test Card (NCB)
+
+- Card number: `9704198526191432198`
+- Name: `NGUYEN VAN A`
+- Expiry: `07/15`
+- OTP: `123456`
+
+### Flow
+
+1. Customer creates a payment URL: `POST /billing/invoices/{id}/payment-url`
+2. Frontend redirects to VNPAY payment page
+3. Customer pays with test card
+4. VNPAY calls IPN: `GET /billing/vnpay/ipn` (source of truth ? confirms payment)
+5. VNPAY redirects browser: `GET /billing/vnpay/return` (display only)
+6. Frontend polls: `GET /billing/vnpay/status?vnp_txn_ref=...` until confirmed
+7. On success, `InvoicePaid` event enqueued ? Order_Service issues policy
+
+### API Endpoints
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/billing/invoices/{id}/payment-url` | POST | Customer | Create VNPAY payment URL |
+| `/billing/vnpay/return` | GET | Public | Browser redirect (display only) |
+| `/billing/vnpay/ipn` | GET | Public | Server-to-server (source of truth) |
+| `/billing/vnpay/status` | GET | Customer | Query payment status |
+
+### Idempotency
+
+- `vnp_txn_ref` is UNIQUE per payment attempt
+- Repeated IPN for the same `vnp_txn_ref` returns `RspCode=02` (already confirmed)
+- Only `RspCode=00` + valid signature + amount match ? invoice paid + 1 `InvoicePaid`
+
 ## Kong Gateway Verification
 
 All API flows are verified through the Kong gateway (port 8000) with JWT enforcement:

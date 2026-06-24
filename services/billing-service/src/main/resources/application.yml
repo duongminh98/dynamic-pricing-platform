@@ -44,6 +44,15 @@ springdoc:
   api-docs:
     path: /v3/api-docs
 
+
+vnpay:
+  tmn-code: ${VNP_TMN_CODE:}
+  hash-secret: ${VNP_HASH_SECRET:}
+  pay-url: ${VNP_PAY_URL:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+  api-url: ${VNP_API_URL:https://sandbox.vnpayment.vn/merchant_webapi/api/transaction}
+  return-url: ${VNP_RETURN_URL:http://localhost:3001/payment-result}
+  version: ${VNP_VERSION:2.1.0}
+  locale: ${VNP_LOCALE:vn}
 dpp:
   order:
     base-url: ${ORDER_BASE_URL:http://localhost:8083}
