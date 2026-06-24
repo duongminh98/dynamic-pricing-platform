@@ -180,7 +180,6 @@ services:
         paths:
           - /pricing
           - /admin/champion
-          - /admin/pricing
         strip_path: false
         preserve_host: false
 

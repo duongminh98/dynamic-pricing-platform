@@ -17,7 +17,7 @@ class QuoteRequest(BaseModel):
 @router.post("/quote")
 async def create_quote(request: QuoteRequest, db: Session = Depends(get_db)):
     if quote_semaphore.locked():
-        raise HTTPException(status_code=503, detail="SERVICE_OVERLOADED")
+        raise HTTPException(status_code=503, detail={"error_code": "SERVICE_OVERLOADED", "message": "Service overloaded"})
 
     async with quote_semaphore:
         try:

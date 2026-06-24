@@ -38,8 +38,27 @@ PROFILE_RANGES = {
 }
 
 
+def _rate_version_for(line: str, model_version: str) -> str:
+    """Deterministic Rate_Version id for the rating config in effect (R32.3).
+    Derived from line + champion model_version so the same config yields the same
+    rate_version across quotes, enabling audit reconciliation."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"rate_version:{line}:{model_version}"))
+
+
+# Base demographic fields every quote request must carry (input schema, R11.4/R11.5).
+REQUIRED_PROFILE_FIELDS = (
+    "age", "gender", "province", "region", "urban_tier",
+    "occupation", "income_level", "marital_status",
+)
+
+
 def validate_profile(profile: dict) -> None:
-    """Reject numeric profile fields outside their allowed range (Property 6)."""
+    """Validate the input schema then reject out-of-range numeric fields (R11.4/R11.5, Property 6)."""
+    if not isinstance(profile, dict):
+        raise ServiceException(ErrorCode.MISSING_FEATURES, details={"reason": "profile must be an object"})
+    missing = [f for f in REQUIRED_PROFILE_FIELDS if profile.get(f) in (None, "")]
+    if missing:
+        raise ServiceException(ErrorCode.MISSING_FEATURES, details={"missing": missing})
     merged = dict(profile)
     merged.update(profile.get("line_attributes", {}) or {})
     for field, (lo, hi) in PROFILE_RANGES.items():
@@ -107,7 +126,9 @@ def quote(db, product_id: str, profile: dict,
     created_at = datetime.datetime.now(datetime.timezone.utc)
     expires_at = created_at + datetime.timedelta(days=QUOTE_VALIDITY_DAYS)
     quote_id = str(uuid.uuid4())
-    rate_version_id = str(uuid.uuid4())
+    # Real Rate_Version: stable id of the rating configuration in effect for this line
+    # (champion model_version), not a throwaway random UUID (R32.3).
+    rate_version_id = _rate_version_for(line, selection["model_version"])
 
     explanation = explain(selection["model"], feature_df)
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
