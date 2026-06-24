@@ -212,7 +212,9 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: host.docker.internal:8081
+      - target: customer-service-1:8080
+        weight: 100
+      - target: customer-service-2:8080
         weight: 100
 
   - name: product-service-upstream
@@ -243,7 +245,9 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: host.docker.internal:8082
+      - target: product-service-1:8080
+        weight: 100
+      - target: product-service-2:8080
         weight: 100
 
   - name: order-service-upstream
@@ -274,7 +278,9 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: host.docker.internal:8083
+      - target: order-service-1:8080
+        weight: 100
+      - target: order-service-2:8080
         weight: 100
 
   - name: claims-service-upstream
@@ -305,7 +311,9 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: host.docker.internal:8085
+      - target: claims-service-1:8080
+        weight: 100
+      - target: claims-service-2:8080
         weight: 100
 
   - name: billing-service-upstream
@@ -336,7 +344,9 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: host.docker.internal:8086
+      - target: billing-service-1:8080
+        weight: 100
+      - target: billing-service-2:8080
         weight: 100
 
   - name: notification-service-upstream
@@ -367,7 +377,9 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: host.docker.internal:8087
+      - target: notification-service-1:8080
+        weight: 100
+      - target: notification-service-2:8080
         weight: 100
 
   - name: pricing-service-upstream
@@ -398,5 +410,7 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: host.docker.internal:9001
+      - target: pricing-service-1:8000
+        weight: 100
+      - target: pricing-service-2:8000
         weight: 100
