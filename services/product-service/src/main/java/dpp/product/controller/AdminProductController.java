@@ -3,11 +3,14 @@ package dpp.product.controller;
 import dpp.product.dto.RateVersionResponse;
 import dpp.product.entity.LoadingFactor;
 import dpp.product.entity.Product;
+import dpp.product.entity.RateVersion;
 import dpp.product.repository.ProductRepository;
 import dpp.product.service.ProductService;
 import dpp.product.service.RateVersionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -37,12 +40,28 @@ public class AdminProductController {
 
     @PutMapping("/loading-factors")
     public ResponseEntity<LoadingFactor> updateLoadingFactor(
-            @RequestBody Map<String, Object> body) {
-        UUID rateVersionId = UUID.fromString((String) body.get("rate_version_id"));
+            @AuthenticationPrincipal Jwt jwt, @RequestBody Map<String, Object> body) {
+        // R32.2/R32.4: a rate change creates a NEW append-only rate version; the
+        // loading factor attaches to that new version (no editing an existing one).
         String line = (String) body.get("line");
         Double loadingValue = ((Number) body.get("loading_value")).doubleValue();
-        LoadingFactor lf = rateVersionService.addLoadingFactor(rateVersionId, line, loadingValue);
+        String createdBy = jwt != null ? jwt.getSubject() : "admin";
+        LoadingFactor lf = rateVersionService.addLoadingFactorAsNewVersion(line, loadingValue, createdBy);
         return ResponseEntity.ok(lf);
+    }
+
+    @PostMapping("/rate-versions")
+    public ResponseEntity<RateVersionResponse> createRateVersion(@AuthenticationPrincipal Jwt jwt) {
+        String createdBy = jwt != null ? jwt.getSubject() : "admin";
+        RateVersion rv = rateVersionService.createNewRateVersion(createdBy);
+        RateVersionResponse resp = RateVersionResponse.builder()
+                .rateVersionId(rv.getRateVersionId())
+                .effectiveAt(rv.getEffectiveAt())
+                .createdBy(rv.getCreatedBy())
+                .isCurrent(rv.getIsCurrent())
+                .createdAt(rv.getCreatedAt())
+                .build();
+        return ResponseEntity.status(201).body(resp);
     }
 
     @GetMapping("/rate-versions")

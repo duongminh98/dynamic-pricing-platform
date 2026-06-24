@@ -75,6 +75,26 @@ public class RateVersionService {
         return loadingFactorRepository.save(lf);
     }
 
+    /**
+     * Append-only rate change (R32.2/R32.4): create a NEW current rate version and
+     * attach the loading factor to it. The previous current version is retired
+     * (is_current=false) but preserved for lineage. This is the production path
+     * for {@code PUT /admin/loading-factors}.
+     */
+    public LoadingFactor addLoadingFactorAsNewVersion(String line, Double loadingValue, String createdBy) {
+        if (!VALID_LINES.contains(line)) {
+            throw new ServiceException(ErrorCode.BAD_REQUEST,
+                    Map.of("line", line, "valid_lines", VALID_LINES));
+        }
+        RateVersion version = createNewRateVersion(createdBy);
+        LoadingFactor lf = LoadingFactor.builder()
+                .rateVersionId(version.getRateVersionId())
+                .line(line)
+                .loadingValue(loadingValue)
+                .build();
+        return loadingFactorRepository.save(lf);
+    }
+
     // Eligibility rules have been removed from the product scope (R26 automatic
     // rules dropped). Rate_Version now covers loading factors + product config only.
 }
