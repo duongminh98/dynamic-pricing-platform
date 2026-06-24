@@ -9,18 +9,11 @@ plugins:
       latency_metrics: true
       bandwidth_metrics: true
       upstream_health_metrics: true
-  # Gateway-level JWT verification against the Keycloak realm signing key (R9.3, R18.1, R18.2).
-  # The Kong OSS image does not include the enterprise `openid-connect` plugin, so we use the
-  # bundled `jwt` plugin with a pinned RS256 public key from `infra/keycloak/realm-public-key.pem`.
-  # The realm export pins the same RSA keypair, so JWTs signed by Keycloak verify against this key
-  # across container restarts. Two JWT credentials below cover the two issuer hostnames a token
-  # can carry depending on whether it was issued through the host or the in-network Keycloak URL.
-  - name: jwt
-    config:
-      key_claim_name: iss
-      claims_to_verify:
-        - exp
-      run_on_preflight: true
+  # NOTE: JWT verification is NOT global. Public bootstrap routes (POST /customers/register,
+  # POST /customers/login, GET /products*) must be reachable without a token (design 3.1/3.2,
+  # R1.1/R1.5/R3.8). Java services self-validate JWT via Spring resource server; the Python
+  # pricing service does not, so the `jwt` plugin is attached per-service below only to services
+  # whose every route is protected (order, claims, notification, pricing).
 
 consumers:
   - username: keycloak-realm
@@ -93,6 +86,13 @@ services:
     read_timeout: 5000
     write_timeout: 5000
     retries: 0
+    plugins:
+      - name: jwt
+        config:
+          key_claim_name: iss
+          claims_to_verify:
+            - exp
+          run_on_preflight: true
     routes:
       - name: order-routes
         paths:
@@ -125,6 +125,13 @@ services:
     read_timeout: 5000
     write_timeout: 5000
     retries: 0
+    plugins:
+      - name: jwt
+        config:
+          key_claim_name: iss
+          claims_to_verify:
+            - exp
+          run_on_preflight: true
     routes:
       - name: claims-routes
         paths:
@@ -155,6 +162,13 @@ services:
     read_timeout: 5000
     write_timeout: 5000
     retries: 0
+    plugins:
+      - name: jwt
+        config:
+          key_claim_name: iss
+          claims_to_verify:
+            - exp
+          run_on_preflight: true
     routes:
       - name: notification-routes
         paths:
@@ -170,6 +184,13 @@ services:
     read_timeout: 5000
     write_timeout: 5000
     retries: 0
+    plugins:
+      - name: jwt
+        config:
+          key_claim_name: iss
+          claims_to_verify:
+            - exp
+          run_on_preflight: true
     routes:
       - name: pricing-routes
         paths:
