@@ -28,9 +28,9 @@ public class BillingClient {
     public Map<String, Object> createInvoice(UUID orderId, UUID policyId, long amountVnd) {
         String url = baseUrl + "/billing/invoices";
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("orderId", orderId.toString());
-        if (policyId != null) body.put("policyId", policyId.toString());
-        body.put("amountVnd", amountVnd);
+        body.put("order_id", orderId.toString());
+        if (policyId != null) body.put("policy_id", policyId.toString());
+        body.put("amount_vnd", amountVnd);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);

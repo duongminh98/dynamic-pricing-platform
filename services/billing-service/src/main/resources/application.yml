@@ -42,3 +42,7 @@ springdoc:
     path: /swagger-ui.html
   api-docs:
     path: /v3/api-docs
+
+dpp:
+  order:
+    base-url: ${ORDER_BASE_URL:http://localhost:8083}

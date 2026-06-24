@@ -5,6 +5,7 @@ import dpp.billing.repository.AdjustmentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Service
@@ -27,6 +28,7 @@ public class AdjustmentService {
         adj.setType(delta >= 0 ? AdjustmentType.additional_charge : AdjustmentType.refund);
         adj.setAmountVnd(Math.abs(delta));
         adj.setReason(AdjustmentReason.endorsement);
+        adj.setCreatedAt(OffsetDateTime.now());
         adjustmentRepository.save(adj);
     }
 
@@ -41,6 +43,7 @@ public class AdjustmentService {
         adj.setType(AdjustmentType.refund);
         adj.setAmountVnd(refund);
         adj.setReason(AdjustmentReason.cancellation);
+        adj.setCreatedAt(OffsetDateTime.now());
         adjustmentRepository.save(adj);
     }
 }

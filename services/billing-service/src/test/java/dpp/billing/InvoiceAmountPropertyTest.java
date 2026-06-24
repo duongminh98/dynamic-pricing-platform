@@ -4,6 +4,8 @@ import dpp.billing.dto.CreateInvoiceRequest;
 import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.entity.Invoice;
 import dpp.billing.entity.InvoiceStatus;
+import dpp.billing.client.OrderClient;
+import dpp.billing.repository.AdjustmentRepository;
 import dpp.billing.repository.InvoiceRepository;
 import dpp.billing.service.BillingService;
 import dpp.common.outbox.OutboxPublisher;
@@ -27,7 +29,7 @@ class InvoiceAmountPropertyTest {
             @ForAll @LongRange(min = 1, max = 100_000_000) long premium) {
         InvoiceRepository repo = mock(InvoiceRepository.class);
         when(repo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
-        BillingService svc = new BillingService(repo, mock(OutboxPublisher.class));
+        BillingService svc = new BillingService(repo, mock(AdjustmentRepository.class), mock(OrderClient.class), mock(OutboxPublisher.class));
 
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(UUID.randomUUID());
@@ -49,7 +51,7 @@ class InvoiceAmountPropertyTest {
         InvoiceRepository repo = mock(InvoiceRepository.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         when(outbox.enqueue(anyString(), anyString())).thenReturn(null);
-        BillingService svc = new BillingService(repo, outbox);
+        BillingService svc = new BillingService(repo, mock(AdjustmentRepository.class), mock(OrderClient.class), outbox);
 
         UUID invoiceId = UUID.randomUUID();
         Invoice invoice = new Invoice();
@@ -70,7 +72,7 @@ class InvoiceAmountPropertyTest {
     void property15_sanity() {
         InvoiceRepository repo = mock(InvoiceRepository.class);
         when(repo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
-        BillingService svc = new BillingService(repo, mock(OutboxPublisher.class));
+        BillingService svc = new BillingService(repo, mock(AdjustmentRepository.class), mock(OrderClient.class), mock(OutboxPublisher.class));
 
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(UUID.randomUUID());
