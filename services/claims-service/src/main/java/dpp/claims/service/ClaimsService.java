@@ -186,11 +186,13 @@ public class ClaimsService {
     }
 
     @Transactional(readOnly = true)
-    public ClaimResponse getClaim(String keycloakSubject, UUID claimId) {
+    public ClaimResponse getClaim(String keycloakSubject, UUID claimId, boolean isAdmin) {
         Claim claim = findClaim(claimId);
-        UUID customerId = CustomerId.fromSubject(keycloakSubject);
-        if (!claim.getCustomerId().equals(customerId)) {
-            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
+        if (!isAdmin) {
+            UUID customerId = CustomerId.fromSubject(keycloakSubject);
+            if (!claim.getCustomerId().equals(customerId)) {
+                throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
+            }
         }
         return toResponse(claim);
     }

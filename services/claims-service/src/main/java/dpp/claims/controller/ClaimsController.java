@@ -4,6 +4,8 @@ import dpp.claims.dto.*;
 import dpp.claims.service.ClaimsService;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
@@ -32,8 +34,12 @@ public class ClaimsController {
     }
 
     @GetMapping("/{id}")
-    public ClaimResponse getClaim(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return claimsService.getClaim(jwt.getSubject(), id);
+    public ClaimResponse getClaim(@AuthenticationPrincipal Jwt jwt, Authentication authentication,
+                                  @PathVariable UUID id) {
+        boolean isAdmin = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch("ROLE_Administrator"::equals);
+        return claimsService.getClaim(jwt.getSubject(), id, isAdmin);
     }
 
     @PostMapping("/{id}/approve")

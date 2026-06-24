@@ -54,7 +54,7 @@ class ClaimOwnershipPropertyTest {
 
         ClaimsService svc = newService(repo);
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> svc.getClaim("intruder-subject", claimId));
+                () -> svc.getClaim("intruder-subject", claimId, false));
         assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
     }
 
@@ -70,7 +70,7 @@ class ClaimOwnershipPropertyTest {
         when(repo.findById(claimId)).thenReturn(Optional.of(claim));
 
         ClaimsService svc = newService(repo);
-        assertDoesNotThrow(() -> svc.getClaim(subject, claimId));
+        assertDoesNotThrow(() -> svc.getClaim(subject, claimId, false));
     }
 
     @Property(tries = 100)
@@ -81,7 +81,7 @@ class ClaimOwnershipPropertyTest {
 
         ClaimsService svc = newService(repo);
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> svc.getClaim("any-subject", claimId));
+                () -> svc.getClaim("any-subject", claimId, false));
         assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
@@ -98,6 +98,21 @@ class ClaimOwnershipPropertyTest {
         verify(repo, times(1)).findByCustomerIdOrderByCreatedAtDesc(customerId);
     }
 
+    @Property(tries = 100)
+    void administratorCanViewAnyClaim(@ForAll int seed) {
+        UUID ownerCustomerId = UUID.nameUUIDFromBytes("owner-subject".getBytes());
+        UUID claimId = UUID.randomUUID();
+        Claim claim = claimForOwner(ownerCustomerId);
+        claim.setClaimId(claimId);
+
+        ClaimRepository repo = mock(ClaimRepository.class);
+        when(repo.findById(claimId)).thenReturn(Optional.of(claim));
+
+        ClaimsService svc = newService(repo);
+        // Admin (isAdmin=true) is not the owner but must still see the claim (design 3.6, R28.6).
+        assertDoesNotThrow(() -> svc.getClaim("admin-subject", claimId, true));
+    }
+
     @Test
     void property13_sanity() {
         UUID ownerCustomerId = UUID.nameUUIDFromBytes("owner-subject".getBytes());
@@ -110,7 +125,7 @@ class ClaimOwnershipPropertyTest {
 
         ClaimsService svc = newService(repo);
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> svc.getClaim("intruder-subject", claimId));
+                () -> svc.getClaim("intruder-subject", claimId, false));
         assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
     }
 }
