@@ -10,7 +10,6 @@ import dpp.notification.service.NotificationService;
 import net.jqwik.api.*;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 import java.time.OffsetDateTime;
@@ -44,7 +43,7 @@ class NotificationOwnershipPropertyTest {
     }
 
     private NotificationController controllerWith(NotificationRepository repo) {
-        return new NotificationController(new NotificationService(repo));
+        return new NotificationController(new NotificationService(repo, null, null, false));
     }
 
     @Property(tries = 100)
@@ -78,7 +77,7 @@ class NotificationOwnershipPropertyTest {
         NotificationController controller = controllerWith(repo);
         controller.myNotifications(jwtFor(subject), null);
 
-        ArgumentCaptor<UUID> captor = ArgumentCaptor.forClass(UUID.class);
+        org.mockito.ArgumentCaptor<UUID> captor = org.mockito.ArgumentCaptor.forClass(UUID.class);
         verify(repo, times(1)).findByCustomerIdOrderByCreatedAtDesc(captor.capture());
         assertEquals(customerId, captor.getValue());
     }

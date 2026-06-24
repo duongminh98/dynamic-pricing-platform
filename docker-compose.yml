@@ -301,6 +301,19 @@ services:
   # round-robin targets (R17.2). Flyway migrations run at service startup.
 
 
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: dpp-mailpit
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    networks:
+      - dpp-network
+    restart: on-failure
+
   customer-service-1:
     build:
       context: .
@@ -583,6 +596,11 @@ services:
       <<: *java-env
       NOTIFICATION_DB_HOST: postgres-notification
       NOTIFICATION_DB_PORT: 5432
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      MAIL_FROM: noreply@dynamic-pricing.local
+      NOTIFICATION_EMAIL_ENABLED: "true"
+      CUSTOMER_BASE_URL: http://customer-service-1:8082
     depends_on:
       postgres-notification:
         condition: service_healthy
@@ -590,6 +608,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     networks:
       dpp-network:
         aliases:
@@ -609,6 +629,11 @@ services:
       <<: *java-env
       NOTIFICATION_DB_HOST: postgres-notification
       NOTIFICATION_DB_PORT: 5432
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      MAIL_FROM: noreply@dynamic-pricing.local
+      NOTIFICATION_EMAIL_ENABLED: "true"
+      CUSTOMER_BASE_URL: http://customer-service-1:8082
     depends_on:
       postgres-notification:
         condition: service_healthy
@@ -616,6 +641,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     networks:
       dpp-network:
         aliases:

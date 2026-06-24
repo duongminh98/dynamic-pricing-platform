@@ -18,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * Real-DB persistence tests (design 5.7, R7.1/R7.3/R7.5/R7.7). Exercises the JPA
  * insert path so created_at NOT NULL and event_id idempotency are verified
  * against a real schema. Requires dpp-postgres-notification (5439) running.
+ * Email is disabled by default in test (NOTIFICATION_EMAIL_ENABLED=false), so
+ * only in_app notifications are created here.
  * Requirements: R7.1, R7.3, R7.5, R7.7.
  */
 @SpringBootTest
@@ -56,7 +58,7 @@ class NotificationPersistenceTest {
         notificationService.createNotification(eventId, customerId, policyId, "ClaimStatusChanged", "msg2");
 
         assertEquals(1, notificationRepository.findByCustomerIdOrderByCreatedAtDesc(customerId).size(),
-                "Same event_id must not create a second notification (R7.7)");
+                "Same event_id+channel must not create a second notification (R7.7)");
     }
 
     @Test

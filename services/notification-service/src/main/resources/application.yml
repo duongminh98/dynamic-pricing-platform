@@ -27,6 +27,14 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration/notification
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: false
+      mail.smtp.starttls.enable: false
 
 management:
   endpoints:
@@ -36,6 +44,15 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+
+notification:
+  email:
+    enabled: ${NOTIFICATION_EMAIL_ENABLED:false}
+    from: ${MAIL_FROM:noreply@dynamic-pricing.local}
+
+dpp:
+  customer:
+    base-url: ${CUSTOMER_BASE_URL:http://localhost:8082}
 
 springdoc:
   swagger-ui:

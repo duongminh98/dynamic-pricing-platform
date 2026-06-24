@@ -19,6 +19,7 @@ public class SecurityConfig {
         http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         http.authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
+                .requestMatchers("/internal/**").permitAll()
                 .requestMatchers("/customers/register", "/customers/login").permitAll()
                 .requestMatchers("/customers/me", "/customers/me/**").hasRole("Customer")
                 .anyRequest().authenticated()
