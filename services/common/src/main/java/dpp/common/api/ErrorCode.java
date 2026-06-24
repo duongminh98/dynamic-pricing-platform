@@ -40,6 +40,7 @@ public enum ErrorCode {
     // ── Policy lifecycle (R22–R25) ──
     POLICY_NOT_MODIFIABLE(409, "Policy cannot be modified"),
     ENDORSEMENT_DATE_OUT_OF_RANGE(400, "Endorsement date out of coverage range"),
+    CANCEL_DATE_OUT_OF_RANGE(400, "Cancel date out of coverage range"),
 
     // ── Claims (R27, R28) ──
     INVALID_CLAIM_TRANSITION(409, "Invalid claim status transition"),

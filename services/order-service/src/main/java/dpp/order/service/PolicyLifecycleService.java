@@ -179,11 +179,32 @@ public class PolicyLifecycleService {
         renewed.setRenewal(true);
         renewed.setYearsSinceFirstPolicy(old.getYearsSinceFirstPolicy() + 1);
         renewed.setPolicyCountPrior(old.getPolicyCountPrior() + 1);
-        renewed.setFinalPremiumVnd(old.getFinalPremiumVnd());
+
+        // R24.2: re-rate the renewal with renewal context instead of cloning the old premium.
+        Map<String, Object> profile = new LinkedHashMap<>();
+        profile.put("is_renewal", true);
+        profile.put("renewal_number", renewed.getRenewalNumber());
+        profile.put("years_since_first_policy", renewed.getYearsSinceFirstPolicy());
+        profile.put("policy_count_prior", renewed.getPolicyCountPrior());
+        long renewedPremium = old.getFinalPremiumVnd();
+        try {
+            Map<String, Object> requote = pricingClient.rerate(old.getProductId(), profile);
+            Object premium = requote != null ? requote.get("final_premium_vnd") : null;
+            if (premium instanceof Number n) {
+                renewedPremium = n.longValue();
+            }
+        } catch (RuntimeException e) {
+            // Fail safe: if pricing is unavailable, keep prior premium rather than block renewal.
+            renewedPremium = old.getFinalPremiumVnd();
+        }
+        renewed.setFinalPremiumVnd(renewedPremium);
         renewed.setCreatedAt(now);
         policyRepository.save(renewed);
 
-        enqueueEvent("PolicyRenewed", renewed.getPolicyId(), Map.of("customer_id", renewed.getCustomerId().toString(), "renewal_number", renewed.getRenewalNumber()));
+        enqueueEvent("PolicyRenewed", renewed.getPolicyId(), Map.of(
+                "customer_id", renewed.getCustomerId().toString(),
+                "renewal_number", renewed.getRenewalNumber(),
+                "final_premium_vnd", renewedPremium));
         return toResponse(renewed);
     }
 
@@ -195,11 +216,27 @@ public class PolicyLifecycleService {
         }
         OffsetDateTime cancelDate = request.getCancelDate();
         if (cancelDate.isAfter(policy.getPolicyExpirationDate()) || cancelDate.isBefore(policy.getPolicyEffectiveDate())) {
-            throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE);
+            throw new ServiceException(ErrorCode.CANCEL_DATE_OUT_OF_RANGE);
         }
         policy.setStatus(PolicyStatus.cancelled);
         policy.setCancelDate(cancelDate);
         policyRepository.save(policy);
+
+        // R25.3: cut the exposure segment covering cancel_date and recompute earned exposure.
+        List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
+        for (ExposureSegment seg : segments) {
+            if (!cancelDate.isBefore(seg.getSegmentStart()) && cancelDate.isBefore(seg.getSegmentEnd())) {
+                seg.setSegmentEnd(cancelDate);
+                long segDays = ChronoUnit.DAYS.between(seg.getSegmentStart(), cancelDate);
+                seg.setEarnedExposureYears(Math.max(0, segDays) / 365.25);
+                segmentRepository.save(seg);
+            } else if (seg.getSegmentStart().isAfter(cancelDate)) {
+                // Segments entirely after cancellation earn no exposure.
+                seg.setSegmentEnd(cancelDate.isAfter(seg.getSegmentStart()) ? seg.getSegmentEnd() : seg.getSegmentStart());
+                seg.setEarnedExposureYears(0.0);
+                segmentRepository.save(seg);
+            }
+        }
 
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(cancelDate, policy.getPolicyExpirationDate());

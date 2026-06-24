@@ -8,6 +8,7 @@ import dpp.order.repository.ExposureSegmentRepository;
 import dpp.order.repository.OrderRepository;
 import dpp.order.repository.PolicyDocumentRepository;
 import dpp.order.repository.PolicyRepository;
+import dpp.order.repository.ProcessedEventRepository;
 import dpp.order.service.PolicyIssuanceService;
 import net.jqwik.api.*;
 import net.jqwik.api.constraints.LongRange;
@@ -37,7 +38,7 @@ class ExposureInvariantPropertyTest {
     private PolicyIssuanceService newService(OrderRepository orderRepo, PolicyRepository policyRepo,
                                               ExposureSegmentRepository segRepo) {
         return new PolicyIssuanceService(orderRepo, policyRepo, segRepo,
-                mock(PolicyDocumentRepository.class), mock(OutboxPublisher.class));
+                mock(PolicyDocumentRepository.class), mock(ProcessedEventRepository.class), mock(OutboxPublisher.class));
     }
 
     @Property(tries = 100)
@@ -55,7 +56,7 @@ class ExposureInvariantPropertyTest {
         when(segRepo.save(any(ExposureSegment.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PolicyIssuanceService svc = newService(orderRepo, policyRepo, segRepo);
-        svc.issuePolicy(orderId, null);
+        svc.issuePolicy(null, orderId, null);
 
         ArgumentCaptor<ExposureSegment> captor = ArgumentCaptor.forClass(ExposureSegment.class);
         verify(segRepo, times(1)).save(captor.capture());
@@ -78,7 +79,7 @@ class ExposureInvariantPropertyTest {
         ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
 
         PolicyIssuanceService svc = newService(orderRepo, policyRepo, segRepo);
-        svc.issuePolicy(orderId, null);
+        svc.issuePolicy(null, orderId, null);
 
         verify(policyRepo, never()).save(any());
         verify(segRepo, never()).save(any());
@@ -98,7 +99,7 @@ class ExposureInvariantPropertyTest {
         when(segRepo.save(any(ExposureSegment.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PolicyIssuanceService svc = newService(orderRepo, policyRepo, segRepo);
-        svc.issuePolicy(orderId, null);
+        svc.issuePolicy(null, orderId, null);
         ArgumentCaptor<ExposureSegment> captor = ArgumentCaptor.forClass(ExposureSegment.class);
         verify(segRepo).save(captor.capture());
         assertEquals(0, captor.getValue().getExposureSegmentSeq());

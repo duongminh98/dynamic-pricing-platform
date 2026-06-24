@@ -4,6 +4,7 @@ import dpp.common.outbox.OutboxPublisher;
 import dpp.order.entity.ExposureSegment;
 import dpp.order.entity.OrderEntity;
 import dpp.order.entity.OrderStatus;
+import dpp.order.repository.ProcessedEventRepository;
 import dpp.order.repository.ExposureSegmentRepository;
 import dpp.order.repository.OrderRepository;
 import dpp.order.repository.PolicyDocumentRepository;
@@ -57,8 +58,8 @@ class AtomicRollbackPropertyTest {
         when(outbox.enqueue(anyString(), anyString()))
                 .thenThrow(new RuntimeException("MQ down"));
 
-        PolicyIssuanceService svc = new PolicyIssuanceService(orderRepo, policyRepo, segRepo, docRepo, outbox);
-        assertThrows(RuntimeException.class, () -> svc.issuePolicy(orderId, null));
+        PolicyIssuanceService svc = new PolicyIssuanceService(orderRepo, policyRepo, segRepo, docRepo, mock(ProcessedEventRepository.class), outbox);
+        assertThrows(RuntimeException.class, () -> svc.issuePolicy(null, orderId, null));
     }
 
     @Property(tries = 100)
@@ -84,8 +85,8 @@ class AtomicRollbackPropertyTest {
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         when(outbox.enqueue(anyString(), anyString())).thenReturn(null);
 
-        PolicyIssuanceService svc = new PolicyIssuanceService(orderRepo, policyRepo, segRepo, docRepo, outbox);
-        svc.issuePolicy(orderId, null);
+        PolicyIssuanceService svc = new PolicyIssuanceService(orderRepo, policyRepo, segRepo, docRepo, mock(ProcessedEventRepository.class), outbox);
+        svc.issuePolicy(null, orderId, null);
 
         org.mockito.InOrder inOrder = inOrder(policyRepo, segRepo, docRepo, outbox);
         inOrder.verify(policyRepo).save(any());
@@ -112,7 +113,7 @@ class AtomicRollbackPropertyTest {
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         when(outbox.enqueue(anyString(), anyString())).thenThrow(new RuntimeException("down"));
 
-        PolicyIssuanceService svc = new PolicyIssuanceService(orderRepo, policyRepo, segRepo, docRepo, outbox);
-        assertThrows(RuntimeException.class, () -> svc.issuePolicy(orderId, null));
+        PolicyIssuanceService svc = new PolicyIssuanceService(orderRepo, policyRepo, segRepo, docRepo, mock(ProcessedEventRepository.class), outbox);
+        assertThrows(RuntimeException.class, () -> svc.issuePolicy(null, orderId, null));
     }
 }

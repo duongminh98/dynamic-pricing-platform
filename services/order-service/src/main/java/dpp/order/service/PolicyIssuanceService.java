@@ -19,31 +19,49 @@ import java.util.UUID;
 @Service
 public class PolicyIssuanceService {
 
+    private static final String CONSUMER = "order.invoice-paid";
+
     private final OrderRepository orderRepository;
     private final PolicyRepository policyRepository;
     private final ExposureSegmentRepository segmentRepository;
     private final PolicyDocumentRepository documentRepository;
+    private final ProcessedEventRepository processedEventRepository;
     private final OutboxPublisher outboxPublisher;
     private final ObjectMapper objectMapper;
 
     public PolicyIssuanceService(OrderRepository orderRepository, PolicyRepository policyRepository,
                                   ExposureSegmentRepository segmentRepository, PolicyDocumentRepository documentRepository,
+                                  ProcessedEventRepository processedEventRepository,
                                   OutboxPublisher outboxPublisher) {
         this.orderRepository = orderRepository;
         this.policyRepository = policyRepository;
         this.segmentRepository = segmentRepository;
         this.documentRepository = documentRepository;
+        this.processedEventRepository = processedEventRepository;
         this.outboxPublisher = outboxPublisher;
         this.objectMapper = new ObjectMapper();
     }
 
     @Transactional
-    public void issuePolicy(UUID orderId, UUID policyIdFromInvoice) {
+    public void issuePolicy(String eventId, UUID orderId, UUID policyIdFromInvoice) {
+        // R6.6: idempotency on event_id; a redelivered InvoicePaid is a no-op.
+        if (eventId != null && processedEventRepository.existsById(eventId)) {
+            return;
+        }
+
         OrderEntity order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found for policy issuance", null));
 
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             return;
+        }
+
+        if (eventId != null) {
+            ProcessedEvent pe = new ProcessedEvent();
+            pe.setEventId(eventId);
+            pe.setConsumer(CONSUMER);
+            pe.setProcessedAt(OffsetDateTime.now());
+            processedEventRepository.save(pe);
         }
 
         OffsetDateTime now = OffsetDateTime.now();
