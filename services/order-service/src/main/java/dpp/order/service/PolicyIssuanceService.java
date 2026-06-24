@@ -65,7 +65,13 @@ public class PolicyIssuanceService {
         }
 
         OffsetDateTime now = OffsetDateTime.now();
-        OffsetDateTime expiration = now.plus(365, ChronoUnit.DAYS);
+        // R22.3 / R34.1: travel policies run for trip_duration_days; other lines use a 1-year term.
+        long termDays = 365L;
+        if ("travel".equals(order.getLine()) && order.getTripDurationDays() != null
+                && order.getTripDurationDays() > 0) {
+            termDays = order.getTripDurationDays();
+        }
+        OffsetDateTime expiration = now.plus(termDays, ChronoUnit.DAYS);
 
         Policy policy = new Policy();
         UUID policyId = UUID.randomUUID();
@@ -90,7 +96,7 @@ public class PolicyIssuanceService {
         segment.setExposureSegmentSeq(0);
         segment.setSegmentStart(now);
         segment.setSegmentEnd(expiration);
-        long days = ChronoUnit.DAYS.between(now, expiration);
+        long days = Math.max(1, ChronoUnit.DAYS.between(now, expiration));
         segment.setEarnedExposureYears(days / 365.25);
         segment.setCoverageAmountVnd(0);
         segment.setDeductibleVnd(0);

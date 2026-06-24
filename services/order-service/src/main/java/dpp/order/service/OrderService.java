@@ -49,6 +49,9 @@ public class OrderService {
         order.setCustomerId(resolveCustomerId(keycloakSubject));
         order.setProductId(productId);
         order.setFinalPremiumVnd(finalPremiumVnd);
+        order.setLine(quote.get("line") != null ? String.valueOf(quote.get("line")) : null);
+        Object tripDays = quote.get("trip_duration_days");
+        order.setTripDurationDays(tripDays instanceof Number ? ((Number) tripDays).intValue() : null);
         order.setStatus(OrderStatus.PENDING_REVIEW);
         order.setCreatedAt(OffsetDateTime.now());
         order = orderRepository.save(order);
@@ -66,8 +69,17 @@ public class OrderService {
         return toResponse(findOrder(orderId));
     }
 
-    @Transactional
     public OrderResponse approve(UUID orderId, String reviewer) {
+        OrderEntity order = approveInTransaction(orderId, reviewer);
+        // R6.10 / R19.4: invoice creation is a cross-service REST call kept OUT of the
+        // DB transaction to avoid dual-write. Billing dedups on order_id (findByOrderId),
+        // so a retry after a transient failure is safe.
+        billingClient.createInvoice(order.getOrderId(), null, order.getFinalPremiumVnd());
+        return toResponse(order);
+    }
+
+    @Transactional
+    protected OrderEntity approveInTransaction(UUID orderId, String reviewer) {
         OrderEntity order = findOrder(orderId);
         if (order.getStatus() != OrderStatus.PENDING_REVIEW) {
             throw new ServiceException(ErrorCode.ORDER_NOT_APPROVED);
@@ -76,10 +88,7 @@ public class OrderService {
         order.setReviewedBy(reviewer);
         order.setReviewedAt(OffsetDateTime.now());
         order.setStatus(OrderStatus.PENDING_PAYMENT);
-        order = orderRepository.save(order);
-
-        billingClient.createInvoice(order.getOrderId(), null, order.getFinalPremiumVnd());
-        return toResponse(order);
+        return orderRepository.save(order);
     }
 
     @Transactional

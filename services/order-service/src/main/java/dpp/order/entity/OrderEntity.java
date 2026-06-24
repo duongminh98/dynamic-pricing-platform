@@ -28,6 +28,12 @@ public class OrderEntity {
     @Column(name = "final_premium_vnd", nullable = false)
     private long finalPremiumVnd;
 
+    @Column(name = "line", length = 20)
+    private String line;
+
+    @Column(name = "trip_duration_days")
+    private Integer tripDurationDays;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private OrderStatus status;

@@ -24,6 +24,7 @@ class Quote(Base):
     customer_id = Column(String, nullable=False)
     product_id = Column(String, nullable=False)
     line = Column(String, nullable=False)
+    trip_duration_days = Column(Integer, nullable=True)
     pure_premium_vnd = Column(Integer, nullable=False)
     final_premium_vnd = Column(Integer, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
