@@ -95,6 +95,44 @@ class ProfileValidationPropertyTest {
         assertEquals(ErrorCode.MISSING_REQUIRED_FIELDS, ex.getErrorCode());
     }
 
+    @Property(tries = 100)
+    void ageOutOfRangeRejectedWithRangeError(
+            @ForAll @IntRange(min = 101, max = 200) int age) {
+        ProfileRequest r = request("health", validHealthAttrs());
+        r.setAge(age);
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validate(r));
+        assertEquals(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, ex.getErrorCode());
+    }
+
+    @Property(tries = 100)
+    void invalidGenderRejectedWithCategoricalError(@ForAll int seed) {
+        String[] bad = {"male", "M", "other", "", "FEMALE"};
+        ProfileRequest r = request("health", validHealthAttrs());
+        r.setGender(bad[Math.floorMod(seed, bad.length)]);
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validate(r));
+        assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
+    }
+
+    @Property(tries = 100)
+    void invalidMotorbikeCategoricalRejected(@ForAll int seed) {
+        java.util.Map<String, Object> attrs = new java.util.HashMap<>();
+        attrs.put("vehicle_brand", "Honda");
+        attrs.put("vehicle_model", "commuter");
+        attrs.put("vehicle_segment", "standard");
+        attrs.put("vehicle_age", 3);
+        attrs.put("vehicle_value_vnd", 40_000_000L);
+        attrs.put("engine_capacity_cc", 125);
+        attrs.put("driving_experience_years", 5);
+        attrs.put("annual_mileage_km", 8000);
+        attrs.put("traffic_violation_count_12m", 0);
+        attrs.put("parking_location", "unknown_spot"); // invalid
+        attrs.put("anti_theft_device", true);
+        attrs.put("primary_use", "personal");
+        ServiceException ex = assertThrows(ServiceException.class,
+                () -> validator.validate(request("motorbike", attrs)));
+        assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
+    }
+
     @Test
     void nullLineAttributesRejected() {
         ServiceException ex = assertThrows(ServiceException.class,
