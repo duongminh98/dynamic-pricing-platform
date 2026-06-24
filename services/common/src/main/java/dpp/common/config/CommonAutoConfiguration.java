@@ -1,7 +1,10 @@
 package dpp.common.config;
 
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.Ordered;
@@ -58,6 +61,11 @@ public class CommonAutoConfiguration {
         return new GlobalExceptionHandler();
     }
 
+    @Bean
+    @ConditionalOnMissingBean(name = "dppJacksonSnakeCaseCustomizer")
+    public Jackson2ObjectMapperBuilderCustomizer dppJacksonSnakeCaseCustomizer() {
+        return builder -> builder.propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
+    }
     @Bean
     @ConditionalOnMissingBean
     public RestTemplate restTemplate(CorrelationIdInterceptor correlationIdInterceptor) {
