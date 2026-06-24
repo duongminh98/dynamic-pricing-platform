@@ -297,6 +297,31 @@ is unchanged ? VNPAY only replaces the "confirm payment" step.
 - Repeated IPN for the same `vnp_txn_ref` returns `RspCode=02` (already confirmed)
 - Only `RspCode=00` + valid signature + amount match ? invoice paid + 1 `InvoicePaid`
 
+
+## CI/CD Pipeline
+
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and
+pull request to `master`:
+
+- **java job:** `./gradlew clean test` + JaCoCo coverage report + 70% coverage gate
+- **python job:** `pytest --cov --cov-fail-under=70` for pricing service
+- **docker-build job:** Builds all 8 service images + frontend (no push)
+
+All jobs have a 30-minute timeout (R21.1). Gradle and pip caches are enabled.
+
+### Branch Protection (R21.8)
+
+To enforce CI gates on merges to `master`, enable branch protection in GitHub:
+
+1. Go to **Settings ? Branches ? Add branch protection rule** for `master`
+2. Check **Require status checks to pass before merging**
+3. Select required checks: `java`, `python`, `docker-build`
+4. Check **Require branches to be up to date before merging**
+5. Check **Do not allow bypassing the above settings**
+
+This prevents merging when CI fails (R21.8). The `ci.yml` workflow name matches
+the status check names above.
+
 ## Kong Gateway Verification
 
 All API flows are verified through the Kong gateway (port 8000) with JWT enforcement:

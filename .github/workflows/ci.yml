@@ -9,20 +9,7 @@ on:
 jobs:
   java:
     runs-on: ubuntu-latest
-    services:
-      postgres-product:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: product_db
-          POSTGRES_USER: platform_user
-          POSTGRES_PASSWORD: platform_password_dev_only
-        ports:
-          - 5434:5432
-        options: >-
-          --health-cmd "pg_isready -U platform_user -d product_db"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    timeout-minutes: 30
     env:
       PRODUCT_DB_HOST: localhost
       PRODUCT_DB_PORT: 5434
@@ -35,23 +22,110 @@ jobs:
         with:
           java-version: 17
           distribution: temurin
+          cache: gradle
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
-      - name: Build and test Java services
-        run: ./gradlew build test
+      - name: Build and test Java services with coverage
+        run: ./gradlew clean test jacocoTestReport
+      - name: Verify coverage >= 70%
+        run: ./gradlew jacocoTestCoverageVerification
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-coverage
+          path: services/*/build/reports/jacoco/test/html/
 
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
       - name: Install pricing dependencies
-        run: |
-          pip install -r pricing/requirements.txt
-      - name: Run pricing tests
+        run: pip install -r pricing/requirements.txt
+      - name: Run pricing tests with coverage
         working-directory: pricing
         run: |
-          python -m pytest tests/ -q
+          pip install pytest-cov
+          python -m pytest tests/ --cov=app --cov=common --cov-fail-under=70 -q
           python -m pytest common/tests/ -q
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: pricing/.coverage
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build customer-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/Dockerfile
+          build-args: SERVICE=customer-service
+          push: false
+          load: true
+      - name: Build product-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/Dockerfile
+          build-args: SERVICE=product-service
+          push: false
+          load: true
+      - name: Build order-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/Dockerfile
+          build-args: SERVICE=order-service
+          push: false
+          load: true
+      - name: Build billing-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/Dockerfile
+          build-args: SERVICE=billing-service
+          push: false
+          load: true
+      - name: Build claims-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/Dockerfile
+          build-args: SERVICE=claims-service
+          push: false
+          load: true
+      - name: Build notification-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/Dockerfile
+          build-args: SERVICE=notification-service
+          push: false
+          load: true
+      - name: Build pricing-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: pricing/Dockerfile
+          push: false
+          load: true
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: false
+          load: true
