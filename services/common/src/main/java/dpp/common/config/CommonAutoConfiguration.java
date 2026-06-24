@@ -27,9 +27,10 @@ import java.util.List;
  * </ul>
  *
  * <p>OutboxRelay and OutboxPublisher are @Component-annotated and
- * picked up via component scanning when the consuming service
- * has @ComponentScan or @SpringBootApplication on its root package.
- * They require OutboxRepository (Spring Data JPA) and RabbitTemplate.</p>
+ * picked up via component scanning when the consuming service adds
+ * {@code scanBasePackages = {"dpp.<svc>", "dpp.common.outbox"}} to its
+ * {@code @SpringBootApplication} along with {@code @EntityScan} and
+ * {@code @EnableJpaRepositories} for the outbox package.</p>
  */
 @AutoConfiguration
 @EnableScheduling

@@ -17,7 +17,7 @@ spring:
           jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8080/realms/dynamic-pricing/protocol/openid-connect/certs}
   jpa:
     hibernate:
-      $l-auto: none
+      ddl-auto: none
     open-in-view: false
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
@@ -41,7 +41,7 @@ dpp:
   pricing:
     base-url: ${PRICING_BASE_URL:http://localhost:8000}
   billing:
-    base-url: ${BILLING_BASE_URL:http://localhost:8000}
+    base-url: ${BILLING_BASE_URL:http://localhost:8086}
 
 springdoc:
   swagger-ui:

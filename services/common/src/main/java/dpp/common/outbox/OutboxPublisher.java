@@ -14,7 +14,7 @@ import java.util.UUID;
  * public void someBusinessMethod(...) {
  *     // ... business write ...
  *     outboxPublisher.enqueue("PolicyIssued", payload);
- *     // outbox INSERT in same TX — if business write fails, outbox rolls back too
+ *     // outbox INSERT in same TX Ã¢â‚¬â€ if business write fails, outbox rolls back too
  * }
  * </pre>
  *

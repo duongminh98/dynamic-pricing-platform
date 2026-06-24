@@ -37,19 +37,19 @@ public class ClaimsController {
     }
 
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasRole(''Administrator'')")
+    @PreAuthorize("hasRole('Administrator')")
     public ClaimResponse approve(@PathVariable UUID id, @Valid @RequestBody ApproveClaimRequest request) {
         return claimsService.approve(id, request);
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasRole(''Administrator'')")
+    @PreAuthorize("hasRole('Administrator')")
     public ClaimResponse reject(@PathVariable UUID id) {
         return claimsService.reject(id);
     }
 
     @PostMapping("/{id}/misrepresentation")
-    @PreAuthorize("hasRole(''Administrator'')")
+    @PreAuthorize("hasRole('Administrator')")
     public ClaimResponse misrepresentation(@PathVariable UUID id, @Valid @RequestBody MisrepresentationRequest request) {
         return claimsService.misrepresentation(id, request);
     }

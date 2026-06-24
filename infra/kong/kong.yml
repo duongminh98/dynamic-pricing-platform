@@ -175,6 +175,7 @@ services:
         paths:
           - /pricing
           - /admin/champion
+          - /admin/pricing
         strip_path: false
         preserve_host: false
 
@@ -207,9 +208,7 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: customer-service-1:8080
-        weight: 100
-      - target: customer-service-2:8080
+      - target: host.docker.internal:8081
         weight: 100
 
   - name: product-service-upstream
@@ -240,9 +239,7 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: product-service-1:8080
-        weight: 100
-      - target: product-service-2:8080
+      - target: host.docker.internal:8082
         weight: 100
 
   - name: order-service-upstream
@@ -273,9 +270,7 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: order-service-1:8080
-        weight: 100
-      - target: order-service-2:8080
+      - target: host.docker.internal:8083
         weight: 100
 
   - name: underwriting-service-upstream
@@ -339,9 +334,7 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: claims-service-1:8080
-        weight: 100
-      - target: claims-service-2:8080
+      - target: host.docker.internal:8085
         weight: 100
 
   - name: billing-service-upstream
@@ -372,9 +365,7 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: billing-service-1:8080
-        weight: 100
-      - target: billing-service-2:8080
+      - target: host.docker.internal:8086
         weight: 100
 
   - name: notification-service-upstream
@@ -405,9 +396,7 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: notification-service-1:8080
-        weight: 100
-      - target: notification-service-2:8080
+      - target: host.docker.internal:8087
         weight: 100
 
   - name: pricing-service-upstream
@@ -438,7 +427,5 @@ upstreams:
             - 504
             - 505
     targets:
-      - target: pricing-service-1:8000
-        weight: 100
-      - target: pricing-service-2:8000
+      - target: host.docker.internal:9001
         weight: 100

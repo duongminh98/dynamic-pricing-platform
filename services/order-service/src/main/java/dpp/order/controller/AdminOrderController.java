@@ -22,25 +22,25 @@ public class AdminOrderController {
     }
 
     @GetMapping("/review-queue")
-    @PreAuthorize("hasRole(''Administrator'')")
+    @PreAuthorize("hasRole('Administrator')")
     public List<ReviewQueueItem> reviewQueue() {
         return orderService.reviewQueue();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasRole(''Administrator'')")
+    @PreAuthorize("hasRole('Administrator')")
     public OrderResponse getOrder(@PathVariable UUID id) {
         return orderService.getOrder(id);
     }
 
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasRole(''Administrator'')")
+    @PreAuthorize("hasRole('Administrator')")
     public OrderResponse approve(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
         return orderService.approve(id, jwt.getSubject());
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasRole(''Administrator'')")
+    @PreAuthorize("hasRole('Administrator')")
     public OrderResponse reject(@PathVariable UUID id, @Valid @RequestBody RejectRequest request,
                                 @AuthenticationPrincipal Jwt jwt) {
         return orderService.reject(id, request.getReason(), jwt.getSubject());
