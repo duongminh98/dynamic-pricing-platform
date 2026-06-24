@@ -24,7 +24,7 @@ public enum ErrorCode {
     // ── Pricing (R4, R5, R11, R12) ──
     MISSING_FEATURES(400, "Missing input features"),
     UNSUPPORTED_LINE(400, "Unsupported product line"),
-    MISSING_CHAMPION(400, "No champion model configured for line"),
+    MISSING_CHAMPION(409, "No champion model configured for line"),
 
     // ── Order (R6) ──
     QUOTE_EXPIRED(409, "Quote has expired"),
