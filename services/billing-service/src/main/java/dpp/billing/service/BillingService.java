@@ -5,6 +5,8 @@ import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.entity.Invoice;
 import dpp.billing.entity.InvoiceStatus;
 import dpp.billing.repository.InvoiceRepository;
+import dpp.common.api.ErrorCode;
+import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,7 +47,7 @@ public class BillingService {
     @Transactional
     public InvoiceResponse payInvoice(UUID invoiceId) {
         Invoice invoice = invoiceRepository.findById(invoiceId)
-                .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Invoice not found", null));
         invoice.setStatus(InvoiceStatus.paid);
         invoice.setPaidAt(OffsetDateTime.now());
         invoice = invoiceRepository.save(invoice);

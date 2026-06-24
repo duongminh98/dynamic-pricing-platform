@@ -26,7 +26,7 @@ public class PricingClient {
         try {
             return restTemplate.getForObject(url, Map.class);
         } catch (Exception e) {
-            throw new ServiceException(ErrorCode.BAD_REQUEST, "Quote not found: " + quoteId, null);
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Quote not found: " + quoteId, null);
         }
     }
 }

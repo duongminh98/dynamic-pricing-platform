@@ -83,7 +83,7 @@ public class ProfileService {
 
         CustomerProfile profile = profileRepository.findByAccount_AccountId(account.getAccountId());
         if (profile == null) {
-            throw new ServiceException(ErrorCode.BAD_REQUEST, "Profile not found", null);
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Profile not found", null);
         }
 
         List<ProfileVersion> versions = versionRepository.findByCustomerProfile_CustomerIdOrderByEffectiveAtDesc(profile.getCustomerId());

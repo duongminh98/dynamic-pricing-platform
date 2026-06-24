@@ -27,7 +27,7 @@ public class OrderClient {
         try {
             return restTemplate.getForObject(baseUrl + "/policies/" + policyId, Map.class);
         } catch (Exception e) {
-            throw new ServiceException(ErrorCode.BAD_REQUEST, "Policy not found", null);
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null);
         }
     }
 }

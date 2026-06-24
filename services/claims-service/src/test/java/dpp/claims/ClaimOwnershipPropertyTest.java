@@ -82,7 +82,7 @@ class ClaimOwnershipPropertyTest {
         ClaimsService svc = newService(repo);
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.getClaim("any-subject", claimId));
-        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Property(tries = 100)

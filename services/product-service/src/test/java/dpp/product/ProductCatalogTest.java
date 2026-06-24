@@ -42,7 +42,7 @@ class ProductCatalogTest {
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> productService.getProduct("UNKNOWN"));
 
-        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
         Object details = ex.getDetails();
         assertInstanceOf(Map.class, details);
         Map<?, ?> map = (Map<?, ?>) details;

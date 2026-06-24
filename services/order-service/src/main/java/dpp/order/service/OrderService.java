@@ -99,7 +99,7 @@ public class OrderService {
     @Transactional(readOnly = true)
     public OrderEntity findOrder(UUID orderId) {
         return orderRepository.findById(orderId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.BAD_REQUEST, "Order not found", null));
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found", null));
     }
 
     private UUID resolveCustomerId(String keycloakSubject) {

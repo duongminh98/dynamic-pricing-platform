@@ -39,7 +39,7 @@ public class CustomerController {
     @GetMapping("/{id}")
     public Map<String, Object> getCustomer(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         Account account = accountRepository.findById(id)
-                .orElseThrow(() -> new ServiceException(ErrorCode.BAD_REQUEST, "Account not found", null));
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Account not found", null));
                 
         if (!account.getKeycloakSubject().equals(jwt.getSubject())) {
              throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE, "Cannot access other customer's data", null);

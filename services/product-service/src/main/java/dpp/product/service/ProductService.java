@@ -42,7 +42,7 @@ public class ProductService {
 
     public ProductDetail getProduct(String productId) {
         Product product = productRepository.findByProductIdAndActiveTrue(productId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.BAD_REQUEST,
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND,
                         Map.of("product_id", productId, "reason", "not found")));
         return toDetail(product);
     }

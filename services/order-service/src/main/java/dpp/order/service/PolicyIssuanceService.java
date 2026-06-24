@@ -1,5 +1,7 @@
 package dpp.order.service;
 
+import dpp.common.api.ErrorCode;
+import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
 import dpp.order.entity.*;
 import dpp.order.repository.*;
@@ -38,7 +40,7 @@ public class PolicyIssuanceService {
     @Transactional
     public void issuePolicy(UUID orderId, UUID policyIdFromInvoice) {
         OrderEntity order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new IllegalArgumentException("Order not found for policy issuance"));
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found for policy issuance", null));
 
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             return;

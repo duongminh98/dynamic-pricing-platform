@@ -72,6 +72,7 @@ class ErrorCode(Enum):
 
     # ── Gateway (R9) ──
     ROUTE_NOT_FOUND = ("ROUTE_NOT_FOUND", 404, "Route not found")
+    RESOURCE_NOT_FOUND = ("RESOURCE_NOT_FOUND", 404, "Resource not found")
     UNAUTHENTICATED = ("UNAUTHENTICATED", 401, "Unauthenticated")
     SERVICE_UNAVAILABLE = ("SERVICE_UNAVAILABLE", 503, "Service unavailable")
 

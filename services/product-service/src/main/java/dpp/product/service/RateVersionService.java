@@ -64,7 +64,7 @@ public class RateVersionService {
                     Map.of("line", line, "valid_lines", VALID_LINES));
         }
         rateVersionRepository.findById(rateVersionId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.BAD_REQUEST,
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND,
                         Map.of("rate_version_id", rateVersionId.toString(), "reason", "not found")));
 
         LoadingFactor lf = LoadingFactor.builder()

@@ -140,7 +140,7 @@ public class ClaimsService {
 
     private Claim findClaim(UUID claimId) {
         return claimRepository.findById(claimId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.BAD_REQUEST, "Claim not found", null));
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Claim not found", null));
     }
 
     private void enqueueClaimChanged(Claim claim) {

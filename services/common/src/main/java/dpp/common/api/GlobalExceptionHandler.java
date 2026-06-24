@@ -54,7 +54,7 @@ public class GlobalExceptionHandler {
 
         log.warn("Validation failed: {}", fieldErrors);
         ErrorResponse body = ErrorResponse.of(
-                ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, correlationId(), fieldErrors);
+                ErrorCode.BAD_REQUEST, correlationId(), fieldErrors);
         return ResponseEntity.badRequest().body(body);
     }
 

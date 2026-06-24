@@ -57,7 +57,7 @@ public class PolicyController {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
         }
         return documentRepository.findLatestByPolicyId(id)
-                .orElseThrow(() -> new ServiceException(ErrorCode.BAD_REQUEST, "Document not found", null));
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Document not found", null));
     }
 
     @PostMapping("/{id}/endorsements")
