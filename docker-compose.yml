@@ -7,6 +7,24 @@ x-postgres-healthcheck: &postgres-healthcheck
   retries: 5
   start_period: 10s
 
+x-java-env: &java-env
+  POSTGRES_USER: ${POSTGRES_USER:-platform_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: 5672
+  RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-platform_user}
+  RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-change-me}
+  KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-dynamic-pricing}/protocol/openid-connect/certs
+  KEYCLOAK_AUTH_SERVER_URL: http://keycloak:8080
+  KEYCLOAK_REALM: ${KEYCLOAK_REALM:-dynamic-pricing}
+
+x-java-healthcheck: &java-healthcheck
+  test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || exit 1"]
+  interval: 15s
+  timeout: 5s
+  retries: 10
+  start_period: 60s
+
 services:
   postgres-customer:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
@@ -277,6 +295,408 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # ?? Application services (one-command bring-up, R16.1) ?????????????????????
+  # Each Java service runs two replicas (-1/-2) on dpp-network so Kong has >=2
+  # round-robin targets (R17.2). Flyway migrations run at service startup.
+
+
+  customer-service-1:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: customer-service
+    image: dpp/customer-service:latest
+    container_name: dpp-customer-service-1
+    environment:
+      <<: *java-env
+      CUSTOMER_DB_HOST: postgres-customer
+      CUSTOMER_DB_PORT: 5432
+    depends_on:
+      postgres-customer:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - customer-service-1
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  customer-service-2:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: customer-service
+    image: dpp/customer-service:latest
+    container_name: dpp-customer-service-2
+    environment:
+      <<: *java-env
+      CUSTOMER_DB_HOST: postgres-customer
+      CUSTOMER_DB_PORT: 5432
+    depends_on:
+      postgres-customer:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - customer-service-2
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  product-service-1:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: product-service
+    image: dpp/product-service:latest
+    container_name: dpp-product-service-1
+    environment:
+      <<: *java-env
+      PRODUCT_DB_HOST: postgres-product
+      PRODUCT_DB_PORT: 5432
+    depends_on:
+      postgres-product:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - product-service-1
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  product-service-2:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: product-service
+    image: dpp/product-service:latest
+    container_name: dpp-product-service-2
+    environment:
+      <<: *java-env
+      PRODUCT_DB_HOST: postgres-product
+      PRODUCT_DB_PORT: 5432
+    depends_on:
+      postgres-product:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - product-service-2
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  order-service-1:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: order-service
+    image: dpp/order-service:latest
+    container_name: dpp-order-service-1
+    environment:
+      <<: *java-env
+      ORDER_DB_HOST: postgres-order
+      ORDER_DB_PORT: 5432
+      PRICING_BASE_URL: http://pricing-service-1:8000
+      BILLING_BASE_URL: http://billing-service-1:8080
+    depends_on:
+      postgres-order:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - order-service-1
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  order-service-2:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: order-service
+    image: dpp/order-service:latest
+    container_name: dpp-order-service-2
+    environment:
+      <<: *java-env
+      ORDER_DB_HOST: postgres-order
+      ORDER_DB_PORT: 5432
+      PRICING_BASE_URL: http://pricing-service-1:8000
+      BILLING_BASE_URL: http://billing-service-1:8080
+    depends_on:
+      postgres-order:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - order-service-2
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  claims-service-1:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: claims-service
+    image: dpp/claims-service:latest
+    container_name: dpp-claims-service-1
+    environment:
+      <<: *java-env
+      CLAIMS_DB_HOST: postgres-claims
+      CLAIMS_DB_PORT: 5432
+      ORDER_BASE_URL: http://order-service-1:8080
+      PRODUCT_BASE_URL: http://product-service-1:8080
+    depends_on:
+      postgres-claims:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - claims-service-1
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  claims-service-2:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: claims-service
+    image: dpp/claims-service:latest
+    container_name: dpp-claims-service-2
+    environment:
+      <<: *java-env
+      CLAIMS_DB_HOST: postgres-claims
+      CLAIMS_DB_PORT: 5432
+      ORDER_BASE_URL: http://order-service-1:8080
+      PRODUCT_BASE_URL: http://product-service-1:8080
+    depends_on:
+      postgres-claims:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - claims-service-2
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  billing-service-1:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: billing-service
+    image: dpp/billing-service:latest
+    container_name: dpp-billing-service-1
+    environment:
+      <<: *java-env
+      BILLING_DB_HOST: postgres-billing
+      BILLING_DB_PORT: 5432
+      ORDER_BASE_URL: http://order-service-1:8080
+    depends_on:
+      postgres-billing:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - billing-service-1
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  billing-service-2:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: billing-service
+    image: dpp/billing-service:latest
+    container_name: dpp-billing-service-2
+    environment:
+      <<: *java-env
+      BILLING_DB_HOST: postgres-billing
+      BILLING_DB_PORT: 5432
+      ORDER_BASE_URL: http://order-service-1:8080
+    depends_on:
+      postgres-billing:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - billing-service-2
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  notification-service-1:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: notification-service
+    image: dpp/notification-service:latest
+    container_name: dpp-notification-service-1
+    environment:
+      <<: *java-env
+      NOTIFICATION_DB_HOST: postgres-notification
+      NOTIFICATION_DB_PORT: 5432
+    depends_on:
+      postgres-notification:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - notification-service-1
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  notification-service-2:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: notification-service
+    image: dpp/notification-service:latest
+    container_name: dpp-notification-service-2
+    environment:
+      <<: *java-env
+      NOTIFICATION_DB_HOST: postgres-notification
+      NOTIFICATION_DB_PORT: 5432
+    depends_on:
+      postgres-notification:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - notification-service-2
+    healthcheck: *java-healthcheck
+    restart: on-failure
+
+  pricing-service-1:
+    build:
+      context: .
+      dockerfile: pricing/Dockerfile
+    image: dpp/pricing-service:latest
+    container_name: dpp-pricing-service-1
+    environment:
+      PRICING_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
+    volumes:
+      - ./reports/modeling/models:/app/reports/modeling/models:ro
+      - ./data/synthetic_real:/app/data/synthetic_real:ro
+    depends_on:
+      postgres-pricing:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - pricing-service-1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: on-failure
+
+  pricing-service-2:
+    build:
+      context: .
+      dockerfile: pricing/Dockerfile
+    image: dpp/pricing-service:latest
+    container_name: dpp-pricing-service-2
+    environment:
+      PRICING_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
+    volumes:
+      - ./reports/modeling/models:/app/reports/modeling/models:ro
+      - ./data/synthetic_real:/app/data/synthetic_real:ro
+    depends_on:
+      postgres-pricing:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      dpp-network:
+        aliases:
+          - pricing-service-2
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: on-failure
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE: http://localhost:${KONG_PROXY_PORT:-8000}
+    image: dpp/frontend:latest
+    container_name: dpp-frontend
+    ports:
+      - "${FRONTEND_PORT:-3001}:80"
+    depends_on:
+      kong:
+        condition: service_started
+    networks:
+      - dpp-network
+    restart: on-failure
 
 networks:
   dpp-network:

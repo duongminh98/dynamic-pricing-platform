@@ -33,57 +33,37 @@ A microservices platform for dynamic insurance pricing featuring an AI pricing e
 - Java 17+ (Gradle toolchain auto-resolves)
 - Python 3.11+ with pip
 
-### 1. Start Infrastructure
+### Run everything with one command
 
 ```bash
-docker compose up -d
+docker compose up --build -d
 ```
 
-This starts 13 containers: 8 PostgreSQL databases, RabbitMQ, Keycloak, Kong, Prometheus, and Grafana.
+This builds and starts the full stack in containers: 7 PostgreSQL databases,
+RabbitMQ, Keycloak, Kong, Prometheus, Grafana, all six Spring Boot services
+(two replicas each), the Pricing service (two replicas, FastAPI), and the
+frontend Mini_App (nginx). Java services run Flyway migrations on startup; the
+Pricing container runs `alembic upgrade head` before serving (R16.1).
 
-Verify all containers are healthy:
+Verify the stack is healthy:
 
 ```bash
 docker compose ps
 ```
 
-### 2. Build Java Services
+- API gateway (Kong): http://localhost:8000
+- Frontend (Mini_App): http://localhost:3001
+- Keycloak: http://localhost:8080
 
-```bash
-./gradlew build test
-```
+> The legacy `checkpoint` profile (nginx health-stub) is still available for the
+> infrastructure-only checkpoint: `docker compose --profile checkpoint up -d`.
 
-This builds all six Spring Boot services and runs unit/property tests (jqwik + Mockito, ≥100 iterations each).
+#### Local development (without containers)
 
-### 3. Start Application Services
-
-Start each Java service from its built jar:
-
-```bash
-java -jar services/customer-service/build/libs/customer-service-0.1.0-SNAPSHOT.jar
-java -jar services/product-service/build/libs/product-service-0.1.0-SNAPSHOT.jar
-java -jar services/order-service/build/libs/order-service-0.1.0-SNAPSHOT.jar
-java -jar services/claims-service/build/libs/claims-service-0.1.0-SNAPSHOT.jar
-java -jar services/billing-service/build/libs/billing-service-0.1.0-SNAPSHOT.jar
-java -jar services/notification-service/build/libs/notification-service-0.1.0-SNAPSHOT.jar
-```
-
-Start the pricing service (FastAPI) — note port 9001 avoids Kong's port 8000:
-
-```bash
-cd pricing
-pip install -r requirements.txt
-python -m uvicorn app.main:app --host 0.0.0.0 --port 9001
-```
-
-> **Note:** The pricing service uses port 9001 because Kong occupies host port 8000. Set `PRICING_BASE_URL=http://127.0.0.1:9001` for the order-service.
-
-### 4. Run Pricing DB Migrations
-
-```bash
-cd pricing
-python -m alembic upgrade head
-```
+For iterating on a single service you can still run it from a built jar
+(`./gradlew :services:<svc>:bootJar` then `java -jar ...`) or, for Pricing,
+`uvicorn app.main:app --port 9001` after `alembic upgrade head`. Point
+`PRICING_BASE_URL` / DB host env vars at your local infra in that case.
 
 ## Services and Ports
 
@@ -97,7 +77,7 @@ python -m alembic upgrade head
 | Claims Service | Spring Boot | 8085 | claims_db | 5437 |
 | Billing Service | Spring Boot | 8086 | billing_db | 5438 |
 | Notification Service | Spring Boot | 8087 | notification_db | 5439 |
-| Pricing Service | FastAPI | 9001 | pricing_db | 5440 |
+| Pricing Service | FastAPI | 8000 (in-container) | pricing_db | 5440 |
 | RabbitMQ | 3.13 | 5672 (AMQP), 15672 (mgmt) | — | — |
 | Prometheus | v2.55 | 9090 | — | — |
 | Grafana | 11.3 | 3000 | — | — |

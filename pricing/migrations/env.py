@@ -1,4 +1,5 @@
 ﻿import logging
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -10,6 +11,12 @@ from app.database import Base
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Allow the runtime DATABASE_URL env var to override the static alembic.ini URL
+# (so the same migration runs against the in-container postgres-pricing host).
+_env_db_url = os.getenv("DATABASE_URL")
+if _env_db_url:
+    config.set_main_option("sqlalchemy.url", _env_db_url)
 
 target_metadata = Base.metadata
 

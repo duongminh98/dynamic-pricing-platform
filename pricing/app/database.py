@@ -1,10 +1,14 @@
+import os
 import uuid
 import datetime
 from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Float, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-DATABASE_URL = "postgresql://platform_user:platform_password_dev_only@localhost:5440/pricing_db"
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://platform_user:platform_password_dev_only@localhost:5440/pricing_db",
+)
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
