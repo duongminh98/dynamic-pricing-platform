@@ -23,12 +23,15 @@ public class PolicyController {
     private final PolicyLifecycleService lifecycleService;
     private final PolicyRepository policyRepository;
     private final PolicyDocumentRepository documentRepository;
+    private final ExposureSegmentRepository exposureSegmentRepository;
 
     public PolicyController(PolicyLifecycleService lifecycleService, PolicyRepository policyRepository,
-                            PolicyDocumentRepository documentRepository) {
+                            PolicyDocumentRepository documentRepository,
+                            ExposureSegmentRepository exposureSegmentRepository) {
         this.lifecycleService = lifecycleService;
         this.policyRepository = policyRepository;
         this.documentRepository = documentRepository;
+        this.exposureSegmentRepository = exposureSegmentRepository;
     }
 
     @GetMapping
@@ -76,5 +79,30 @@ public class PolicyController {
     public PolicyResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                  @Valid @RequestBody CancelRequest request) {
         return lifecycleService.cancel(id, request, jwt.getSubject());
+    }
+
+    @GetMapping("/{id}/exposure-segments")
+    public List<ExposureSegmentResponse> exposureSegments(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        Policy p = policyRepository.findById(id)
+                .orElseThrow(() -> new ServiceException(ErrorCode.FORBIDDEN_RESOURCE));
+        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
+        if (!p.getCustomerId().equals(customerId)) {
+            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
+        }
+        return exposureSegmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(id).stream()
+                .map(this::toSegmentResponse).collect(Collectors.toList());
+    }
+
+    private ExposureSegmentResponse toSegmentResponse(ExposureSegment seg) {
+        ExposureSegmentResponse r = new ExposureSegmentResponse();
+        r.setSegmentId(seg.getSegmentId());
+        r.setPolicyId(seg.getPolicyId());
+        r.setExposureSegmentSeq(seg.getExposureSegmentSeq());
+        r.setSegmentStart(seg.getSegmentStart());
+        r.setSegmentEnd(seg.getSegmentEnd());
+        r.setEarnedExposureYears(seg.getEarnedExposureYears());
+        r.setCoverageAmountVnd(seg.getCoverageAmountVnd());
+        r.setDeductibleVnd(seg.getDeductibleVnd());
+        return r;
     }
 }

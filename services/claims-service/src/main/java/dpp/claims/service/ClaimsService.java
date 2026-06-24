@@ -39,7 +39,7 @@ public class ClaimsService {
     public ClaimResponse fnol(String keycloakSubject, FnolRequest request) {
         UUID policyId = request.getPolicyId();
         Map<String, Object> policy = orderClient.getPolicy(policyId);
-        UUID policyOwner = UUID.fromString(String.valueOf(policy.get("customerId")));
+        UUID policyOwner = UUID.fromString(String.valueOf(policy.get("customer_id")));
         UUID customerId = CustomerId.fromSubject(keycloakSubject);
         if (!policyOwner.equals(customerId)) {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
@@ -51,7 +51,8 @@ public class ClaimsService {
             throw new ServiceException(ErrorCode.BAD_REQUEST, "Report date before occurrence", null);
         }
 
-        int segmentSeq = findSegmentSeq(policy, occurrence);
+        List<Map<String, Object>> segments = orderClient.getExposureSegments(policyId);
+        int segmentSeq = findSegmentSeq(segments, occurrence);
 
         Claim claim = new Claim();
         claim.setClaimId(UUID.randomUUID());
@@ -70,13 +71,36 @@ public class ClaimsService {
         return toResponse(claim);
     }
 
-    private int findSegmentSeq(Map<String, Object> policy, OffsetDateTime occurrence) {
-        OffsetDateTime eff = OffsetDateTime.parse(String.valueOf(policy.get("policyEffectiveDate")));
-        OffsetDateTime exp = OffsetDateTime.parse(String.valueOf(policy.get("policyExpirationDate")));
-        if (occurrence.isBefore(eff) || occurrence.isAfter(exp)) {
-            throw new ServiceException(ErrorCode.OCCURRENCE_OUT_OF_COVERAGE);
+    /**
+     * Resolve the exposure segment covering the occurrence date and return its
+     * sequence (R27.3). The occurrence must fall within some segment window
+     * [segment_start, segment_end]; otherwise it is outside coverage.
+     */
+    private int findSegmentSeq(List<Map<String, Object>> segments, OffsetDateTime occurrence) {
+        for (Map<String, Object> seg : segments) {
+            OffsetDateTime start = OffsetDateTime.parse(String.valueOf(seg.get("segment_start")));
+            OffsetDateTime end = OffsetDateTime.parse(String.valueOf(seg.get("segment_end")));
+            if (!occurrence.isBefore(start) && !occurrence.isAfter(end)) {
+                return ((Number) seg.get("exposure_segment_seq")).intValue();
+            }
         }
-        return 0;
+        throw new ServiceException(ErrorCode.OCCURRENCE_OUT_OF_COVERAGE);
+    }
+
+    /**
+     * Coverage minus deductible cap for the segment covering the claim occurrence
+     * (R28.5). Returns the max payable amount the approver must not exceed.
+     */
+    private long payoutCapForClaim(Claim claim) {
+        List<Map<String, Object>> segments = orderClient.getExposureSegments(claim.getPolicyId());
+        for (Map<String, Object> seg : segments) {
+            if (((Number) seg.get("exposure_segment_seq")).intValue() == claim.getExposureSegmentSeq()) {
+                long coverage = ((Number) seg.get("coverage_amount_vnd")).longValue();
+                long deductible = ((Number) seg.get("deductible_vnd")).longValue();
+                return Math.max(0L, coverage - deductible);
+            }
+        }
+        throw new ServiceException(ErrorCode.OCCURRENCE_OUT_OF_COVERAGE);
     }
 
     @Transactional
@@ -89,6 +113,11 @@ public class ClaimsService {
         long paid = request.getPaidAmount();
         if (incurred <= 0 || paid < 0 || paid > incurred) {
             throw new ServiceException(ErrorCode.BAD_REQUEST, "Invalid payout amounts", null);
+        }
+        long cap = payoutCapForClaim(claim);
+        if (paid > cap) {
+            throw new ServiceException(ErrorCode.BAD_REQUEST,
+                    "Paid amount exceeds coverage minus deductible", Map.of("paid", paid, "cap", cap));
         }
         claim.setIncurredAmount(incurred);
         claim.setPaidAmount(paid);
@@ -114,12 +143,39 @@ public class ClaimsService {
     @Transactional
     public ClaimResponse misrepresentation(UUID claimId, MisrepresentationRequest request) {
         Claim claim = findClaim(claimId);
-        claim.setMisrepresentationSanction(MisrepresentationSanction.valueOf(request.getSanction()));
-        if (request.getSanction().equals("reject")) {
-            claim.setPaidAmount(0);
+        MisrepresentationSanction sanction = parseSanction(request.getSanction());
+        claim.setMisrepresentationSanction(sanction);
+
+        switch (sanction) {
+            case reject -> claim.setPaidAmount(0);
+            case proportional -> {
+                Long paidPremium = request.getPaidPremium();
+                Long shouldPremium = request.getShouldPremium();
+                if (paidPremium == null || shouldPremium == null || shouldPremium <= 0 || paidPremium < 0) {
+                    throw new ServiceException(ErrorCode.BAD_REQUEST,
+                            "proportional sanction requires paid_premium and positive should_premium", null);
+                }
+                double ratio = Math.min(1.0, (double) paidPremium / shouldPremium);
+                long adjusted = Math.round(claim.getPaidAmount() * ratio);
+                claim.setPaidAmount(adjusted);
+            }
+            case cancel -> {
+                claim.setPaidAmount(0);
+                claim.setClaimStatus(ClaimStatus.rejected);
+            }
         }
         claim = claimRepository.save(claim);
+        enqueueClaimChanged(claim);
         return toResponse(claim);
+    }
+
+    private MisrepresentationSanction parseSanction(String value) {
+        try {
+            return MisrepresentationSanction.valueOf(value);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new ServiceException(ErrorCode.BAD_REQUEST,
+                    "Invalid misrepresentation sanction", Map.of("sanction", String.valueOf(value)));
+        }
     }
 
     @Transactional(readOnly = true)

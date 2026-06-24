@@ -16,8 +16,8 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.OffsetDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,12 +26,20 @@ import static org.mockito.Mockito.*;
 @Tag("Feature: dynamic-pricing-platform, Property 12")
 class FnolTemporalPropertyTest {
 
-    private Map<String, Object> policyMap(UUID customerId, OffsetDateTime eff, OffsetDateTime exp) {
+    private Map<String, Object> policyMap(UUID customerId) {
         Map<String, Object> policy = new HashMap<>();
-        policy.put("customerId", customerId.toString());
-        policy.put("policyEffectiveDate", eff.toString());
-        policy.put("policyExpirationDate", exp.toString());
+        policy.put("customer_id", customerId.toString());
         return policy;
+    }
+
+    private Map<String, Object> segment(int seq, OffsetDateTime start, OffsetDateTime end) {
+        Map<String, Object> s = new HashMap<>();
+        s.put("exposure_segment_seq", seq);
+        s.put("segment_start", start.toString());
+        s.put("segment_end", end.toString());
+        s.put("coverage_amount_vnd", 100_000_000L);
+        s.put("deductible_vnd", 0L);
+        return s;
     }
 
     private FnolRequest fnolRequest(UUID policyId, OffsetDateTime occurrence) {
@@ -48,17 +56,22 @@ class FnolTemporalPropertyTest {
     }
 
     @Property(tries = 100)
-    void fnolWithOccurrenceInCoverageSucceedsWithReportAfterOccurrence(@ForAll int seed) {
+    void fnolResolvesSegmentSeqFromCoveringSegment(@ForAll int seed) {
         String subject = "customer-subject";
         UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
         UUID policyId = UUID.randomUUID();
 
         OffsetDateTime eff = OffsetDateTime.now().minusDays(100);
+        OffsetDateTime mid = OffsetDateTime.now().minusDays(50);
         OffsetDateTime exp = OffsetDateTime.now().plusDays(265);
         OffsetDateTime occurrence = OffsetDateTime.now().minusDays(10);
 
         dpp.claims.client.OrderClient orderClient = mock(dpp.claims.client.OrderClient.class);
-        when(orderClient.getPolicy(policyId)).thenReturn(policyMap(customerId, eff, exp));
+        when(orderClient.getPolicy(policyId)).thenReturn(policyMap(customerId));
+        // Two segments; occurrence falls in the second (seq=1), proving seq is read, not hardcoded 0.
+        when(orderClient.getExposureSegments(policyId)).thenReturn(List.of(
+                segment(0, eff, mid.minusSeconds(1)),
+                segment(1, mid, exp)));
 
         ClaimRepository repo = mock(ClaimRepository.class);
         when(repo.save(any(Claim.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -71,11 +84,11 @@ class FnolTemporalPropertyTest {
 
         ArgumentCaptor<Claim> captor = ArgumentCaptor.forClass(Claim.class);
         verify(repo, times(1)).save(captor.capture());
-        assertEquals(0, captor.getValue().getExposureSegmentSeq());
+        assertEquals(1, captor.getValue().getExposureSegmentSeq());
     }
 
     @Property(tries = 100)
-    void fnolWithOccurrenceOutsideCoverageRejected(@ForAll int seed) {
+    void fnolWithOccurrenceOutsideAnySegmentRejected(@ForAll int seed) {
         String subject = "customer-subject";
         UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
         UUID policyId = UUID.randomUUID();
@@ -85,7 +98,8 @@ class FnolTemporalPropertyTest {
         OffsetDateTime occurrence = eff.minusDays(10);
 
         dpp.claims.client.OrderClient orderClient = mock(dpp.claims.client.OrderClient.class);
-        when(orderClient.getPolicy(policyId)).thenReturn(policyMap(customerId, eff, exp));
+        when(orderClient.getPolicy(policyId)).thenReturn(policyMap(customerId));
+        when(orderClient.getExposureSegments(policyId)).thenReturn(List.of(segment(0, eff, exp)));
 
         ClaimRepository repo = mock(ClaimRepository.class);
 
@@ -102,12 +116,10 @@ class FnolTemporalPropertyTest {
         UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
         UUID policyId = UUID.randomUUID();
 
-        OffsetDateTime eff = OffsetDateTime.now().minusDays(100);
-        OffsetDateTime exp = OffsetDateTime.now().plusDays(265);
         OffsetDateTime occurrence = OffsetDateTime.now().plusDays(10);
 
         dpp.claims.client.OrderClient orderClient = mock(dpp.claims.client.OrderClient.class);
-        when(orderClient.getPolicy(policyId)).thenReturn(policyMap(customerId, eff, exp));
+        when(orderClient.getPolicy(policyId)).thenReturn(policyMap(customerId));
 
         ClaimRepository repo = mock(ClaimRepository.class);
 
@@ -128,7 +140,8 @@ class FnolTemporalPropertyTest {
         OffsetDateTime occurrence = OffsetDateTime.now().minusDays(10);
 
         dpp.claims.client.OrderClient orderClient = mock(dpp.claims.client.OrderClient.class);
-        when(orderClient.getPolicy(policyId)).thenReturn(policyMap(customerId, eff, exp));
+        when(orderClient.getPolicy(policyId)).thenReturn(policyMap(customerId));
+        when(orderClient.getExposureSegments(policyId)).thenReturn(List.of(segment(0, eff, exp)));
 
         ClaimRepository repo = mock(ClaimRepository.class);
         when(repo.save(any(Claim.class))).thenAnswer(inv -> inv.getArgument(0));
