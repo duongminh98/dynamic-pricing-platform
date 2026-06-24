@@ -22,6 +22,9 @@ public class Notification {
     @Column(name = "policy_id")
     private UUID policyId;
 
+    @Column(name = "event_id", length = 64)
+    private String eventId;
+
     @Column(name = "type", nullable = false, length = 50)
     private String type;
 

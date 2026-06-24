@@ -148,6 +148,7 @@ public class ClaimsService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("claim_id", claim.getClaimId().toString());
         payload.put("policy_id", claim.getPolicyId().toString());
+        payload.put("customer_id", claim.getCustomerId().toString());
         payload.put("status", claim.getClaimStatus().name());
         try {
             outboxPublisher.enqueue("ClaimStatusChanged", objectMapper.writeValueAsString(payload));

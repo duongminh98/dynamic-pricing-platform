@@ -52,7 +52,7 @@ class NotificationOwnershipPropertyTest {
         when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(List.of(own));
 
         NotificationController controller = new NotificationController(repo);
-        List<Notification> result = controller.myNotifications(jwtFor(subject));
+        List<Notification> result = controller.myNotifications(jwtFor(subject), null);
 
         assertEquals(1, result.size());
         assertEquals(customerId, result.get(0).getCustomerId());
@@ -69,7 +69,7 @@ class NotificationOwnershipPropertyTest {
         when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(List.of());
 
         NotificationController controller = new NotificationController(repo);
-        controller.myNotifications(jwtFor(subject));
+        controller.myNotifications(jwtFor(subject), null);
 
         ArgumentCaptor<UUID> captor = ArgumentCaptor.forClass(UUID.class);
         verify(repo, times(1)).findByCustomerIdOrderByCreatedAtDesc(captor.capture());
@@ -85,7 +85,7 @@ class NotificationOwnershipPropertyTest {
         when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(List.of());
 
         NotificationController controller = new NotificationController(repo);
-        List<Notification> result = controller.myNotifications(jwtFor(subject));
+        List<Notification> result = controller.myNotifications(jwtFor(subject), null);
         assertTrue(result.isEmpty());
     }
 }

@@ -80,7 +80,7 @@ public class PolicyLifecycleService {
 
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(eff, policy.getPolicyExpirationDate());
-        enqueueEvent("EndorsementApplied", policyId, Map.of("premium_old", policy.getFinalPremiumVnd(), "premium_new", policy.getFinalPremiumVnd(), "remaining_days", remainingDays, "term_days", termDays));
+        enqueueEvent("EndorsementApplied", policyId, Map.of("customer_id", policy.getCustomerId().toString(), "premium_old", policy.getFinalPremiumVnd(), "premium_new", policy.getFinalPremiumVnd(), "remaining_days", remainingDays, "term_days", termDays));
         return toResponse(policy);
     }
 
@@ -127,7 +127,7 @@ public class PolicyLifecycleService {
 
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(cancelDate, policy.getPolicyExpirationDate());
-        enqueueEvent("PolicyCancelled", policyId, Map.of("cancel_date", cancelDate.toString(), "final_premium_vnd", policy.getFinalPremiumVnd(), "remaining_days", remainingDays, "term_days", termDays));
+        enqueueEvent("PolicyCancelled", policyId, Map.of("customer_id", policy.getCustomerId().toString(), "cancel_date", cancelDate.toString(), "final_premium_vnd", policy.getFinalPremiumVnd(), "remaining_days", remainingDays, "term_days", termDays));
         return toResponse(policy);
     }
 

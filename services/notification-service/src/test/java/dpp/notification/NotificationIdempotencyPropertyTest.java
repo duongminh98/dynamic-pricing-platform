@@ -13,23 +13,24 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * Property 21: notification idempotency. Dedup keys on the producer event_id
+ * (R7.7): the same delivered event (same X-Event-Id) creates exactly one
+ * notification, while distinct events each create their own ? even for the same
+ * policy_id and type (a policy can receive many ClaimStatusChanged events).
+ */
 @Tag("Feature: dynamic-pricing-platform, Property 21")
 class NotificationIdempotencyPropertyTest {
 
     @Property(tries = 100)
-    void duplicatePolicyIssuedCreatesOnlyOneNotification(@ForAll int seed) {
+    void duplicateEventIdCreatesOnlyOneNotification(@ForAll int seed) {
         NotificationRepository repo = mock(NotificationRepository.class);
         Notification existing = new Notification();
-        when(repo.findByPolicyIdAndType(any(UUID.class), eq("PolicyIssued")))
-                .thenReturn(Optional.of(existing));
+        when(repo.findByEventId(anyString())).thenReturn(Optional.of(existing));
         when(repo.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
 
         NotificationService svc = new NotificationService(repo);
-        UUID policyId = UUID.randomUUID();
-        UUID customerId = UUID.randomUUID();
-
-        svc.createNotification(customerId, policyId, "PolicyIssued", "msg");
-        svc.createNotification(customerId, policyId, "PolicyIssued", "msg");
+        svc.createNotification(UUID.randomUUID().toString(), UUID.randomUUID(), UUID.randomUUID(), "PolicyIssued", "msg");
 
         verify(repo, never()).save(any(Notification.class));
     }
@@ -37,56 +38,50 @@ class NotificationIdempotencyPropertyTest {
     @Property(tries = 100)
     void firstEventCreatesNotification(@ForAll int seed) {
         NotificationRepository repo = mock(NotificationRepository.class);
-        when(repo.findByPolicyIdAndType(any(UUID.class), anyString())).thenReturn(Optional.empty());
+        when(repo.findByEventId(anyString())).thenReturn(Optional.empty());
         when(repo.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
 
         NotificationService svc = new NotificationService(repo);
-        UUID policyId = UUID.randomUUID();
-        UUID customerId = UUID.randomUUID();
-
-        svc.createNotification(customerId, policyId, "PolicyIssued", "msg");
+        svc.createNotification(UUID.randomUUID().toString(), UUID.randomUUID(), UUID.randomUUID(), "PolicyIssued", "msg");
 
         verify(repo, times(1)).save(any(Notification.class));
     }
 
     @Property(tries = 100)
-    void differentTypeForSamePolicyCreatesSeparateNotifications(@ForAll int seed) {
+    void distinctEventsForSamePolicyAndTypeBothPersist(@ForAll int seed) {
         NotificationRepository repo = mock(NotificationRepository.class);
-        when(repo.findByPolicyIdAndType(any(UUID.class), anyString())).thenReturn(Optional.empty());
+        when(repo.findByEventId(anyString())).thenReturn(Optional.empty());
         when(repo.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
 
         NotificationService svc = new NotificationService(repo);
         UUID policyId = UUID.randomUUID();
         UUID customerId = UUID.randomUUID();
-
-        svc.createNotification(customerId, policyId, "PolicyIssued", "msg1");
-        svc.createNotification(customerId, policyId, "PolicyCancelled", "msg2");
+        svc.createNotification(UUID.randomUUID().toString(), customerId, policyId, "ClaimStatusChanged", "msg1");
+        svc.createNotification(UUID.randomUUID().toString(), customerId, policyId, "ClaimStatusChanged", "msg2");
 
         verify(repo, times(2)).save(any(Notification.class));
     }
 
     @Property(tries = 100)
-    void nullPolicyIdAlwaysCreatesNotification(@ForAll int seed) {
+    void nullEventIdAlwaysCreatesNotification(@ForAll int seed) {
         NotificationRepository repo = mock(NotificationRepository.class);
         when(repo.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
 
         NotificationService svc = new NotificationService(repo);
-        UUID customerId = UUID.randomUUID();
-
-        svc.createNotification(customerId, null, "PolicyIssued", "msg");
+        svc.createNotification(null, UUID.randomUUID(), UUID.randomUUID(), "PolicyIssued", "msg");
 
         verify(repo, times(1)).save(any(Notification.class));
-        verify(repo, never()).findByPolicyIdAndType(any(), anyString());
+        verify(repo, never()).findByEventId(anyString());
     }
 
     @Test
     void property21_sanity() {
         NotificationRepository repo = mock(NotificationRepository.class);
-        when(repo.findByPolicyIdAndType(any(UUID.class), anyString())).thenReturn(Optional.empty());
+        when(repo.findByEventId(anyString())).thenReturn(Optional.empty());
         when(repo.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
 
         NotificationService svc = new NotificationService(repo);
-        svc.createNotification(UUID.randomUUID(), UUID.randomUUID(), "PolicyIssued", "msg");
+        svc.createNotification(UUID.randomUUID().toString(), UUID.randomUUID(), UUID.randomUUID(), "PolicyIssued", "msg");
         verify(repo, times(1)).save(any(Notification.class));
     }
 }
