@@ -62,7 +62,7 @@ public class ClaimsService {
         claim.setOccurrenceDate(occurrence);
         claim.setReportDate(reportDate);
         claim.setLossType(request.getLossType());
-        claim.setSeverityLevel(SeverityLevel.valueOf(request.getSeverityLevel()));
+        claim.setSeverityLevel(parseSeverity(request.getSeverityLevel()));
         claim.setIncurredAmount(0);
         claim.setPaidAmount(0);
         claim.setClaimStatus(ClaimStatus.pending);
@@ -167,6 +167,15 @@ public class ClaimsService {
         claim = claimRepository.save(claim);
         enqueueClaimChanged(claim);
         return toResponse(claim);
+    }
+
+    private SeverityLevel parseSeverity(String value) {
+        try {
+            return SeverityLevel.valueOf(value);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new ServiceException(ErrorCode.BAD_REQUEST, "Invalid severity_level",
+                    Map.of("severity_level", String.valueOf(value)));
+        }
     }
 
     private MisrepresentationSanction parseSanction(String value) {

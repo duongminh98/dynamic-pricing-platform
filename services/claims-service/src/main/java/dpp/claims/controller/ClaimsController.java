@@ -8,6 +8,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,6 +25,7 @@ public class ClaimsController {
     }
 
     @PostMapping("/fnol")
+    @ResponseStatus(HttpStatus.CREATED)
     public ClaimResponse fnol(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody FnolRequest request) {
         return claimsService.fnol(jwt.getSubject(), request);
     }

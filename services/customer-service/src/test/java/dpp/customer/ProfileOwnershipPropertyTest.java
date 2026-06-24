@@ -18,9 +18,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Property 13: data-ownership isolation. A caller reading their own account
- * succeeds; reading another subject's account is rejected with FORBIDDEN_RESOURCE.
- * Requirements: R18.3.
+ * Property 13: data-ownership isolation. GET /customers/me resolves strictly by
+ * the caller's JWT subject, so a caller only ever sees their own account; a
+ * different subject resolves to a different account; an unknown subject is
+ * rejected. Requirements: R18.3.
  */
 @Tag("Feature: dynamic-pricing-platform, Property 13")
 class ProfileOwnershipPropertyTest {
@@ -40,40 +41,43 @@ class ProfileOwnershipPropertyTest {
     }
 
     @Property(tries = 100)
-    void ownerCanReadOwnAccount(@ForAll long seed) {
+    void getMeResolvesCallerOwnAccount(@ForAll long seed) {
         String subject = "subject-" + seed;
         UUID id = UUID.randomUUID();
         AccountRepository repo = mock(AccountRepository.class);
-        when(repo.findById(id)).thenReturn(Optional.of(accountFor(id, subject)));
+        when(repo.findByKeycloakSubject(subject)).thenReturn(Optional.of(accountFor(id, subject)));
 
         CustomerController controller = new CustomerController(repo);
-        Map<String, Object> result = controller.getCustomer(jwtFor(subject), id);
+        Map<String, Object> result = controller.getMe(jwtFor(subject));
         assertEquals(id, result.get("accountId"));
+        assertEquals(subject, result.get("keycloakSubject"));
     }
 
     @Property(tries = 100)
-    void crossSubjectAccessRejected(@ForAll long seed) {
+    void getMeNeverReturnsAnotherSubjectsAccount(@ForAll long seed) {
         String owner = "owner-" + seed;
-        String intruder = "intruder-" + seed;
-        UUID id = UUID.randomUUID();
+        String caller = "caller-" + seed;
+        UUID ownerId = UUID.randomUUID();
+        UUID callerId = UUID.randomUUID();
         AccountRepository repo = mock(AccountRepository.class);
-        when(repo.findById(id)).thenReturn(Optional.of(accountFor(id, owner)));
+        when(repo.findByKeycloakSubject(owner)).thenReturn(Optional.of(accountFor(ownerId, owner)));
+        when(repo.findByKeycloakSubject(caller)).thenReturn(Optional.of(accountFor(callerId, caller)));
 
         CustomerController controller = new CustomerController(repo);
-        ServiceException ex = assertThrows(ServiceException.class,
-                () -> controller.getCustomer(jwtFor(intruder), id));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        Map<String, Object> result = controller.getMe(jwtFor(caller));
+        // The caller's own account is returned, never the other owner's.
+        assertEquals(callerId, result.get("accountId"));
+        assertNotEquals(ownerId, result.get("accountId"));
     }
 
     @Test
-    void unknownAccountRejectedWithNotFound() {
-        UUID id = UUID.randomUUID();
+    void getMeUnknownSubjectRejected() {
         AccountRepository repo = mock(AccountRepository.class);
-        when(repo.findById(id)).thenReturn(Optional.empty());
+        when(repo.findByKeycloakSubject("ghost")).thenReturn(Optional.empty());
 
         CustomerController controller = new CustomerController(repo);
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> controller.getCustomer(jwtFor("anyone"), id));
-        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
+                () -> controller.getMe(jwtFor("ghost")));
+        assertEquals(ErrorCode.UNAUTHENTICATED, ex.getErrorCode());
     }
 }

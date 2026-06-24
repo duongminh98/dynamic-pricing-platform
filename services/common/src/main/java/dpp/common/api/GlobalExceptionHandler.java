@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -55,6 +56,14 @@ public class GlobalExceptionHandler {
         log.warn("Validation failed: {}", fieldErrors);
         ErrorResponse body = ErrorResponse.of(
                 ErrorCode.BAD_REQUEST, correlationId(), fieldErrors);
+        return ResponseEntity.badRequest().body(body);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleNotReadable(HttpMessageNotReadableException ex) {
+        // Malformed body or invalid enum value -> 400 with neutral code (not 500).
+        log.warn("Unreadable request body: {}", ex.getMostSpecificCause().getMessage());
+        ErrorResponse body = ErrorResponse.of(ErrorCode.BAD_REQUEST, correlationId());
         return ResponseEntity.badRequest().body(body);
     }
 
