@@ -13,8 +13,8 @@ from hypothesis import given, settings, strategies as st, HealthCheck
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database import Base, ModelVersion, ChampionAssignment, AuditTrail
-from app.pricing_engine.governance import promote_champion
+from app.database import Base, ModelVersion, ChampionAssignment, AuditTrail, EventOutbox
+from app.pricing_engine.governance import promote_champion, rollback_champion
 
 
 # --------------------------------------------------------------------------
@@ -36,7 +36,8 @@ def _seed_model(db, line, gini, monotonic, version_id=None):
     return version_id
 
 def _seed_champion(db, line, version_id):
-    db.add(ChampionAssignment(assignment_id=str(uuid.uuid4()), line=line, model_version_id=version_id, is_current=True))
+    db.add(ChampionAssignment(assignment_id=str(uuid.uuid4()), line=line, model_version_id=version_id, is_current=True,
+                              created_at=datetime.datetime.now(datetime.timezone.utc)))
 
 # --------------------------------------------------------------------------
 # Property 24: controlled champion promotion (BR-23)
@@ -63,7 +64,7 @@ def test_property24_promotion_rule(champion_gini, challenger_gini, challenger_mo
 
         # An audit trail entry exists for the decision either way.
         events = db.query(AuditTrail).filter(
-            AuditTrail.event_type.in_(["ChampionPromoted", "CHAMPION_PROMOTE_REJECTED"])
+            AuditTrail.event_type.in_(["CHAMPION_CHANGE", "CHAMPION_PROMOTE_REJECTED"])
         ).all()
         assert len(events) >= 1
     finally:
@@ -87,7 +88,7 @@ def test_property24_promotion_records_audit(champion_gini):
         after = db.query(AuditTrail).count()
         assert after == before + 1  # append-only: only INSERT, count grows by 1
         promoted = db.query(AuditTrail).filter(
-            AuditTrail.event_type == "ChampionPromoted").first()
+            AuditTrail.event_type == "CHAMPION_CHANGE").first()
         assert promoted is not None
     finally:
         db.close()
@@ -112,15 +113,69 @@ def test_property19_audit_append_only(champion_gini):
             db.commit()
             promote_champion(db, "health", chall_id)
             rows = db.query(AuditTrail).filter(
-                AuditTrail.event_type == "ChampionPromoted").all()
+                AuditTrail.event_type == "CHAMPION_CHANGE").all()
             seen_event_ids.extend(r.audit_id for r in rows)
 
         # All previously written champion-change audit rows are still present.
         all_rows = db.query(AuditTrail).filter(
-            AuditTrail.event_type.in_(["ChampionPromoted", "CHAMPION_PROMOTE_REJECTED"])
+            AuditTrail.event_type.in_(["CHAMPION_CHANGE", "CHAMPION_PROMOTE_REJECTED"])
         ).all()
         for eid in seen_event_ids:
             assert any(r.audit_id == eid for r in all_rows)
         assert len(all_rows) >= 5  # at least one audit row per promotion
+    finally:
+        db.close()
+
+
+def test_rollback_is_append_only_and_publishes_event():
+    """Rollback appends a new current assignment (no UPDATE-in-place destruction)
+    and emits a ChampionRolledBack outbox event (R37.5/R37.8/R37.9)."""
+    db = _fresh_session()
+    try:
+        champ_id = _seed_model(db, "health", 0.50, True)
+        _seed_champion(db, "health", champ_id)
+        chall_id = _seed_model(db, "health", 0.65, True)
+        db.commit()
+        promote_champion(db, "health", chall_id)
+        assignments_before = db.query(ChampionAssignment).filter(
+            ChampionAssignment.line == "health").count()
+
+        result = rollback_champion(db, "health")
+        assert result["rolled_back"] is True
+        assert result["champion"] == champ_id
+
+        # Append-only: a new assignment row was inserted (count grows), none deleted.
+        assignments_after = db.query(ChampionAssignment).filter(
+            ChampionAssignment.line == "health").count()
+        assert assignments_after == assignments_before + 1
+
+        # Exactly one current assignment, pointing back to the original champion.
+        current = db.query(ChampionAssignment).filter(
+            ChampionAssignment.line == "health",
+            ChampionAssignment.is_current.is_(True)).all()
+        assert len(current) == 1
+        assert current[0].model_version_id == champ_id
+
+        # An outbox event was published for the rollback.
+        events = db.query(EventOutbox).filter(
+            EventOutbox.event_type == "ChampionRolledBack").all()
+        assert len(events) == 1
+        assert events[0].routing_key == "ChampionRolledBack"
+    finally:
+        db.close()
+
+
+def test_promote_publishes_outbox_event():
+    db = _fresh_session()
+    try:
+        champ_id = _seed_model(db, "car", 0.50, True)
+        _seed_champion(db, "car", champ_id)
+        chall_id = _seed_model(db, "car", 0.70, True)
+        db.commit()
+        promote_champion(db, "car", chall_id)
+        events = db.query(EventOutbox).filter(
+            EventOutbox.event_type == "ChampionPromoted").all()
+        assert len(events) == 1
+        assert events[0].payload["new"] == chall_id
     finally:
         db.close()

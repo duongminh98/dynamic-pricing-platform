@@ -64,3 +64,15 @@ class ChampionAssignment(Base):
     line = Column(String, nullable=False)
     model_version_id = Column(String, nullable=False)
     is_current = Column(Boolean, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class EventOutbox(Base):
+    __tablename__ = 'event_outbox'
+
+    event_id = Column(String, primary_key=True)
+    event_type = Column(String, nullable=False)
+    routing_key = Column(String, nullable=False)
+    payload = Column(JSON, nullable=False)
+    status = Column(String, nullable=False, default='NEW')
+    created_at = Column(DateTime(timezone=True), nullable=False)

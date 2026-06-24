@@ -96,7 +96,15 @@ def load_artifacts() -> None:
             if chosen is not None:
                 artifacts[line][family] = chosen
             else:
-                warnings.warn(f"Model artifact not found for {line} {family}")
+                raise RuntimeError(
+                    f"Missing required model artifact for line={line} family={family}; "
+                    f"cannot serve pricing for all six lines (R11.3 fail-fast)")
+
+    # R11.3: every line must have all three model families loaded.
+    missing = [(line, fam) for line in LINES for fam in FAMILIES
+               if fam not in artifacts.get(line, {})]
+    if missing:
+        raise RuntimeError(f"Pricing artifacts incomplete; missing: {missing}")
 
     _load_geo()
     _load_cost_indices()

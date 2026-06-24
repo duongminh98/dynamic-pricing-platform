@@ -15,7 +15,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from ..database import ModelVersion, ChampionAssignment, AuditTrail
+from ..database import ModelVersion, ChampionAssignment, AuditTrail, EventOutbox
 from . import loader
 from common.errors import ErrorCode, ServiceException
 
@@ -79,35 +79,52 @@ def promote_champion(db: Session, line: str, challenger_version_id: str,
     db.add(ChampionAssignment(assignment_id=str(uuid.uuid4()),
                               line=line,
                               model_version_id=challenger_version_id,
-                              is_current=True))
-    _audit(db, line, "ChampionPromoted",
-           {"old": current.model_version_id if current else None,
-            "new": challenger_version_id,
-            "challenger_gini": challenger_metric,
-            "champion_gini": current_metric}, actor)
+                              is_current=True,
+                              created_at=datetime.datetime.now(datetime.timezone.utc)))
+    detail = {"line": line,
+              "action": "promote",
+              "old": current.model_version_id if current else None,
+              "new": challenger_version_id,
+              "challenger_gini": challenger_metric,
+              "champion_gini": current_metric}
+    _audit(db, line, "CHAMPION_CHANGE", detail, actor)
+    _publish_event(db, "ChampionPromoted", detail)
     db.commit()
     return {"promoted": True, "champion": challenger_version_id}
 
 
 def rollback_champion(db: Session, line: str, actor: str = "admin") -> dict:
-    """Roll back to the most recent non-current champion for the line."""
-    previous = db.query(ChampionAssignment).filter(
+    """Roll back to the prior champion by appending a new current assignment (R37.5/R37.8)."""
+    history = db.query(ChampionAssignment).filter(
         ChampionAssignment.line == line,
-        ChampionAssignment.is_current.is_(False),
-    ).order_by(ChampionAssignment.line.desc()).first()
+    ).order_by(ChampionAssignment.created_at.desc().nullslast()).all()
+    current = next((a for a in history if a.is_current), None)
+    # The most recent assignment that is not the current model is the rollback target.
+    previous = None
+    for a in history:
+        if current is not None and a.model_version_id == current.model_version_id:
+            continue
+        previous = a
+        break
     if previous is None:
         raise ServiceException(ErrorCode.BAD_REQUEST,
                                details={"line": line, "reason": "no previous champion"})
+    # Append-only: flip current off, INSERT a new current row pointing to the prior model.
     db.query(ChampionAssignment).filter(
         ChampionAssignment.line == line,
         ChampionAssignment.is_current.is_(True),
     ).update({"is_current": False})
-    db.query(ChampionAssignment).filter(
-        ChampionAssignment.line == line,
-        ChampionAssignment.model_version_id == previous.model_version_id,
-    ).update({"is_current": True})
-    _audit(db, line, "ChampionRolledBack",
-           {"restored": previous.model_version_id}, actor)
+    db.add(ChampionAssignment(assignment_id=str(uuid.uuid4()),
+                              line=line,
+                              model_version_id=previous.model_version_id,
+                              is_current=True,
+                              created_at=datetime.datetime.now(datetime.timezone.utc)))
+    detail = {"line": line,
+              "action": "rollback",
+              "old": current.model_version_id if current else None,
+              "restored": previous.model_version_id}
+    _audit(db, line, "CHAMPION_CHANGE", detail, actor)
+    _publish_event(db, "ChampionRolledBack", detail)
     db.commit()
     return {"rolled_back": True, "champion": previous.model_version_id}
 
@@ -118,5 +135,19 @@ def _audit(db: Session, line: str, event_type: str, detail: dict, actor: str) ->
         event_type=event_type,
         change_detail=dict(detail, line=line),
         actor=actor,
+        created_at=datetime.datetime.now(datetime.timezone.utc),
+    ))
+
+
+def _publish_event(db: Session, event_type: str, detail: dict) -> None:
+    """Append an outbox row so champion changes are published to platform.events
+    (routing key = event_type) for downstream consumers (R37.9). A separate relay
+    delivers NEW rows; writing it in the same transaction preserves atomicity."""
+    db.add(EventOutbox(
+        event_id=str(uuid.uuid4()),
+        event_type=event_type,
+        routing_key=event_type,
+        payload=detail,
+        status="NEW",
         created_at=datetime.datetime.now(datetime.timezone.utc),
     ))
