@@ -53,20 +53,6 @@ services:
       - dpp-network
     healthcheck: *postgres-healthcheck
 
-  postgres-underwriting:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
-    container_name: dpp-postgres-underwriting
-    environment:
-      POSTGRES_DB: ${UNDERWRITING_DB_NAME:-underwriting_db}
-      POSTGRES_USER: ${POSTGRES_USER:-platform_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_password_dev_only}
-    ports:
-      - "${UNDERWRITING_DB_PORT:-5436}:5432"
-    volumes:
-      - postgres_underwriting_data:/var/lib/postgresql/data
-    networks:
-      - dpp-network
-    healthcheck: *postgres-healthcheck
 
   postgres-claims:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
@@ -277,8 +263,6 @@ services:
           - product-service-2
           - order-service-1
           - order-service-2
-          - underwriting-service-1
-          - underwriting-service-2
           - claims-service-1
           - claims-service-2
           - billing-service-1
@@ -303,7 +287,6 @@ volumes:
   postgres_customer_data:
   postgres_product_data:
   postgres_order_data:
-  postgres_underwriting_data:
   postgres_claims_data:
   postgres_billing_data:
   postgres_notification_data:

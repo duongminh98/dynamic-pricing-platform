@@ -33,7 +33,6 @@ scrape_configs:
           - customer-service:8080
           - product-service:8080
           - order-service:8080
-          - underwriting-service:8080
           - claims-service:8080
           - billing-service:8080
           - notification-service:8080

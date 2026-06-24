@@ -102,21 +102,6 @@ services:
         strip_path: false
         preserve_host: false
 
-  - name: underwriting-service
-    protocol: http
-    host: underwriting-service-upstream
-    port: 80
-    connect_timeout: 5000
-    read_timeout: 5000
-    write_timeout: 5000
-    retries: 0
-    routes:
-      - name: underwriting-routes
-        paths:
-          - /underwriting
-        strip_path: false
-        preserve_host: false
-
   - name: claims-service
     protocol: http
     host: claims-service-upstream
@@ -292,39 +277,6 @@ upstreams:
             - 505
     targets:
       - target: host.docker.internal:8083
-        weight: 100
-
-  - name: underwriting-service-upstream
-    algorithm: round-robin
-    healthchecks:
-      active:
-        type: http
-        http_path: /actuator/health
-        timeout: 5
-        concurrency: 10
-        healthy:
-          interval: 5
-          successes: 2
-          http_statuses:
-            - 200
-            - 302
-        unhealthy:
-          interval: 5
-          tcp_failures: 2
-          timeouts: 3
-          http_failures: 3
-          http_statuses:
-            - 429
-            - 500
-            - 501
-            - 502
-            - 503
-            - 504
-            - 505
-    targets:
-      - target: underwriting-service-1:8080
-        weight: 100
-      - target: underwriting-service-2:8080
         weight: 100
 
   - name: claims-service-upstream

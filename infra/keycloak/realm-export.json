@@ -141,21 +141,6 @@
       }
     },
     {
-      "clientId": "underwriting-service",
-      "name": "Underwriting Service confidential client",
-      "enabled": true,
-      "protocol": "openid-connect",
-      "publicClient": false,
-      "clientAuthenticatorType": "client-secret",
-      "secret": "underwriting-service-secret-dev-only",
-      "standardFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": true,
-      "attributes": {
-        "access.token.lifespan": "1800"
-      }
-    },
-    {
       "clientId": "claims-service",
       "name": "Claims Service confidential client",
       "enabled": true,
