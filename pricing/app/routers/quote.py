@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db, Quote
 from pydantic import BaseModel
+from common.errors import ServiceException
 import datetime
 
 router = APIRouter(prefix="/pricing", tags=["pricing"])
@@ -41,16 +42,14 @@ async def create_quote(request: QuoteRequest, db: Session = Depends(get_db)):
         except HTTPException:
             db.rollback()
             raise
-        except Exception as exc:
+        except ServiceException:
             db.rollback()
-            # Map business exceptions to structured errors via common errors.
-            from common.errors import ErrorCode, ServiceException
-            if isinstance(exc, ServiceException):
-                raise HTTPException(status_code=exc.error_code.http_status,
-                                    detail={"error_code": exc.error_code.code,
-                                            "message": exc.message,
-                                            "details": exc.details})
-            raise HTTPException(status_code=400, detail=str(exc))
+            # Let the registered ServiceException handler render the 7.1 body
+            # (error_code + message + correlation_id + details) with the right status.
+            raise
+        except Exception:
+            db.rollback()
+            raise
 
 
 @router.get('/quote/{quote_id}')
