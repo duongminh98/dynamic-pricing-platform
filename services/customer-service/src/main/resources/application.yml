@@ -44,3 +44,9 @@ dpp:
     admin-username: ${KEYCLOAK_ADMIN:admin}
     admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin_dev_only}
     login-client-id: mini-app
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs

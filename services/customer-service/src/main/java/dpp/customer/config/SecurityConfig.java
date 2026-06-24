@@ -20,6 +20,7 @@ public class SecurityConfig {
         http.authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                 .requestMatchers("/internal/**").permitAll()
+                .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/customers/register", "/customers/login").permitAll()
                 .requestMatchers("/customers/me", "/customers/me/**").hasRole("Customer")
                 .anyRequest().authenticated()
