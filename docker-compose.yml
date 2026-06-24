@@ -660,8 +660,8 @@ services:
       PRICING_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
     volumes:
-      - ./reports/modeling/models:/app/reports/modeling/models:ro
-      - ./data/synthetic_real:/app/data/synthetic_real:ro
+      - ./reports/modeling/models:/reports/modeling/models:ro
+      - ./data/synthetic_real:/data/synthetic_real:ro
     depends_on:
       postgres-pricing:
         condition: service_healthy
@@ -689,8 +689,8 @@ services:
       PRICING_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
     volumes:
-      - ./reports/modeling/models:/app/reports/modeling/models:ro
-      - ./data/synthetic_real:/app/data/synthetic_real:ro
+      - ./reports/modeling/models:/reports/modeling/models:ro
+      - ./data/synthetic_real:/data/synthetic_real:ro
     depends_on:
       postgres-pricing:
         condition: service_healthy

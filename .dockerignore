@@ -1,0 +1,24 @@
+# Exclude large non-build directories from Docker build context.
+# These are mounted at runtime (volumes) ? not needed inside the build image.
+data/
+reports/
+logs/
+.pycache__/
+__pycache__/
+*.pyc
+.env
+.env.local
+.git/
+.kiro/
+.agents/
+bin/
+build/
+node_modules/
+frontend/dist/
+*.md
+tests/
+offline/
+pytest_cache/
+.qodana/
+.jqwik-database/
+.gradle/
