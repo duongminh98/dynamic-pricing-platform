@@ -4,6 +4,7 @@ import dpp.order.dto.*;
 import dpp.order.entity.*;
 import dpp.order.repository.*;
 import dpp.order.service.PolicyLifecycleService;
+import dpp.common.security.CustomerId;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import jakarta.validation.Valid;
@@ -32,7 +33,7 @@ public class PolicyController {
 
     @GetMapping
     public List<PolicyResponse> myPolicies(@AuthenticationPrincipal Jwt jwt) {
-        UUID customerId = UUID.nameUUIDFromBytes(jwt.getSubject().getBytes());
+        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
         return policyRepository.findByCustomerIdOrderByCreatedAtDesc(customerId).stream()
                 .map(lifecycleService::toResponse).collect(Collectors.toList());
     }
@@ -41,7 +42,7 @@ public class PolicyController {
     public PolicyResponse getPolicy(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         Policy p = policyRepository.findById(id)
                 .orElseThrow(() -> new ServiceException(ErrorCode.FORBIDDEN_RESOURCE));
-        UUID customerId = UUID.nameUUIDFromBytes(jwt.getSubject().getBytes());
+        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
         if (!p.getCustomerId().equals(customerId)) {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
         }
@@ -52,7 +53,7 @@ public class PolicyController {
     public PolicyDocument getDocument(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         Policy p = policyRepository.findById(id)
                 .orElseThrow(() -> new ServiceException(ErrorCode.FORBIDDEN_RESOURCE));
-        UUID customerId = UUID.nameUUIDFromBytes(jwt.getSubject().getBytes());
+        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
         if (!p.getCustomerId().equals(customerId)) {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
         }

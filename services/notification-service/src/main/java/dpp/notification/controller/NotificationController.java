@@ -1,5 +1,6 @@
 package dpp.notification.controller;
 
+import dpp.common.security.CustomerId;
 import dpp.notification.entity.Notification;
 import dpp.notification.repository.NotificationRepository;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -21,7 +22,7 @@ public class NotificationController {
 
     @GetMapping
     public List<Notification> myNotifications(@AuthenticationPrincipal Jwt jwt) {
-        UUID customerId = UUID.nameUUIDFromBytes(jwt.getSubject().getBytes());
+        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
         return notificationRepository.findByCustomerIdOrderByCreatedAtDesc(customerId);
     }
 }

@@ -4,6 +4,7 @@ import dpp.claims.client.OrderClient;
 import dpp.claims.dto.*;
 import dpp.claims.entity.*;
 import dpp.claims.repository.ClaimRepository;
+import dpp.common.security.CustomerId;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
@@ -39,7 +40,7 @@ public class ClaimsService {
         UUID policyId = request.getPolicyId();
         Map<String, Object> policy = orderClient.getPolicy(policyId);
         UUID policyOwner = UUID.fromString(String.valueOf(policy.get("customerId")));
-        UUID customerId = UUID.nameUUIDFromBytes(keycloakSubject.getBytes());
+        UUID customerId = CustomerId.fromSubject(keycloakSubject);
         if (!policyOwner.equals(customerId)) {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
         }
@@ -123,7 +124,7 @@ public class ClaimsService {
 
     @Transactional(readOnly = true)
     public List<ClaimResponse> myClaims(String keycloakSubject) {
-        UUID customerId = UUID.nameUUIDFromBytes(keycloakSubject.getBytes());
+        UUID customerId = CustomerId.fromSubject(keycloakSubject);
         return claimRepository.findByCustomerIdOrderByCreatedAtDesc(customerId).stream()
                 .map(this::toResponse).collect(Collectors.toList());
     }
@@ -131,7 +132,7 @@ public class ClaimsService {
     @Transactional(readOnly = true)
     public ClaimResponse getClaim(String keycloakSubject, UUID claimId) {
         Claim claim = findClaim(claimId);
-        UUID customerId = UUID.nameUUIDFromBytes(keycloakSubject.getBytes());
+        UUID customerId = CustomerId.fromSubject(keycloakSubject);
         if (!claim.getCustomerId().equals(customerId)) {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
         }

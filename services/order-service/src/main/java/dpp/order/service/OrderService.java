@@ -1,5 +1,6 @@
 package dpp.order.service;
 
+import dpp.common.security.CustomerId;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.order.dto.*;
@@ -103,7 +104,7 @@ public class OrderService {
     }
 
     private UUID resolveCustomerId(String keycloakSubject) {
-        return UUID.nameUUIDFromBytes(keycloakSubject.getBytes());
+        return CustomerId.fromSubject(keycloakSubject);
     }
 
     private ReviewQueueItem toQueueItem(OrderEntity order) {

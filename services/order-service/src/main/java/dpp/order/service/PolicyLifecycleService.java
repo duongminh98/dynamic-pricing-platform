@@ -1,5 +1,6 @@
 package dpp.order.service;
 
+import dpp.common.security.CustomerId;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
@@ -133,7 +134,7 @@ public class PolicyLifecycleService {
     private Policy findOwnedPolicy(UUID policyId, String keycloakSubject) {
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new ServiceException(ErrorCode.FORBIDDEN_RESOURCE));
-        UUID customerId = UUID.nameUUIDFromBytes(keycloakSubject.getBytes());
+        UUID customerId = CustomerId.fromSubject(keycloakSubject);
         if (!policy.getCustomerId().equals(customerId)) {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
         }

@@ -1,6 +1,7 @@
 package dpp.customer.service;
 
 import dpp.common.api.ErrorCode;
+import dpp.common.security.CustomerId;
 import dpp.common.api.ServiceException;
 import dpp.customer.dto.ProfileRequest;
 import dpp.customer.dto.ProfileResponse;
@@ -47,7 +48,7 @@ public class ProfileService {
         
         if (profile == null) {
             profile = new CustomerProfile();
-            profile.setCustomerId(UUID.randomUUID());
+            profile.setCustomerId(CustomerId.fromSubject(keycloakSubject));
             profile.setAccount(account);
         }
 
