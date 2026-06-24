@@ -1,5 +1,6 @@
 package dpp.order;
 
+import dpp.order.client.PricingClient;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
@@ -39,7 +40,7 @@ class PolicyOwnershipPropertyTest {
 
     private PolicyLifecycleService newService(PolicyRepository repo) {
         return new PolicyLifecycleService(repo, mock(ExposureSegmentRepository.class),
-                mock(PolicyDocumentRepository.class), mock(OutboxPublisher.class));
+                mock(PolicyDocumentRepository.class), mock(PricingClient.class), mock(OutboxPublisher.class));
     }
 
     @Property(tries = 100)

@@ -10,6 +10,7 @@ import dpp.order.entity.Policy;
 import dpp.order.entity.PolicyStatus;
 import dpp.order.repository.ExposureSegmentRepository;
 import dpp.order.repository.PolicyDocumentRepository;
+import dpp.order.client.PricingClient;
 import dpp.order.repository.PolicyRepository;
 import dpp.order.service.PolicyLifecycleService;
 import net.jqwik.api.*;
@@ -60,7 +61,7 @@ class ExposureHistoryPropertyTest {
 
     private PolicyLifecycleService newService(PolicyRepository repo, ExposureSegmentRepository segRepo,
                                                PolicyDocumentRepository docRepo) {
-        return new PolicyLifecycleService(repo, segRepo, docRepo, mock(OutboxPublisher.class));
+        return new PolicyLifecycleService(repo, segRepo, docRepo, mock(PricingClient.class), mock(OutboxPublisher.class));
     }
 
     @Property(tries = 100)
