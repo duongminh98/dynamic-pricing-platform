@@ -80,3 +80,14 @@ class EventOutbox(Base):
     payload = Column(JSON, nullable=False)
     status = Column(String, nullable=False, default='NEW')
     created_at = Column(DateTime(timezone=True), nullable=False)
+
+class ModelDriftFlag(Base):
+    __tablename__ = 'model_drift_flag'
+
+    flag_id = Column(String, primary_key=True)
+    line = Column(String, nullable=False)
+    metric = Column(String, nullable=False)
+    value = Column(Float, nullable=False)
+    threshold = Column(Float, nullable=False)
+    needs_recalibration = Column(Boolean, nullable=False, default=False)
+    computed_at = Column(DateTime(timezone=True), nullable=False)

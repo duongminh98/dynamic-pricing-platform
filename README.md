@@ -298,6 +298,68 @@ is unchanged ? VNPAY only replaces the "confirm payment" step.
 - Only `RspCode=00` + valid signature + amount match ? invoice paid + 1 `InvoicePaid`
 
 
+
+## Model Lifecycle (Task 23, R37)
+
+The platform supports offline model lifecycle management ? retraining triggers
+and drift monitoring ? that runs entirely outside the serving path (R37.10).
+
+### Retrain Trigger (`offline/retrain_trigger.py`)
+
+Two independently configurable mechanisms (in `offline/retrain_config.json`):
+
+1. **Schedule:** Quarterly by default (months 1, 4, 7, 10)
+2. **Data threshold:** When new claims/exposure count for a line exceeds a
+   configured threshold, trigger retrain for that line only
+
+The trigger calls `train_pricing_models.py` ? `register_models.py` to create a
+**candidate** Model_Version. It does NOT auto-promote ? promotion follows BR-23
+governance (`POST /admin/champion/promote`).
+
+```bash
+python offline/retrain_trigger.py              # check + trigger
+python offline/retrain_trigger.py --dry-run     # show what would trigger
+python offline/retrain_trigger.py --line health # force one line
+```
+
+### Drift Monitor (`offline/drift_monitor.py`)
+
+Per-line comparison of:
+
+1. **Feature distribution drift:** PSI (Population Stability Index) between
+   training and current input distributions
+2. **Calibration drift:** actual-vs-predicted deviation by bin
+
+When a metric exceeds its threshold (`drift_threshold_psi=0.2`,
+`drift_threshold_calibration=0.15`), the `needs_recalibration` flag is set for
+the line in the `model_drift_flag` table.
+
+```bash
+python offline/drift_monitor.py              # compute + persist flags
+python offline/drift_monitor.py --dry-run     # compute without persisting
+```
+
+### Admin Drift Endpoint
+
+```bash
+GET /admin/pricing/drift    # Administrator role
+```
+
+Returns per-line drift status with PSI and calibration metrics, thresholds, and
+the `needs_recalibration` flag. This can feed into the retrain trigger (23.1).
+
+### Scheduling
+
+The offline scripts are designed to be run via a cron job or GitHub Actions
+schedule ? they do NOT run in the serving path. Example cron:
+
+```cron
+# Quarterly retrain check (Jan/Apr/Jul/Oct 1st at 2am)
+0 2 1 1,4,7,10 * python /app/offline/retrain_trigger.py
+# Weekly drift check (every Monday at 3am)
+0 3 * * 1 python /app/offline/drift_monitor.py
+```
+
 ## CI/CD Pipeline
 
 The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and

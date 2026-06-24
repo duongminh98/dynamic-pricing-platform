@@ -1,0 +1,15 @@
+{
+  "schedule_quarterly": true,
+  "quarterly_months": [1, 4, 7, 10],
+  "data_threshold_enabled": true,
+  "line_thresholds": {
+    "health": 500,
+    "motorbike": 500,
+    "car": 300,
+    "home": 200,
+    "accident": 200,
+    "travel": 200
+  },
+  "drift_threshold_psi": 0.2,
+  "drift_threshold_calibration": 0.15
+}
