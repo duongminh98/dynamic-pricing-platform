@@ -19,7 +19,7 @@ public class AdjustmentService {
     @Transactional
     public void applyEndorsement(UUID policyId, long premiumOld, long premiumNew, long remainingDays, long termDays) {
         double fraction = termDays > 0 ? remainingDays / (double) termDays : 0;
-        if (fraction < 0) fraction = 0; if (fraction > 1) fraction = 1;
+        fraction = Math.max(0.0, Math.min(1.0, fraction));
         long delta = Math.round((premiumNew - premiumOld) * fraction);
         Adjustment adj = new Adjustment();
         adj.setAdjustmentId(UUID.randomUUID());
@@ -33,7 +33,7 @@ public class AdjustmentService {
     @Transactional
     public void applyCancellation(UUID policyId, long finalPremiumVnd, long remainingDays, long termDays) {
         double fraction = termDays > 0 ? remainingDays / (double) termDays : 0;
-        if (fraction < 0) fraction = 0; if (fraction > 1) fraction = 1;
+        fraction = Math.max(0.0, Math.min(1.0, fraction));
         long refund = Math.round(finalPremiumVnd * fraction);
         Adjustment adj = new Adjustment();
         adj.setAdjustmentId(UUID.randomUUID());

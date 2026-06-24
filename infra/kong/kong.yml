@@ -73,7 +73,6 @@ services:
           - /products
           - /admin/products
           - /admin/loading-factors
-          - /admin/eligibility-rules
           - /admin/rate-versions
         strip_path: false
         preserve_host: false
