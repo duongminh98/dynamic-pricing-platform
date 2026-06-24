@@ -1,5 +1,6 @@
 package dpp.notification.service;
 
+import dpp.notification.dto.NotificationResponse;
 import dpp.notification.entity.*;
 import dpp.notification.repository.NotificationRepository;
 import org.slf4j.Logger;
@@ -8,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -70,5 +72,27 @@ public class NotificationService {
     /** In-app channel delivery. Returns true on success. */
     private boolean sendOnce(Notification n) {
         return n.getChannel() == NotificationChannel.in_app;
+    }
+
+    @Transactional(readOnly = true)
+    public List<NotificationResponse> listForCustomer(UUID customerId, NotificationStatus status) {
+        List<Notification> rows = (status != null)
+                ? notificationRepository.findByCustomerIdAndStatusOrderByCreatedAtDesc(customerId, status)
+                : notificationRepository.findByCustomerIdOrderByCreatedAtDesc(customerId);
+        return rows.stream().map(NotificationService::toResponse).toList();
+    }
+
+    static NotificationResponse toResponse(Notification n) {
+        return NotificationResponse.builder()
+                .notificationId(n.getNotificationId())
+                .customerId(n.getCustomerId())
+                .policyId(n.getPolicyId())
+                .type(n.getType())
+                .channel(n.getChannel())
+                .message(n.getMessage())
+                .status(n.getStatus())
+                .retryCount(n.getRetryCount())
+                .createdAt(n.getCreatedAt())
+                .build();
     }
 }

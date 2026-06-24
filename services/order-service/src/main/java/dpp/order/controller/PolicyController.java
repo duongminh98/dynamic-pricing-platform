@@ -53,15 +53,22 @@ public class PolicyController {
     }
 
     @GetMapping("/{id}/document")
-    public PolicyDocument getDocument(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+    public PolicyDocumentResponse getDocument(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         Policy p = policyRepository.findById(id)
                 .orElseThrow(() -> new ServiceException(ErrorCode.FORBIDDEN_RESOURCE));
         UUID customerId = CustomerId.fromSubject(jwt.getSubject());
         if (!p.getCustomerId().equals(customerId)) {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
         }
-        return documentRepository.findLatestByPolicyId(id)
+        PolicyDocument doc = documentRepository.findLatestByPolicyId(id)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Document not found", null));
+        PolicyDocumentResponse resp = new PolicyDocumentResponse();
+        resp.setDocumentId(doc.getDocumentId());
+        resp.setPolicyId(doc.getPolicyId());
+        resp.setVersion(doc.getVersion());
+        resp.setContent(doc.getContent());
+        resp.setCreatedAt(doc.getCreatedAt());
+        return resp;
     }
 
     @PostMapping("/{id}/endorsements")

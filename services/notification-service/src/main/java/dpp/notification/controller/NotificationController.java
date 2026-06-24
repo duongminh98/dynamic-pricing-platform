@@ -1,9 +1,9 @@
 package dpp.notification.controller;
 
 import dpp.common.security.CustomerId;
-import dpp.notification.entity.Notification;
+import dpp.notification.dto.NotificationResponse;
 import dpp.notification.entity.NotificationStatus;
-import dpp.notification.repository.NotificationRepository;
+import dpp.notification.service.NotificationService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
@@ -15,19 +15,16 @@ import java.util.UUID;
 @RequestMapping("/notifications")
 public class NotificationController {
 
-    private final NotificationRepository notificationRepository;
+    private final NotificationService notificationService;
 
-    public NotificationController(NotificationRepository notificationRepository) {
-        this.notificationRepository = notificationRepository;
+    public NotificationController(NotificationService notificationService) {
+        this.notificationService = notificationService;
     }
 
     @GetMapping
-    public List<Notification> myNotifications(@AuthenticationPrincipal Jwt jwt,
-                                              @RequestParam(name = "status", required = false) NotificationStatus status) {
+    public List<NotificationResponse> myNotifications(@AuthenticationPrincipal Jwt jwt,
+                                                      @RequestParam(name = "status", required = false) NotificationStatus status) {
         UUID customerId = CustomerId.fromSubject(jwt.getSubject());
-        if (status != null) {
-            return notificationRepository.findByCustomerIdAndStatusOrderByCreatedAtDesc(customerId, status);
-        }
-        return notificationRepository.findByCustomerIdOrderByCreatedAtDesc(customerId);
+        return notificationService.listForCustomer(customerId, status);
     }
 }

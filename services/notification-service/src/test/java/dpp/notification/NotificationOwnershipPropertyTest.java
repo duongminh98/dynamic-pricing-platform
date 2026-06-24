@@ -1,8 +1,12 @@
 package dpp.notification;
 
 import dpp.notification.controller.NotificationController;
+import dpp.notification.dto.NotificationResponse;
 import dpp.notification.entity.Notification;
+import dpp.notification.entity.NotificationChannel;
+import dpp.notification.entity.NotificationStatus;
 import dpp.notification.repository.NotificationRepository;
+import dpp.notification.service.NotificationService;
 import net.jqwik.api.*;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -25,9 +29,9 @@ class NotificationOwnershipPropertyTest {
         n.setCustomerId(customerId);
         n.setPolicyId(UUID.randomUUID());
         n.setType(type);
-        n.setChannel(dpp.notification.entity.NotificationChannel.in_app);
+        n.setChannel(NotificationChannel.in_app);
         n.setMessage("msg");
-        n.setStatus(dpp.notification.entity.NotificationStatus.sent);
+        n.setStatus(NotificationStatus.sent);
         n.setRetryCount(0);
         n.setCreatedAt(OffsetDateTime.now());
         return n;
@@ -39,6 +43,10 @@ class NotificationOwnershipPropertyTest {
         return jwt;
     }
 
+    private NotificationController controllerWith(NotificationRepository repo) {
+        return new NotificationController(new NotificationService(repo));
+    }
+
     @Property(tries = 100)
     void myNotificationsReturnsOnlyOwnNotifications(@ForAll int seed) {
         String subject = "customer-subject";
@@ -46,13 +54,12 @@ class NotificationOwnershipPropertyTest {
         UUID otherId = UUID.nameUUIDFromBytes("other-subject".getBytes());
 
         Notification own = notificationFor(customerId, "PolicyIssued");
-        Notification others = notificationFor(otherId, "PolicyIssued");
 
         NotificationRepository repo = mock(NotificationRepository.class);
         when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(List.of(own));
 
-        NotificationController controller = new NotificationController(repo);
-        List<Notification> result = controller.myNotifications(jwtFor(subject), null);
+        NotificationController controller = controllerWith(repo);
+        List<NotificationResponse> result = controller.myNotifications(jwtFor(subject), null);
 
         assertEquals(1, result.size());
         assertEquals(customerId, result.get(0).getCustomerId());
@@ -68,12 +75,28 @@ class NotificationOwnershipPropertyTest {
         NotificationRepository repo = mock(NotificationRepository.class);
         when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(List.of());
 
-        NotificationController controller = new NotificationController(repo);
+        NotificationController controller = controllerWith(repo);
         controller.myNotifications(jwtFor(subject), null);
 
         ArgumentCaptor<UUID> captor = ArgumentCaptor.forClass(UUID.class);
         verify(repo, times(1)).findByCustomerIdOrderByCreatedAtDesc(captor.capture());
         assertEquals(customerId, captor.getValue());
+    }
+
+    @Property(tries = 100)
+    void statusFilterDelegatesToStatusQuery(@ForAll int seed) {
+        String subject = "customer-subject";
+        UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
+
+        NotificationRepository repo = mock(NotificationRepository.class);
+        when(repo.findByCustomerIdAndStatusOrderByCreatedAtDesc(customerId, NotificationStatus.failed))
+                .thenReturn(List.of());
+
+        NotificationController controller = controllerWith(repo);
+        controller.myNotifications(jwtFor(subject), NotificationStatus.failed);
+
+        verify(repo, times(1)).findByCustomerIdAndStatusOrderByCreatedAtDesc(customerId, NotificationStatus.failed);
+        verify(repo, never()).findByCustomerIdOrderByCreatedAtDesc(customerId);
     }
 
     @Test
@@ -84,8 +107,8 @@ class NotificationOwnershipPropertyTest {
         NotificationRepository repo = mock(NotificationRepository.class);
         when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(List.of());
 
-        NotificationController controller = new NotificationController(repo);
-        List<Notification> result = controller.myNotifications(jwtFor(subject), null);
+        NotificationController controller = controllerWith(repo);
+        List<NotificationResponse> result = controller.myNotifications(jwtFor(subject), null);
         assertTrue(result.isEmpty());
     }
 }

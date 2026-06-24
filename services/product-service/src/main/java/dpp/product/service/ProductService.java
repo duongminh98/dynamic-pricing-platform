@@ -4,6 +4,8 @@ import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.product.dto.CoverageOptionResponse;
 import dpp.product.dto.ProductDetail;
+import dpp.product.dto.ProductRequest;
+import dpp.product.dto.ProductResponse;
 import dpp.product.dto.ProductSummary;
 import dpp.product.entity.CoverageOption;
 import dpp.product.entity.Product;
@@ -55,6 +57,36 @@ public class ProductService {
                 .filter(co -> productIds.contains(co.getProductId()))
                 .map(this::toCoverageOptionResponse)
                 .toList();
+    }
+
+    @Transactional
+    public ProductResponse saveProduct(ProductRequest request) {
+        validateLine(request.getCategory());
+        Product product = Product.builder()
+                .productId(request.getProductId())
+                .category(request.getCategory())
+                .productName(request.getProductName())
+                .coverageAmountVnd(request.getCoverageAmountVnd())
+                .deductibleVnd(request.getDeductibleVnd())
+                .basePremiumVnd(request.getBasePremiumVnd())
+                .adminFeeVnd(request.getAdminFeeVnd())
+                .active(request.getActive() == null ? Boolean.TRUE : request.getActive())
+                .build();
+        Product saved = productRepository.save(product);
+        return toProductResponse(saved);
+    }
+
+    public static ProductResponse toProductResponse(Product p) {
+        return ProductResponse.builder()
+                .productId(p.getProductId())
+                .category(p.getCategory())
+                .productName(p.getProductName())
+                .coverageAmountVnd(p.getCoverageAmountVnd())
+                .deductibleVnd(p.getDeductibleVnd())
+                .basePremiumVnd(p.getBasePremiumVnd())
+                .adminFeeVnd(p.getAdminFeeVnd())
+                .active(Boolean.TRUE.equals(p.getActive()))
+                .build();
     }
 
     public void validateLine(String line) {
