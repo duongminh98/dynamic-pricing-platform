@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db, ModelVersion, ChampionAssignment, AuditTrail
+from common.auth import require_administrator
 from pydantic import BaseModel
 import datetime
 import uuid
@@ -18,12 +19,12 @@ class RollbackRequest(BaseModel):
 
 
 @router.get("/pricing/models")
-async def list_models(db: Session = Depends(get_db)):
+async def list_models(db: Session = Depends(get_db), _claims=Depends(require_administrator)):
     return db.query(ModelVersion).all()
 
 
 @router.post("/champion/promote")
-async def promote_champion(request: PromoteRequest, db: Session = Depends(get_db)):
+async def promote_champion(request: PromoteRequest, db: Session = Depends(get_db), _claims=Depends(require_administrator)):
     from ..pricing_engine import governance
     try:
         result = governance.promote_champion(db, request.line, request.model_version_id)
@@ -34,7 +35,7 @@ async def promote_champion(request: PromoteRequest, db: Session = Depends(get_db
 
 
 @router.post("/champion/rollback")
-async def rollback_champion(request: RollbackRequest, db: Session = Depends(get_db)):
+async def rollback_champion(request: RollbackRequest, db: Session = Depends(get_db), _claims=Depends(require_administrator)):
     from ..pricing_engine import governance
     try:
         result = governance.rollback_champion(db, request.line)
