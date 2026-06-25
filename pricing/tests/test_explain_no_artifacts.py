@@ -4,11 +4,21 @@ Covers _direction, _extract_model_and_features, and explain() with mocked models
 """
 from __future__ import annotations
 
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
+
+# Inject a fake ``shap`` module so that ``import shap`` inside explain() works
+# even on CI runners where shap is not installed.
+if "shap" not in sys.modules:
+    _fake_shap = types.ModuleType("shap")
+    _fake_shap.TreeExplainer = MagicMock()
+    _fake_shap.LinearExplainer = MagicMock()
+    sys.modules["shap"] = _fake_shap
 
 from app.pricing_engine.explain import (
     _direction,
@@ -97,7 +107,8 @@ def test_explain_with_tree_model():
     mock_explainer = MagicMock()
     mock_explainer.shap_values.return_value = np.array([[0.3, -0.5, 0.1]])
 
-    with patch("app.pricing_engine.explain._get_tree_explainer", return_value=mock_explainer):
+    with patch("app.pricing_engine.explain._get_tree_explainer", return_value=mock_explainer), \
+         patch.dict(sys.modules, {"shap": sys.modules["shap"]}):
         result = explain(mock_model, feature_df)
 
     assert result["available"] is True
@@ -127,8 +138,9 @@ def test_explain_with_linear_model():
     mock_linear_explainer = MagicMock()
     mock_linear_explainer.shap_values.return_value = np.array([[0.1, -0.2, 0.05]])
 
+    fake_shap = sys.modules["shap"]
     with patch("app.pricing_engine.explain._get_tree_explainer", side_effect=Exception("no tree")), \
-         patch("shap.LinearExplainer", return_value=mock_linear_explainer):
+         patch.object(fake_shap, "LinearExplainer", return_value=mock_linear_explainer):
         result = explain(mock_model, feature_df)
 
     assert result["available"] is True
@@ -148,8 +160,9 @@ def test_explain_fallback_perturbation():
 
     feature_df = pd.DataFrame({"age": [30], "bmi": [22.5], "income": [50]})
 
+    fake_shap = sys.modules["shap"]
     with patch("app.pricing_engine.explain._get_tree_explainer", side_effect=Exception("no tree")), \
-         patch("shap.LinearExplainer", side_effect=Exception("no linear")):
+         patch.object(fake_shap, "LinearExplainer", side_effect=Exception("no linear")):
         result = explain(mock_model, feature_df)
 
     assert result["available"] is True
@@ -175,7 +188,8 @@ def test_explain_3d_shap_values():
     mock_explainer = MagicMock()
     mock_explainer.shap_values.return_value = np.array([[[0.1], [-0.2], [0.05]]])
 
-    with patch("app.pricing_engine.explain._get_tree_explainer", return_value=mock_explainer):
+    with patch("app.pricing_engine.explain._get_tree_explainer", return_value=mock_explainer), \
+         patch.dict(sys.modules, {"shap": sys.modules["shap"]}):
         result = explain(mock_model, feature_df)
 
     assert result["available"] is True
@@ -195,7 +209,8 @@ def test_explain_less_than_3_features_returns_unavailable():
     mock_explainer = MagicMock()
     mock_explainer.shap_values.return_value = np.array([[0.5]])
 
-    with patch("app.pricing_engine.explain._get_tree_explainer", return_value=mock_explainer):
+    with patch("app.pricing_engine.explain._get_tree_explainer", return_value=mock_explainer), \
+         patch.dict(sys.modules, {"shap": sys.modules["shap"]}):
         result = explain(mock_model, feature_df)
 
     assert result["available"] is False
