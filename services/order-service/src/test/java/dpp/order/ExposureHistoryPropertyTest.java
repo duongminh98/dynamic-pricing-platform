@@ -37,12 +37,19 @@ class ExposureHistoryPropertyTest {
     private Policy activePolicy(UUID customerId) {
         Policy p = new Policy();
         p.setPolicyId(UUID.randomUUID());
+        p.setOrderId(UUID.randomUUID());
         p.setCustomerId(customerId);
+        p.setProductId("motor-basic");
         p.setStatus(PolicyStatus.active);
         OffsetDateTime eff = OffsetDateTime.now().minusDays(30);
         p.setPolicyEffectiveDate(eff);
         p.setPolicyExpirationDate(eff.plus(365, ChronoUnit.DAYS));
+        p.setRenewalNumber(0);
+        p.setRenewal(false);
+        p.setYearsSinceFirstPolicy(0);
+        p.setPolicyCountPrior(0);
         p.setFinalPremiumVnd(1_000_000L);
+        p.setCreatedAt(OffsetDateTime.now());
         return p;
     }
 

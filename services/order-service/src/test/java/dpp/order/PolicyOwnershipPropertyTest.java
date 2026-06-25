@@ -31,11 +31,18 @@ class PolicyOwnershipPropertyTest {
     private Policy activePolicy(UUID customerId) {
         Policy p = new Policy();
         p.setPolicyId(UUID.randomUUID());
+        p.setOrderId(UUID.randomUUID());
         p.setCustomerId(customerId);
+        p.setProductId("motor-basic");
         p.setStatus(PolicyStatus.active);
         p.setPolicyEffectiveDate(OffsetDateTime.now().minusDays(30));
         p.setPolicyExpirationDate(OffsetDateTime.now().plusDays(335));
+        p.setRenewalNumber(0);
+        p.setRenewal(false);
+        p.setYearsSinceFirstPolicy(0);
+        p.setPolicyCountPrior(0);
         p.setFinalPremiumVnd(1_000_000L);
+        p.setCreatedAt(OffsetDateTime.now());
         return p;
     }
 
