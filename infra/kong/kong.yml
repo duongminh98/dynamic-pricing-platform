@@ -9,6 +9,34 @@ plugins:
       latency_metrics: true
       bandwidth_metrics: true
       upstream_health_metrics: true
+  # Browser CORS for the SPA (served at http://localhost:3001, or :5173 in Vite dev).
+  # The frontend sends an X-Correlation-Id header on every call, which makes even
+  # GETs non-simple and triggers a preflight OPTIONS. This global plugin answers the
+  # preflight and adds Access-Control-Allow-* so the browser exposes responses to JS.
+  # NOTE: jwt plugins below set run_on_preflight=false so OPTIONS reaches this plugin
+  # on protected routes instead of being rejected for a missing token.
+  - name: cors
+    config:
+      origins:
+        - http://localhost:3001
+        - http://localhost:5173
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - X-Correlation-Id
+      exposed_headers:
+        - X-Correlation-Id
+      credentials: true
+      max_age: 3600
+      preflight_continue: false
   # NOTE: JWT verification is NOT global. Public bootstrap routes (POST /customers/register,
   # POST /customers/login, GET /products*) must be reachable without a token (design 3.1/3.2,
   # R1.1/R1.5/R3.8). Java services self-validate JWT via Spring resource server; the Python
@@ -91,7 +119,7 @@ services:
           key_claim_name: iss
           claims_to_verify:
             - exp
-          run_on_preflight: true
+          run_on_preflight: false
     routes:
       - name: order-routes
         paths:
@@ -116,7 +144,7 @@ services:
           key_claim_name: iss
           claims_to_verify:
             - exp
-          run_on_preflight: true
+          run_on_preflight: false
     routes:
       - name: claims-routes
         paths:
@@ -153,7 +181,7 @@ services:
           key_claim_name: iss
           claims_to_verify:
             - exp
-          run_on_preflight: true
+          run_on_preflight: false
     routes:
       - name: notification-routes
         paths:
@@ -175,7 +203,7 @@ services:
           key_claim_name: iss
           claims_to_verify:
             - exp
-          run_on_preflight: true
+          run_on_preflight: false
     routes:
       - name: pricing-routes
         paths:
