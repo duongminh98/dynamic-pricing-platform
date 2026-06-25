@@ -46,7 +46,7 @@ class BillingPersistenceTest {
     @Test
     void endorsementAdjustmentPersistsWithCreatedAt() {
         UUID policyId = UUID.randomUUID();
-        adjustmentService.applyEndorsement(UUID.randomUUID().toString(), policyId, 1_000_000L, 1_500_000L, 200, 365);
+        adjustmentService.applyEndorsement(UUID.randomUUID().toString(), policyId, UUID.randomUUID(), 1_000_000L, 1_500_000L, 200, 365);
 
         List<Adjustment> saved = adjustmentRepository.findByPolicyIdOrderByCreatedAtAsc(policyId);
         assertEquals(1, saved.size(), "Adjustment must be inserted (created_at NOT NULL satisfied)");
@@ -70,9 +70,9 @@ class BillingPersistenceTest {
     void duplicateEventIdDoesNotCreateDuplicateAdjustment() {
         UUID policyId = UUID.randomUUID();
         String eventId = UUID.randomUUID().toString();
-        adjustmentService.applyEndorsement(eventId, policyId, 1_000_000L, 1_500_000L, 200, 365);
+        adjustmentService.applyEndorsement(eventId, policyId, UUID.randomUUID(), 1_000_000L, 1_500_000L, 200, 365);
         // Redelivery of the same event_id is a no-op (R33.4 dedup).
-        adjustmentService.applyEndorsement(eventId, policyId, 1_000_000L, 1_500_000L, 200, 365);
+        adjustmentService.applyEndorsement(eventId, policyId, UUID.randomUUID(), 1_000_000L, 1_500_000L, 200, 365);
 
         List<Adjustment> saved = adjustmentRepository.findByPolicyIdOrderByCreatedAtAsc(policyId);
         assertEquals(1, saved.size(), "redelivered event must not create a second adjustment");

@@ -65,4 +65,8 @@ public class EndorsementRequestEntity {
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
+
+    /** Provisional premium (VND) quoted at submission time for the customer's information; applied only on admin approval. */
+    @Column(name = "quoted_premium_vnd")
+    private Long quotedPremiumVnd;
 }

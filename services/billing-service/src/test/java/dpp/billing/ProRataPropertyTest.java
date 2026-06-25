@@ -2,6 +2,7 @@ package dpp.billing;
 
 import dpp.billing.entity.*;
 import dpp.billing.repository.AdjustmentRepository;
+import dpp.billing.repository.InvoiceRepository;
 import dpp.billing.repository.ProcessedEventRepository;
 import dpp.billing.service.AdjustmentService;
 import net.jqwik.api.*;
@@ -25,9 +26,10 @@ class ProRataPropertyTest {
             @ForAll @LongRange(min = 0, max = 365) long remainingDays,
             @ForAll @LongRange(min = 1, max = 365) long termDays) {
         AdjustmentRepository repo = mock(AdjustmentRepository.class);
-        AdjustmentService service = new AdjustmentService(repo, mock(ProcessedEventRepository.class));
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        AdjustmentService service = new AdjustmentService(repo, invRepo, mock(ProcessedEventRepository.class));
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        service.applyEndorsement(UUID.randomUUID().toString(), UUID.randomUUID(), premiumOld, premiumNew, remainingDays, termDays);
+        service.applyEndorsement(UUID.randomUUID().toString(), UUID.randomUUID(), UUID.randomUUID(), premiumOld, premiumNew, remainingDays, termDays);
         ArgumentCaptor<Adjustment> captor = ArgumentCaptor.forClass(Adjustment.class);
         verify(repo, times(1)).save(captor.capture());
         Adjustment adj = captor.getValue();
@@ -42,6 +44,15 @@ class ProRataPropertyTest {
         }
         assertEquals(Math.abs(expectedDelta), adj.getAmountVnd());
         assertEquals(AdjustmentReason.endorsement, adj.getReason());
+        // When delta > 0, an unpaid invoice must be created for the customer to pay.
+        if (expectedDelta > 0) {
+            ArgumentCaptor<Invoice> invCaptor = ArgumentCaptor.forClass(Invoice.class);
+            verify(invRepo, times(1)).save(invCaptor.capture());
+            assertEquals(InvoiceStatus.unpaid, invCaptor.getValue().getStatus());
+            assertEquals(Math.abs(expectedDelta), invCaptor.getValue().getAmountVnd());
+        } else {
+            verify(invRepo, never()).save(any());
+        }
     }
 
     @Property(tries = 100)
@@ -50,7 +61,7 @@ class ProRataPropertyTest {
             @ForAll @LongRange(min = 0, max = 365) long remainingDays,
             @ForAll @LongRange(min = 1, max = 365) long termDays) {
         AdjustmentRepository repo = mock(AdjustmentRepository.class);
-        AdjustmentService service = new AdjustmentService(repo, mock(ProcessedEventRepository.class));
+        AdjustmentService service = new AdjustmentService(repo, mock(InvoiceRepository.class), mock(ProcessedEventRepository.class));
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         service.applyCancellation(UUID.randomUUID().toString(), UUID.randomUUID(), finalPremiumVnd, remainingDays, termDays);
         ArgumentCaptor<Adjustment> captor = ArgumentCaptor.forClass(Adjustment.class);
@@ -69,7 +80,7 @@ class ProRataPropertyTest {
     @Test
     void remainingFractionClampedToRange() {
         AdjustmentRepository repo = mock(AdjustmentRepository.class);
-        AdjustmentService service = new AdjustmentService(repo, mock(ProcessedEventRepository.class));
+        AdjustmentService service = new AdjustmentService(repo, mock(InvoiceRepository.class), mock(ProcessedEventRepository.class));
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         service.applyCancellation(UUID.randomUUID().toString(), UUID.randomUUID(), 1000000, 400, 365);
         ArgumentCaptor<Adjustment> captor = ArgumentCaptor.forClass(Adjustment.class);

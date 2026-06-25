@@ -26,10 +26,12 @@ public class PolicyLifecycleService {
 
     /**
      * Keys that are NOT risk attributes: changing only these (the priced sum
-     * insured / retention) does not require re-rating against the model. Any other
-     * attribute in the change set is a Material_Change requiring re-rating + admin
-     * review (R23.7, BR-21). This is line-agnostic so a health change (e.g. smoker,
-     * age, bmi) is treated the same as a motor change (e.g. vehicle_value_vnd).
+     * insured / retention) does not require admin review. However, since
+     * coverage_amount_vnd and deductible_vnd are model features, every
+     * endorsement still re-rates. Any other attribute in the change set is a
+     * Material_Change requiring admin review (R23.7, BR-21). This is
+     * line-agnostic so a health change (e.g. smoker, age, bmi) is treated the
+     * same as a motor change (e.g. vehicle_value_vnd).
      */
     private static final Set<String> NON_MATERIAL_KEYS = Set.of(
             "coverage_amount_vnd", "deductible_vnd");
@@ -79,6 +81,25 @@ public class PolicyLifecycleService {
 
         if (material) {
             // R23.9: route to the Administrator review queue; do NOT apply yet.
+            // However, re-rate immediately so the customer sees the provisional premium.
+            long newCoverage = request.getCoverageAmountVnd() != null ? request.getCoverageAmountVnd() : 0L;
+            long newDeductible = request.getDeductibleVnd() != null ? request.getDeductibleVnd() : 0L;
+            List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
+            ExposureSegment prior = segments.isEmpty() ? null : segments.get(segments.size() - 1);
+            Map<String, Object> mergedProfile = prior != null ? readRiskSnapshot(prior) : new LinkedHashMap<>();
+            mergedProfile.putAll(change);
+            mergedProfile.put("coverage_amount_vnd", newCoverage);
+            mergedProfile.put("deductible_vnd", newDeductible);
+            Long quotedPremium = null;
+            try {
+                Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), mergedProfile);
+                Object premium = requote != null ? requote.get("final_premium_vnd") : null;
+                if (premium instanceof Number n) {
+                    quotedPremium = n.longValue();
+                }
+            } catch (RuntimeException e) {
+                quotedPremium = null;
+            }
             EndorsementRequestEntity pending = new EndorsementRequestEntity();
             pending.setEndorsementRequestId(UUID.randomUUID());
             pending.setPolicyId(policyId);
@@ -88,13 +109,14 @@ public class PolicyLifecycleService {
             pending.setDeductibleVnd(request.getDeductibleVnd());
             pending.setStatus(EndorsementStatus.PENDING_REVIEW);
             pending.setCreatedAt(OffsetDateTime.now());
+            pending.setQuotedPremiumVnd(quotedPremium);
             try {
                 pending.setChangeSet(objectMapper.writeValueAsString(change));
             } catch (Exception e) {
                 pending.setChangeSet("{}");
             }
             endorsementRequestRepository.save(pending);
-            return EndorsementResult.pendingReview(pending.getEndorsementRequestId());
+            return EndorsementResult.pendingReview(pending.getEndorsementRequestId(), quotedPremium);
         }
 
         // Non-material change: apply immediately (no admin needed).
@@ -226,22 +248,21 @@ public class PolicyLifecycleService {
         mergedProfile.put("coverage_amount_vnd", newCoverage);
         mergedProfile.put("deductible_vnd", newDeductible);
 
-        // R23.2/R23.8: re-rate the remaining term for a material change using the new risk profile.
-        if (material) {
-            // If pricing is unavailable or rejects the profile, fail safe by keeping the
-            // prior premium instead of blocking the endorsement — mirrors the renewal
-            // re-rate fallback (R24.2).
-            try {
-                Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), mergedProfile);
-                Object premium = requote != null ? requote.get("final_premium_vnd") : null;
-                if (premium instanceof Number n) {
-                    premiumNew = n.longValue();
-                    policy.setFinalPremiumVnd(premiumNew);
-                    policyRepository.save(policy);
-                }
-            } catch (RuntimeException e) {
-                premiumNew = premiumOld;
+        // R23.2/R23.8: always re-rate — coverage/deductible changes affect the
+        // premium even though they are non-material (no admin review needed).
+        // If pricing is unavailable or rejects the profile, fail safe by keeping
+        // the prior premium instead of blocking the endorsement — mirrors the
+        // renewal re-rate fallback (R24.2).
+        try {
+            Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), mergedProfile);
+            Object premium = requote != null ? requote.get("final_premium_vnd") : null;
+            if (premium instanceof Number n) {
+                premiumNew = n.longValue();
+                policy.setFinalPremiumVnd(premiumNew);
+                policyRepository.save(policy);
             }
+        } catch (RuntimeException e) {
+            premiumNew = premiumOld;
         }
 
         ExposureSegment seg = new ExposureSegment();
@@ -288,6 +309,7 @@ public class PolicyLifecycleService {
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(eff, policy.getPolicyExpirationDate());
         enqueueEvent("EndorsementApplied", policyId, Map.of("customer_id", policy.getCustomerId().toString(),
+                "order_id", policy.getOrderId().toString(),
                 "premium_old", premiumOld, "premium_new", premiumNew,
                 "remaining_days", remainingDays, "term_days", termDays));
         return toResponse(policy);
@@ -313,6 +335,16 @@ public class PolicyLifecycleService {
         OffsetDateTime newEff = old.getPolicyExpirationDate().isBefore(now) ? now : old.getPolicyExpirationDate();
         OffsetDateTime newExp = newEff.plus(365, ChronoUnit.DAYS);
 
+        // Retrieve the full risk profile from the old policy's latest exposure segment
+        // so the renewal re-rate uses the complete feature set, not just renewal context.
+        List<ExposureSegment> oldSegments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
+        ExposureSegment oldLatest = oldSegments.isEmpty() ? null : oldSegments.get(oldSegments.size() - 1);
+        Map<String, Object> profile = oldLatest != null ? readRiskSnapshot(oldLatest) : new LinkedHashMap<>();
+        profile.put("is_renewal", true);
+        profile.put("renewal_number", old.getRenewalNumber() + 1);
+        profile.put("years_since_first_policy", old.getYearsSinceFirstPolicy() + 1);
+        profile.put("policy_count_prior", old.getPolicyCountPrior() + 1);
+
         Policy renewed = new Policy();
         renewed.setPolicyId(UUID.randomUUID());
         renewed.setOrderId(old.getOrderId());
@@ -326,12 +358,7 @@ public class PolicyLifecycleService {
         renewed.setYearsSinceFirstPolicy(old.getYearsSinceFirstPolicy() + 1);
         renewed.setPolicyCountPrior(old.getPolicyCountPrior() + 1);
 
-        // R24.2: re-rate the renewal with renewal context instead of cloning the old premium.
-        Map<String, Object> profile = new LinkedHashMap<>();
-        profile.put("is_renewal", true);
-        profile.put("renewal_number", renewed.getRenewalNumber());
-        profile.put("years_since_first_policy", renewed.getYearsSinceFirstPolicy());
-        profile.put("policy_count_prior", renewed.getPolicyCountPrior());
+        // R24.2: re-rate the renewal with the full risk profile + renewal context.
         long renewedPremium = old.getFinalPremiumVnd();
         try {
             Map<String, Object> requote = pricingClient.rerate(old.getProductId(), profile);
@@ -347,8 +374,28 @@ public class PolicyLifecycleService {
         renewed.setCreatedAt(now);
         policyRepository.save(renewed);
 
+        // Stamp exposure segment 0 for the renewed policy with the full risk profile
+        // so subsequent endorsements can merge against it.
+        ExposureSegment seg = new ExposureSegment();
+        seg.setSegmentId(UUID.randomUUID());
+        seg.setPolicyId(renewed.getPolicyId());
+        seg.setExposureSegmentSeq(0);
+        seg.setSegmentStart(newEff);
+        seg.setSegmentEnd(newExp);
+        long days = ChronoUnit.DAYS.between(newEff, newExp);
+        seg.setEarnedExposureYears(days / 365.25);
+        seg.setCoverageAmountVnd(oldLatest != null ? oldLatest.getCoverageAmountVnd() : 0L);
+        seg.setDeductibleVnd(oldLatest != null ? oldLatest.getDeductibleVnd() : 0L);
+        try {
+            seg.setRiskSnapshot(objectMapper.writeValueAsString(profile));
+        } catch (Exception e) {
+            seg.setRiskSnapshot("{}");
+        }
+        segmentRepository.save(seg);
+
         enqueueEvent("PolicyRenewed", renewed.getPolicyId(), Map.of(
                 "customer_id", renewed.getCustomerId().toString(),
+                "order_id", renewed.getOrderId().toString(),
                 "renewal_number", renewed.getRenewalNumber(),
                 "final_premium_vnd", renewedPremium));
         return toResponse(renewed);

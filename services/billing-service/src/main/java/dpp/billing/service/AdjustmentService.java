@@ -2,6 +2,7 @@ package dpp.billing.service;
 
 import dpp.billing.entity.*;
 import dpp.billing.repository.AdjustmentRepository;
+import dpp.billing.repository.InvoiceRepository;
 import dpp.billing.repository.ProcessedEventRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,16 +17,19 @@ public class AdjustmentService {
     static final String CONSUMER_CANCELLATION = "billing.policy-cancelled";
 
     private final AdjustmentRepository adjustmentRepository;
+    private final InvoiceRepository invoiceRepository;
     private final ProcessedEventRepository processedEventRepository;
 
     public AdjustmentService(AdjustmentRepository adjustmentRepository,
+                             InvoiceRepository invoiceRepository,
                              ProcessedEventRepository processedEventRepository) {
         this.adjustmentRepository = adjustmentRepository;
+        this.invoiceRepository = invoiceRepository;
         this.processedEventRepository = processedEventRepository;
     }
 
     @Transactional
-    public void applyEndorsement(String eventId, UUID policyId, long premiumOld, long premiumNew,
+    public void applyEndorsement(String eventId, UUID policyId, UUID orderId, long premiumOld, long premiumNew,
                                  long remainingDays, long termDays) {
         // R33.4: dedup on event_id within the same TX as the Adjustment insert. A
         // redelivered EndorsementApplied is a no-op (no duplicate additional charge / refund).
@@ -43,6 +47,18 @@ public class AdjustmentService {
         adj.setReason(AdjustmentReason.endorsement);
         adj.setCreatedAt(OffsetDateTime.now());
         adjustmentRepository.save(adj);
+        // For additional charges, create an unpaid invoice so the customer can pay via VNPAY.
+        // Refunds are recorded as adjustments only; the refund is settled at renewal or manually.
+        if (delta > 0) {
+            Invoice invoice = new Invoice();
+            invoice.setInvoiceId(UUID.randomUUID());
+            invoice.setOrderId(orderId);
+            invoice.setPolicyId(policyId);
+            invoice.setAmountVnd(Math.abs(delta));
+            invoice.setStatus(InvoiceStatus.unpaid);
+            invoice.setCreatedAt(OffsetDateTime.now());
+            invoiceRepository.save(invoice);
+        }
         recordProcessed(eventId, CONSUMER_ENDORSEMENT);
     }
 

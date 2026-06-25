@@ -39,8 +39,8 @@ class BillingDedupAndAuthzTest {
         String eventId = UUID.randomUUID().toString();
         when(peRepo.existsById(eventId)).thenReturn(true); // already processed
 
-        AdjustmentService svc = new AdjustmentService(adjRepo, peRepo);
-        svc.applyEndorsement(eventId, UUID.randomUUID(), 1_000_000L, 1_500_000L, 200, 365);
+        AdjustmentService svc = new AdjustmentService(adjRepo, mock(InvoiceRepository.class), peRepo);
+        svc.applyEndorsement(eventId, UUID.randomUUID(), UUID.randomUUID(), 1_000_000L, 1_500_000L, 200, 365);
 
         verify(adjRepo, never()).save(any());
         verify(peRepo, never()).save(any());
@@ -49,12 +49,13 @@ class BillingDedupAndAuthzTest {
     @Test
     void firstEndorsementEventInsertsAdjustmentAndLedger() {
         AdjustmentRepository adjRepo = mock(AdjustmentRepository.class);
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
         ProcessedEventRepository peRepo = mock(ProcessedEventRepository.class);
         String eventId = UUID.randomUUID().toString();
         when(peRepo.existsById(eventId)).thenReturn(false);
 
-        AdjustmentService svc = new AdjustmentService(adjRepo, peRepo);
-        svc.applyEndorsement(eventId, UUID.randomUUID(), 1_000_000L, 1_500_000L, 200, 365);
+        AdjustmentService svc = new AdjustmentService(adjRepo, invRepo, peRepo);
+        svc.applyEndorsement(eventId, UUID.randomUUID(), UUID.randomUUID(), 1_000_000L, 1_500_000L, 200, 365);
 
         verify(adjRepo, times(1)).save(any());
         verify(peRepo, times(1)).save(any());
@@ -67,7 +68,7 @@ class BillingDedupAndAuthzTest {
         String eventId = UUID.randomUUID().toString();
         when(peRepo.existsById(eventId)).thenReturn(true);
 
-        AdjustmentService svc = new AdjustmentService(adjRepo, peRepo);
+        AdjustmentService svc = new AdjustmentService(adjRepo, mock(InvoiceRepository.class), peRepo);
         svc.applyCancellation(eventId, UUID.randomUUID(), 2_000_000L, 100, 365);
 
         verify(adjRepo, never()).save(any());
@@ -79,7 +80,7 @@ class BillingDedupAndAuthzTest {
         AdjustmentRepository adjRepo = mock(AdjustmentRepository.class);
         ProcessedEventRepository peRepo = mock(ProcessedEventRepository.class);
 
-        AdjustmentService svc = new AdjustmentService(adjRepo, peRepo);
+        AdjustmentService svc = new AdjustmentService(adjRepo, mock(InvoiceRepository.class), peRepo);
         svc.applyCancellation(null, UUID.randomUUID(), 2_000_000L, 100, 365);
 
         verify(adjRepo, times(1)).save(any());

@@ -29,6 +29,7 @@ class RenewalChainPropertyTest {
     private Policy basePolicy(UUID customerId, int renewalNumber) {
         Policy p = new Policy();
         p.setPolicyId(UUID.randomUUID());
+        p.setOrderId(UUID.randomUUID());
         p.setCustomerId(customerId);
         p.setProductId("motor-001");
         p.setStatus(PolicyStatus.active);
@@ -39,11 +40,14 @@ class RenewalChainPropertyTest {
         p.setYearsSinceFirstPolicy(renewalNumber);
         p.setPolicyCountPrior(renewalNumber);
         p.setFinalPremiumVnd(1_000_000L);
+        p.setCreatedAt(OffsetDateTime.now());
         return p;
     }
 
-    private PolicyLifecycleService newService(PolicyRepository repo) {
-        return new PolicyLifecycleService(repo, mock(ExposureSegmentRepository.class),
+    private PolicyLifecycleService newService(PolicyRepository repo, ExposureSegmentRepository segRepo) {
+        when(segRepo.findByPolicyIdOrderByExposureSegmentSeqAsc(any())).thenReturn(java.util.List.of());
+        when(segRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        return new PolicyLifecycleService(repo, segRepo,
                 mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class),
                 mock(PricingClient.class), mock(OutboxPublisher.class));
     }
@@ -59,7 +63,7 @@ class RenewalChainPropertyTest {
         when(repo.findById(policyId)).thenReturn(Optional.of(basePolicy(customerId, oldRenewalNumber)));
         when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        PolicyLifecycleService svc = newService(repo);
+        PolicyLifecycleService svc = newService(repo, mock(ExposureSegmentRepository.class));
         PolicyResponse resp = svc.renew(policyId, subject);
 
         assertEquals(oldRenewalNumber + 1, resp.getRenewalNumber());
@@ -84,7 +88,7 @@ class RenewalChainPropertyTest {
         when(repo.findById(policyId)).thenReturn(Optional.of(basePolicy(customerId, 0)));
         when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        PolicyLifecycleService svc = newService(repo);
+        PolicyLifecycleService svc = newService(repo, mock(ExposureSegmentRepository.class));
         PolicyResponse resp = svc.renew(policyId, subject);
 
         assertEquals(1, resp.getRenewalNumber());
@@ -102,7 +106,7 @@ class RenewalChainPropertyTest {
         when(repo.findById(policyId)).thenReturn(Optional.of(basePolicy(customerId, 3)));
         when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        PolicyLifecycleService svc = newService(repo);
+        PolicyLifecycleService svc = newService(repo, mock(ExposureSegmentRepository.class));
         PolicyResponse resp = svc.renew(policyId, subject);
         assertEquals(4, resp.getRenewalNumber());
         assertTrue(resp.isRenewal());
