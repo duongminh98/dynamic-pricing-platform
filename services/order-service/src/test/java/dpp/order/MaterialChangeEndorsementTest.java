@@ -234,6 +234,54 @@ class MaterialChangeEndorsementTest {
         assertEquals(1_000_000L, ((Number) sent.get("deductible_vnd")).longValue());
     }
 
+    @Test
+    void healthRiskAttributeChangeIsMaterialAndGoesToReview() {
+        Policy policy = activePolicy();
+        PricingClient pricing = mock(PricingClient.class);
+        ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
+        EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
+        PolicyLifecycleService s = svc(policy, pricing, segRepo,
+                mock(PolicyDocumentRepository.class), mock(PolicyRepository.class), endRepo);
+
+        // A health attribute (not in the legacy motor key list) must now be material.
+        EndorsementRequest req = new EndorsementRequest();
+        Map<String, Object> change = new HashMap<>();
+        change.put("smoker", true);
+        change.put("bmi", 31.0);
+        req.setChange(change);
+        req.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
+
+        EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
+
+        assertEquals("pending_review", result.getStatus(), "any risk attribute change must be material");
+        verify(pricing, never()).rerate(anyString(), anyMap());
+        verify(endRepo, times(1)).save(any(EndorsementRequestEntity.class));
+    }
+
+    @Test
+    void pureCoverageDeductibleChangeIsNonMaterial() {
+        Policy policy = activePolicy();
+        PricingClient pricing = mock(PricingClient.class);
+        ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
+        EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
+        PolicyLifecycleService s = svc(policy, pricing, segRepo,
+                mock(PolicyDocumentRepository.class), mock(PolicyRepository.class), endRepo);
+
+        // Only sum-insured / retention in the change set: no re-rate, applied at once.
+        EndorsementRequest req = new EndorsementRequest();
+        Map<String, Object> change = new HashMap<>();
+        change.put("coverage_amount_vnd", 800_000_000L);
+        change.put("deductible_vnd", 500_000L);
+        req.setChange(change);
+        req.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
+
+        EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
+
+        assertEquals("applied", result.getStatus());
+        verify(pricing, never()).rerate(anyString(), anyMap());
+        verify(endRepo, never()).save(any(EndorsementRequestEntity.class));
+    }
+
     private EndorsementRequestEntity pendingEntity(Policy policy) {
         EndorsementRequestEntity e = new EndorsementRequestEntity();
         e.setEndorsementRequestId(UUID.randomUUID());

@@ -24,10 +24,15 @@ import java.util.UUID;
 @Service
 public class PolicyLifecycleService {
 
-    /** Attributes whose change is a Material_Change requiring re-rating + admin review (R23.7, BR-21). */
-    private static final Set<String> MATERIAL_CHANGE_KEYS = Set.of(
-            "vehicle_value_vnd", "vehicle_age", "engine_capacity_cc", "vehicle_segment",
-            "primary_use", "driver_count", "province");
+    /**
+     * Keys that are NOT risk attributes: changing only these (the priced sum
+     * insured / retention) does not require re-rating against the model. Any other
+     * attribute in the change set is a Material_Change requiring re-rating + admin
+     * review (R23.7, BR-21). This is line-agnostic so a health change (e.g. smoker,
+     * age, bmi) is treated the same as a motor change (e.g. vehicle_value_vnd).
+     */
+    private static final Set<String> NON_MATERIAL_KEYS = Set.of(
+            "coverage_amount_vnd", "deductible_vnd");
 
     private final PolicyRepository policyRepository;    private final ExposureSegmentRepository segmentRepository;
     private final PolicyDocumentRepository documentRepository;
@@ -289,11 +294,12 @@ public class PolicyLifecycleService {
     }
 
     private boolean isMaterialChange(Map<String, Object> change) {
-        if (change == null) {
+        if (change == null || change.isEmpty()) {
             return false;
         }
+        // Any risk attribute (anything other than pure coverage/deductible) is material.
         for (String key : change.keySet()) {
-            if (MATERIAL_CHANGE_KEYS.contains(key)) {
+            if (!NON_MATERIAL_KEYS.contains(key)) {
                 return true;
             }
         }
