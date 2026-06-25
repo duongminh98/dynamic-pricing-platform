@@ -143,6 +143,12 @@ public class ClaimsService {
     @Transactional
     public ClaimResponse misrepresentation(UUID claimId, MisrepresentationRequest request) {
         Claim claim = findClaim(claimId);
+        // R28.7: a misrepresentation sanction may only be applied to a claim in a valid
+        // state. A claim must be pending or approved; a rejected claim cannot be further
+        // sanctioned (invalid transition).
+        if (claim.getClaimStatus() != ClaimStatus.pending && claim.getClaimStatus() != ClaimStatus.approved) {
+            throw new ServiceException(ErrorCode.INVALID_CLAIM_TRANSITION);
+        }
         MisrepresentationSanction sanction = parseSanction(request.getSanction());
         claim.setMisrepresentationSanction(sanction);
 

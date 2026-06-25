@@ -29,26 +29,36 @@ public class PolicyLifecycleService {
             "vehicle_value_vnd", "vehicle_age", "engine_capacity_cc", "vehicle_segment",
             "primary_use", "driver_count", "province");
 
-    private final PolicyRepository policyRepository;
-    private final ExposureSegmentRepository segmentRepository;
+    private final PolicyRepository policyRepository;    private final ExposureSegmentRepository segmentRepository;
     private final PolicyDocumentRepository documentRepository;
+    private final EndorsementRequestRepository endorsementRequestRepository;
     private final PricingClient pricingClient;
     private final OutboxPublisher outboxPublisher;
     private final ObjectMapper objectMapper;
 
     public PolicyLifecycleService(PolicyRepository policyRepository, ExposureSegmentRepository segmentRepository,
-                                   PolicyDocumentRepository documentRepository, PricingClient pricingClient,
-                                   OutboxPublisher outboxPublisher) {
+                                   PolicyDocumentRepository documentRepository,
+                                   EndorsementRequestRepository endorsementRequestRepository,
+                                   PricingClient pricingClient, OutboxPublisher outboxPublisher) {
         this.policyRepository = policyRepository;
         this.segmentRepository = segmentRepository;
         this.documentRepository = documentRepository;
+        this.endorsementRequestRepository = endorsementRequestRepository;
         this.pricingClient = pricingClient;
         this.outboxPublisher = outboxPublisher;
         this.objectMapper = new ObjectMapper();
     }
 
+    /**
+     * Customer endorsement entry point.
+     *
+     * <p>R23.9 / design §4.2 security gate: a Material_Change is NOT applied here.
+     * It is persisted as a PENDING_REVIEW endorsement request that only an
+     * Administrator can approve/reject — the customer can never self-approve.
+     * Non-material changes (coverage/deductible only) are applied immediately.
+     */
     @Transactional
-    public PolicyResponse endorse(UUID policyId, EndorsementRequest request, String keycloakSubject) {
+    public EndorsementResult endorse(UUID policyId, EndorsementRequest request, String keycloakSubject) {
         Policy policy = findOwnedPolicy(policyId, keycloakSubject);
         if (policy.getStatus() != PolicyStatus.active) {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
@@ -62,28 +72,126 @@ public class PolicyLifecycleService {
         Map<String, Object> change = request.getChange();
         boolean material = isMaterialChange(change);
 
-        // R23.9 / BR-21: a Material_Change requires Administrator re-review.
         if (material) {
-            String decision = request.getReviewDecision();
-            if (decision == null || decision.equalsIgnoreCase("REJECT")) {
-                // Missing decision => still pending manual review; explicit REJECT => denied.
-                throw new ServiceException(ErrorCode.ORDER_NOT_APPROVED,
-                        "Material change endorsement not approved", Map.of("review_decision",
-                                decision == null ? "PENDING" : decision));
+            // R23.9: route to the Administrator review queue; do NOT apply yet.
+            EndorsementRequestEntity pending = new EndorsementRequestEntity();
+            pending.setEndorsementRequestId(UUID.randomUUID());
+            pending.setPolicyId(policyId);
+            pending.setCustomerId(policy.getCustomerId());
+            pending.setEffectiveDate(eff);
+            pending.setCoverageAmountVnd(request.getCoverageAmountVnd());
+            pending.setDeductibleVnd(request.getDeductibleVnd());
+            pending.setStatus(EndorsementStatus.PENDING_REVIEW);
+            pending.setCreatedAt(OffsetDateTime.now());
+            try {
+                pending.setChangeSet(objectMapper.writeValueAsString(change));
+            } catch (Exception e) {
+                pending.setChangeSet("{}");
             }
-            if (!decision.equalsIgnoreCase("APPROVE")) {
-                throw new ServiceException(ErrorCode.BAD_REQUEST, "Invalid review_decision",
-                        Map.of("review_decision", decision));
-            }
+            endorsementRequestRepository.save(pending);
+            return EndorsementResult.pendingReview(pending.getEndorsementRequestId());
         }
 
+        // Non-material change: apply immediately (no admin needed).
+        PolicyResponse applied = applyEndorsement(policy, change, eff,
+                request.getCoverageAmountVnd(), request.getDeductibleVnd(), false);
+        return EndorsementResult.applied(applied);
+    }
+
+    // ── Admin review of Material_Change endorsements (R23.9 / design §4.2) ──
+
+    @Transactional(readOnly = true)
+    public List<EndorsementRequestResponse> endorsementReviewQueue() {
+        return endorsementRequestRepository.findByStatusOrderByCreatedAtAsc(EndorsementStatus.PENDING_REVIEW)
+                .stream().map(this::toEndorsementResponse).collect(java.util.stream.Collectors.toList());
+    }
+
+    /** Administrator approves a pending Material_Change: apply it to the policy and mark APPROVED. */
+    @Transactional
+    public EndorsementRequestResponse approveEndorsement(UUID endorsementRequestId, String reviewer) {
+        EndorsementRequestEntity req = findPendingEndorsement(endorsementRequestId);
+        Policy policy = policyRepository.findById(req.getPolicyId())
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null));
+        if (policy.getStatus() != PolicyStatus.active) {
+            throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
+        }
+        Map<String, Object> change = readChangeSet(req);
+        // Apply the material change (re-rate remaining term + new segment + new document version).
+        applyEndorsement(policy, change, req.getEffectiveDate(),
+                req.getCoverageAmountVnd(), req.getDeductibleVnd(), true);
+        req.setStatus(EndorsementStatus.APPROVED);
+        req.setReviewedBy(reviewer);
+        req.setReviewedAt(OffsetDateTime.now());
+        endorsementRequestRepository.save(req);
+        return toEndorsementResponse(req);
+    }
+
+    /** Administrator rejects a pending Material_Change: no change to the policy. */
+    @Transactional
+    public EndorsementRequestResponse rejectEndorsement(UUID endorsementRequestId, String reason, String reviewer) {
+        EndorsementRequestEntity req = findPendingEndorsement(endorsementRequestId);
+        req.setStatus(EndorsementStatus.REJECTED);
+        req.setReviewReason(reason);
+        req.setReviewedBy(reviewer);
+        req.setReviewedAt(OffsetDateTime.now());
+        endorsementRequestRepository.save(req);
+        return toEndorsementResponse(req);
+    }
+
+    private EndorsementRequestEntity findPendingEndorsement(UUID endorsementRequestId) {
+        EndorsementRequestEntity req = endorsementRequestRepository.findById(endorsementRequestId)
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND,
+                        "Endorsement request not found", null));
+        // Only a PENDING_REVIEW request can be acted on; APPROVED/REJECTED are terminal.
+        if (req.getStatus() != EndorsementStatus.PENDING_REVIEW) {
+            throw new ServiceException(ErrorCode.ORDER_NOT_APPROVED,
+                    "Endorsement request is not pending review",
+                    Map.of("status", req.getStatus().name()));
+        }
+        return req;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readChangeSet(EndorsementRequestEntity req) {
+        try {
+            return objectMapper.readValue(req.getChangeSet(), Map.class);
+        } catch (Exception e) {
+            return new LinkedHashMap<>();
+        }
+    }
+
+    private EndorsementRequestResponse toEndorsementResponse(EndorsementRequestEntity req) {
+        EndorsementRequestResponse r = new EndorsementRequestResponse();
+        r.setEndorsementRequestId(req.getEndorsementRequestId());
+        r.setPolicyId(req.getPolicyId());
+        r.setCustomerId(req.getCustomerId());
+        r.setStatus(req.getStatus());
+        r.setChange(readChangeSet(req));
+        r.setEffectiveDate(req.getEffectiveDate());
+        r.setCoverageAmountVnd(req.getCoverageAmountVnd());
+        r.setDeductibleVnd(req.getDeductibleVnd());
+        r.setReviewReason(req.getReviewReason());
+        r.setReviewedBy(req.getReviewedBy());
+        r.setReviewedAt(req.getReviewedAt());
+        r.setCreatedAt(req.getCreatedAt());
+        return r;
+    }
+
+    /**
+     * Apply an endorsement to a policy: create the next exposure segment, optionally
+     * re-rate the remaining term (material change), bump the policy_document version,
+     * and emit the EndorsementApplied event with the real premium_old/premium_new.
+     */
+    private PolicyResponse applyEndorsement(Policy policy, Map<String, Object> change, OffsetDateTime eff,
+                                            Long coverageOverride, Long deductibleOverride, boolean material) {
+        UUID policyId = policy.getPolicyId();
         List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
         ExposureSegment prior = segments.isEmpty() ? null : segments.get(segments.size() - 1);
         int nextSeq = prior == null ? 0 : prior.getExposureSegmentSeq() + 1;
 
-        long newCoverage = request.getCoverageAmountVnd() != null ? request.getCoverageAmountVnd()
+        long newCoverage = coverageOverride != null ? coverageOverride
                 : (prior != null ? prior.getCoverageAmountVnd() : 0L);
-        long newDeductible = request.getDeductibleVnd() != null ? request.getDeductibleVnd()
+        long newDeductible = deductibleOverride != null ? deductibleOverride
                 : (prior != null ? prior.getDeductibleVnd() : 0L);
 
         long premiumOld = policy.getFinalPremiumVnd();

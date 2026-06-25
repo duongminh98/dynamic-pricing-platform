@@ -317,9 +317,9 @@ services:
   customer-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: customer-service
+        JAR_FILE: services/customer-service/build/libs/customer-service-0.1.0-SNAPSHOT.jar
     image: dpp/customer-service:latest
     container_name: dpp-customer-service-1
     environment:
@@ -343,9 +343,9 @@ services:
   customer-service-2:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: customer-service
+        JAR_FILE: services/customer-service/build/libs/customer-service-0.1.0-SNAPSHOT.jar
     image: dpp/customer-service:latest
     container_name: dpp-customer-service-2
     environment:
@@ -369,9 +369,9 @@ services:
   product-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: product-service
+        JAR_FILE: services/product-service/build/libs/product-service-0.1.0-SNAPSHOT.jar
     image: dpp/product-service:latest
     container_name: dpp-product-service-1
     environment:
@@ -395,9 +395,9 @@ services:
   product-service-2:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: product-service
+        JAR_FILE: services/product-service/build/libs/product-service-0.1.0-SNAPSHOT.jar
     image: dpp/product-service:latest
     container_name: dpp-product-service-2
     environment:
@@ -421,9 +421,9 @@ services:
   order-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: order-service
+        JAR_FILE: services/order-service/build/libs/order-service-0.1.0-SNAPSHOT.jar
     image: dpp/order-service:latest
     container_name: dpp-order-service-1
     environment:
@@ -449,9 +449,9 @@ services:
   order-service-2:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: order-service
+        JAR_FILE: services/order-service/build/libs/order-service-0.1.0-SNAPSHOT.jar
     image: dpp/order-service:latest
     container_name: dpp-order-service-2
     environment:
@@ -477,9 +477,9 @@ services:
   claims-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: claims-service
+        JAR_FILE: services/claims-service/build/libs/claims-service-0.1.0-SNAPSHOT.jar
     image: dpp/claims-service:latest
     container_name: dpp-claims-service-1
     environment:
@@ -505,9 +505,9 @@ services:
   claims-service-2:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: claims-service
+        JAR_FILE: services/claims-service/build/libs/claims-service-0.1.0-SNAPSHOT.jar
     image: dpp/claims-service:latest
     container_name: dpp-claims-service-2
     environment:
@@ -533,9 +533,9 @@ services:
   billing-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: billing-service
+        JAR_FILE: services/billing-service/build/libs/billing-service-0.1.0-SNAPSHOT.jar
     image: dpp/billing-service:latest
     container_name: dpp-billing-service-1
     environment:
@@ -560,9 +560,9 @@ services:
   billing-service-2:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: billing-service
+        JAR_FILE: services/billing-service/build/libs/billing-service-0.1.0-SNAPSHOT.jar
     image: dpp/billing-service:latest
     container_name: dpp-billing-service-2
     environment:
@@ -587,9 +587,9 @@ services:
   notification-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: notification-service
+        JAR_FILE: services/notification-service/build/libs/notification-service-0.1.0-SNAPSHOT.jar
     image: dpp/notification-service:latest
     container_name: dpp-notification-service-1
     environment:
@@ -620,9 +620,9 @@ services:
   notification-service-2:
     build:
       context: .
-      dockerfile: services/Dockerfile
+      dockerfile: services/Dockerfile.prebuilt
       args:
-        SERVICE: notification-service
+        JAR_FILE: services/notification-service/build/libs/notification-service-0.1.0-SNAPSHOT.jar
     image: dpp/notification-service:latest
     container_name: dpp-notification-service-2
     environment:

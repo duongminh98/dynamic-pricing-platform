@@ -21,6 +21,10 @@ public class SecurityConfig {
         http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         http.authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/actuator/prometheus", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                // INTERNAL owner-lookup endpoints: server-to-server only, no customer JWT.
+                // NOT routed publicly via Kong (see infra/kong/kong.yml). PRODUCTION: these
+                // must be restricted to the private network (network policy / firewall / mesh authz).
+                .requestMatchers("/internal/**").permitAll()
                 .anyRequest().authenticated()
         );
         http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(KeycloakRoleConverter.create())));

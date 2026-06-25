@@ -72,8 +72,8 @@ public class PolicyController {
     }
 
     @PostMapping("/{id}/endorsements")
-    public PolicyResponse endorse(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
-                                  @Valid @RequestBody EndorsementRequest request) {
+    public EndorsementResult endorse(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                     @Valid @RequestBody EndorsementRequest request) {
         return lifecycleService.endorse(id, request, jwt.getSubject());
     }
 

@@ -9,6 +9,7 @@ import dpp.order.dto.PolicyResponse;
 import dpp.order.entity.ExposureSegment;
 import dpp.order.entity.Policy;
 import dpp.order.entity.PolicyStatus;
+import dpp.order.repository.EndorsementRequestRepository;
 import dpp.order.repository.ExposureSegmentRepository;
 import dpp.order.repository.PolicyDocumentRepository;
 import dpp.order.repository.PolicyRepository;
@@ -58,7 +59,8 @@ class RenewalAndCancellationTest {
         when(pricing.rerate(eq("MOTOR_BASIC"), anyMap())).thenReturn(Map.of("final_premium_vnd", 1_750_000L));
 
         PolicyLifecycleService svc = new PolicyLifecycleService(repo, mock(ExposureSegmentRepository.class),
-                mock(PolicyDocumentRepository.class), pricing, mock(OutboxPublisher.class));
+                mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class),
+                pricing, mock(OutboxPublisher.class));
 
         PolicyResponse resp = svc.renew(old.getPolicyId(), SUBJECT);
 
@@ -94,7 +96,8 @@ class RenewalAndCancellationTest {
         when(segRepo.save(any(ExposureSegment.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo,
-                mock(PolicyDocumentRepository.class), mock(PricingClient.class), mock(OutboxPublisher.class));
+                mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class),
+                mock(PricingClient.class), mock(OutboxPublisher.class));
 
         CancelRequest req = new CancelRequest();
         req.setCancelDate(cancelDate);
@@ -115,7 +118,8 @@ class RenewalAndCancellationTest {
         when(repo.findById(policy.getPolicyId())).thenReturn(Optional.of(policy));
 
         PolicyLifecycleService svc = new PolicyLifecycleService(repo, mock(ExposureSegmentRepository.class),
-                mock(PolicyDocumentRepository.class), mock(PricingClient.class), mock(OutboxPublisher.class));
+                mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class),
+                mock(PricingClient.class), mock(OutboxPublisher.class));
 
         CancelRequest req = new CancelRequest();
         req.setCancelDate(policy.getPolicyExpirationDate().plusDays(5));

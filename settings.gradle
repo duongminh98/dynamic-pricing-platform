@@ -5,6 +5,12 @@ pluginManagement {
     }
 }
 
+// Allows Gradle to auto-provision the JDK 17 toolchain when only a newer JDK
+// (e.g. 21) is installed locally. CI uses setup-java@17 so this is a no-op there.
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
 rootProject.name = 'dynamic-pricing-platform'
 
 include 'services:common'

@@ -33,7 +33,8 @@ public class OrderClient {
     @SuppressWarnings("unchecked")
     public UUID getPolicyOwner(UUID policyId) {
         try {
-            Map<String, Object> policy = restTemplate.getForObject(baseUrl + "/policies/" + policyId, Map.class);
+            Map<String, Object> policy = restTemplate.getForObject(
+                    baseUrl + "/internal/policies/" + policyId + "/owner", Map.class);
             if (policy == null) {
                 return null;
             }
@@ -41,6 +42,28 @@ public class OrderClient {
             return customerId != null ? UUID.fromString(customerId.toString()) : null;
         } catch (Exception e) {
             throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null);
+        }
+    }
+
+    /**
+     * Fetch the owning customer_id for an order (task 20.13). Invoices created at
+     * order approval carry order_id with a null policy_id (the policy is issued
+     * only after payment), so the pay-ownership check resolves the owner through
+     * the order. Returns null when the order has no customer so callers can map it
+     * to a forbidden decision.
+     */
+    @SuppressWarnings("unchecked")
+    public UUID getOrderOwner(UUID orderId) {
+        try {
+            Map<String, Object> order = restTemplate.getForObject(
+                    baseUrl + "/internal/orders/" + orderId + "/owner", Map.class);
+            if (order == null) {
+                return null;
+            }
+            Object customerId = order.get("customer_id");
+            return customerId != null ? UUID.fromString(customerId.toString()) : null;
+        } catch (Exception e) {
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found", null);
         }
     }
 }

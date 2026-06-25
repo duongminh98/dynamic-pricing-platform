@@ -46,7 +46,7 @@ class BillingPersistenceTest {
     @Test
     void endorsementAdjustmentPersistsWithCreatedAt() {
         UUID policyId = UUID.randomUUID();
-        adjustmentService.applyEndorsement(policyId, 1_000_000L, 1_500_000L, 200, 365);
+        adjustmentService.applyEndorsement(UUID.randomUUID().toString(), policyId, 1_000_000L, 1_500_000L, 200, 365);
 
         List<Adjustment> saved = adjustmentRepository.findByPolicyIdOrderByCreatedAtAsc(policyId);
         assertEquals(1, saved.size(), "Adjustment must be inserted (created_at NOT NULL satisfied)");
@@ -57,13 +57,43 @@ class BillingPersistenceTest {
     @Test
     void cancellationAdjustmentPersistsWithCreatedAt() {
         UUID policyId = UUID.randomUUID();
-        adjustmentService.applyCancellation(policyId, 2_000_000L, 100, 365);
+        adjustmentService.applyCancellation(UUID.randomUUID().toString(), policyId, 2_000_000L, 100, 365);
 
         List<Adjustment> saved = adjustmentRepository.findByPolicyIdOrderByCreatedAtAsc(policyId);
         assertEquals(1, saved.size());
         assertNotNull(saved.get(0).getCreatedAt());
         assertEquals(AdjustmentReason.cancellation, saved.get(0).getReason());
         assertTrue(saved.get(0).getAmountVnd() >= 0);
+    }
+
+    @Test
+    void duplicateEventIdDoesNotCreateDuplicateAdjustment() {
+        UUID policyId = UUID.randomUUID();
+        String eventId = UUID.randomUUID().toString();
+        adjustmentService.applyEndorsement(eventId, policyId, 1_000_000L, 1_500_000L, 200, 365);
+        // Redelivery of the same event_id is a no-op (R33.4 dedup).
+        adjustmentService.applyEndorsement(eventId, policyId, 1_000_000L, 1_500_000L, 200, 365);
+
+        List<Adjustment> saved = adjustmentRepository.findByPolicyIdOrderByCreatedAtAsc(policyId);
+        assertEquals(1, saved.size(), "redelivered event must not create a second adjustment");
+    }
+
+    @Test
+    void invoiceCreationIsIdempotentOnOrderId() {
+        UUID orderId = UUID.randomUUID();
+        CreateInvoiceRequest req = new CreateInvoiceRequest();
+        req.setOrderId(orderId);
+        req.setAmountVnd(2_500_000L);
+        InvoiceResponse first = billingService.createInvoice(req);
+
+        // A commit-then-REST retry replays createInvoice with the same order_id.
+        CreateInvoiceRequest retry = new CreateInvoiceRequest();
+        retry.setOrderId(orderId);
+        retry.setAmountVnd(2_500_000L);
+        InvoiceResponse second = billingService.createInvoice(retry);
+
+        assertEquals(first.getInvoiceId(), second.getInvoiceId(), "retry must return the existing invoice");
+        assertTrue(invoiceRepository.findByOrderId(orderId).isPresent(), "invoice exists for the order");
     }
 
     @Test

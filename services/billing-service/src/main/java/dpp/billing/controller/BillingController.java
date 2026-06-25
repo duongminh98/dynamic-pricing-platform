@@ -35,8 +35,9 @@ public class BillingController {
     }
 
     @PostMapping("/invoices/{id}/pay")
-    public InvoiceResponse payInvoice(@PathVariable UUID id) {
-        return billingService.payInvoice(id);
+    public InvoiceResponse payInvoice(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
+        return billingService.payInvoiceAsCustomer(id, customerId);
     }
 
     @GetMapping("/invoices")

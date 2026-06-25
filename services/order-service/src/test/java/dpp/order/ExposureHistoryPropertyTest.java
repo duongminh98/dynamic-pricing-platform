@@ -8,6 +8,7 @@ import dpp.order.dto.PolicyResponse;
 import dpp.order.entity.ExposureSegment;
 import dpp.order.entity.Policy;
 import dpp.order.entity.PolicyStatus;
+import dpp.order.repository.EndorsementRequestRepository;
 import dpp.order.repository.ExposureSegmentRepository;
 import dpp.order.repository.PolicyDocumentRepository;
 import dpp.order.client.PricingClient;
@@ -61,7 +62,8 @@ class ExposureHistoryPropertyTest {
 
     private PolicyLifecycleService newService(PolicyRepository repo, ExposureSegmentRepository segRepo,
                                                PolicyDocumentRepository docRepo) {
-        return new PolicyLifecycleService(repo, segRepo, docRepo, mock(PricingClient.class), mock(OutboxPublisher.class));
+        return new PolicyLifecycleService(repo, segRepo, docRepo, mock(EndorsementRequestRepository.class),
+                mock(PricingClient.class), mock(OutboxPublisher.class));
     }
 
     @Property(tries = 100)

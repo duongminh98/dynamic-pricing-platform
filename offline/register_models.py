@@ -58,6 +58,18 @@ def main():
                 # deterministic one (idempotent across runs).
                 cfg["model_version"] = model_version_id
 
+                # BR-19 travel exemption (task 20.8b): GLM champions on
+                # monotonic-exempt lines do not carry artifact-level
+                # monotone_constraints (monotonic_applied=false). The exemption
+                # is recorded in champion_config.json via "monotonic_exempt" and
+                # honoured by the promote gate in pricing_engine/governance.py.
+                # We surface it here so registration is auditable; the model_version
+                # row still records the actual monotonic_applied value.
+                if cfg.get("monotonic_exempt"):
+                    print(f"  NOTE: {line} is MONOTONIC-EXEMPT "
+                          f"(algorithm={cfg.get('algorithm')}): "
+                          f"{cfg.get('monotonic_exempt_reason', 'no reason given')}")
+
                 cur.execute(
                     """
                     INSERT INTO model_version

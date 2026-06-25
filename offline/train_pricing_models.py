@@ -23,6 +23,26 @@ and recorded by offline/register_models.py (task 6.2). The feature column order 
 preserved from the existing artifacts to ensure monotone_constraints alignment between
 training and serving (HIGH RISK per design).
 
+Anti-leakage cross-validation (task 20.8a)
+------------------------------------------
+Cross-validation here uses **GroupKFold with k=5, grouped by ``customer_id``**.
+Because a single customer can hold several policies/exposures, a plain (random)
+KFold could place rows from the same customer in both the train and the
+validation fold, leaking customer-specific signal and inflating the score.
+Grouping by ``customer_id`` guarantees that every customer appears in exactly
+one fold, so the CV estimate reflects performance on *unseen customers*.
+
+WHERE GroupKFold runs:
+  * ``groupkfold_cv()`` in THIS module is the explicit, self-contained k=5
+    grouped CV step (call ``python offline/train_pricing_models.py --cv``).
+  * The full validation/comparison pipeline in
+    ``scripts/validate_pricing_models.py`` uses the same anti-leakage principle
+    via the ``time_based_grouped`` split (group_col=customer_id) declared in
+    ``data/synthetic_real/pricing_modeling_metadata.json``.
+  * See ``offline/README.md`` for the operational note.
+Running ``--cv`` only prints CV metrics; it NEVER overwrites the champion
+artifacts (artifact outputs are produced by the default ``main()`` path).
+
 Requirements: R12.7, R4.7, R29.5, R30.5, R31.3, R31.4 (design section 6.3, BR-19/C-8)
 """
 
@@ -182,8 +202,204 @@ def retrain_model(line: str, family: str, df: pd.DataFrame) -> lgb.LGBMRegressor
     return model
 
 
+# ── Anti-leakage cross-validation (task 20.8a) ──────────────────────────────
+# Number of folds and the grouping column for GroupKFold. Grouping by
+# customer_id prevents the same customer's rows landing in both train and
+# validation folds (entity leakage).
+CV_FOLDS = 5
+GROUP_COL = "customer_id"
+
+
+def normalized_gini(y_true, y_pred, sample_weight=None) -> float:
+    """Normalized (Somers' D-style) Gini coefficient used to rank risk ordering.
+
+    Equals 2*AUC-1 for a binary target and generalizes to continuous targets as
+    the ratio of the model's Gini to the Gini of a perfect ordering. Range
+    roughly [-1, 1]; higher means better risk discrimination. Returns 0.0 for a
+    degenerate (single-row or zero-variance) fold.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    w = np.ones_like(y_true) if sample_weight is None else np.asarray(sample_weight, dtype=float)
+    if len(y_true) < 2:
+        return 0.0
+
+    def _gini(order_key):
+        order = np.argsort(order_key, kind="mergesort")[::-1]
+        yt = y_true[order]
+        ww = w[order]
+        cum_w = np.cumsum(ww)
+        total_w = cum_w[-1]
+        if total_w <= 0:
+            return 0.0
+        cum_pos = np.cumsum(yt * ww)
+        total_pos = cum_pos[-1]
+        if total_pos == 0:
+            return 0.0
+        # Area between the Lorenz curve and the diagonal (weighted).
+        lorenz = cum_pos / total_pos
+        pop = cum_w / total_w
+        # Trapezoidal area under the Lorenz curve minus 0.5 (the diagonal).
+        area = np.sum((pop[1:] - pop[:-1]) * (lorenz[1:] + lorenz[:-1]) / 2.0)
+        return area - 0.5
+
+    pred_gini = _gini(y_pred)
+    perfect_gini = _gini(y_true)
+    if perfect_gini == 0:
+        return 0.0
+    return float(pred_gini / perfect_gini)
+
+
+def _build_target_and_weight(df_work: pd.DataFrame, family: str):
+    """Build (target, sample_weight) for a family, mirroring retrain_model().
+
+    Returns (None, None) when the required columns are missing.
+    """
+    if family == "freq":
+        if "earned_exposure_years" not in df_work.columns or "claim_count" not in df_work.columns:
+            return None, None
+        exposure = df_work["earned_exposure_years"].clip(lower=MIN_EXPOSURE).to_numpy()
+        return (df_work["claim_count"].to_numpy() / exposure), exposure
+    if family == "sev":
+        if "incurred_amount" not in df_work.columns:
+            return None, None
+        return df_work["incurred_amount"].to_numpy(), None
+    if family == "tw":
+        if "_loss_per_exposure" not in df_work.columns or "earned_exposure_years" not in df_work.columns:
+            return None, None
+        exposure = df_work["earned_exposure_years"].clip(lower=MIN_EXPOSURE).to_numpy()
+        return (df_work["_loss_per_exposure"].to_numpy() / exposure), exposure
+    raise ValueError(f"Unknown family: {family}")
+
+
+def groupkfold_cv(line: str, family: str, df: pd.DataFrame,
+                  k: int = CV_FOLDS, group_col: str = GROUP_COL) -> dict:
+    """Run k=5 GroupKFold CV (grouped by ``customer_id``) for one (line, family).
+
+    Anti-leakage: every customer (group) appears in exactly one validation fold,
+    so the score estimates performance on *unseen customers*. Each fold fits a
+    LightGBM with the SAME monotone_constraints as the champion artifact and
+    scores the held-out fold with the normalized Gini.
+
+    Returns a dict: {line, family, k, fold_gini: [...], mean_gini, n_groups, n_rows}.
+    Raises ValueError if the grouping column is absent (we refuse to silently
+    fall back to a leaky random split).
+    """
+    from sklearn.model_selection import GroupKFold
+
+    if group_col not in df.columns:
+        raise ValueError(
+            f"{line}/{family}: cannot run GroupKFold, missing group column "
+            f"'{group_col}' (required for anti-leakage CV)"
+        )
+
+    existing_path = MODELS_DIR / f"{line}__lgb_{family}.joblib"
+    if not existing_path.exists():
+        return {"line": line, "family": family, "k": k, "fold_gini": [],
+                "mean_gini": None, "n_groups": 0, "n_rows": 0,
+                "skipped": "no existing artifact"}
+
+    df_work = df
+    if family == "sev":
+        if "incurred_amount" not in df.columns:
+            return {"line": line, "family": family, "k": k, "fold_gini": [],
+                    "mean_gini": None, "n_groups": 0, "n_rows": 0,
+                    "skipped": "no incurred_amount"}
+        df_work = df[df["incurred_amount"] > 0].copy()
+
+    target, sample_weight = _build_target_and_weight(df_work, family)
+    if target is None:
+        return {"line": line, "family": family, "k": k, "fold_gini": [],
+                "mean_gini": None, "n_groups": 0, "n_rows": 0,
+                "skipped": "missing target columns"}
+
+    existing = joblib.load(existing_path)
+    existing_features = list(existing.feature_name_)
+    monotone_constraints = build_monotone_constraints(existing_features, line)
+    feat_df = prepare_features(df_work, existing_features).reset_index(drop=True)
+    target = np.asarray(target, dtype=float)
+    groups = df_work[group_col].to_numpy()
+    n_groups = len(np.unique(groups))
+
+    # GroupKFold needs at least k distinct groups.
+    n_splits = min(k, n_groups)
+    if n_splits < 2:
+        return {"line": line, "family": family, "k": k, "fold_gini": [],
+                "mean_gini": None, "n_groups": int(n_groups), "n_rows": len(df_work),
+                "skipped": f"only {n_groups} group(s); need >= 2"}
+
+    base_params = existing.get_params()
+    base_params["monotone_constraints"] = monotone_constraints
+    base_params["verbose"] = -1
+
+    gkf = GroupKFold(n_splits=n_splits)
+    fold_gini = []
+    for train_idx, val_idx in gkf.split(feat_df, target, groups=groups):
+        x_tr, x_val = feat_df.iloc[train_idx], feat_df.iloc[val_idx]
+        y_tr, y_val = target[train_idx], target[val_idx]
+        w_tr = sample_weight[train_idx] if sample_weight is not None else None
+        w_val = sample_weight[val_idx] if sample_weight is not None else None
+        fold_model = lgb.LGBMRegressor(**base_params)
+        fold_model.fit(x_tr, y_tr, sample_weight=w_tr)
+        preds = fold_model.predict(x_val)
+        fold_gini.append(normalized_gini(y_val, preds, sample_weight=w_val))
+
+    mean_gini = float(np.mean(fold_gini)) if fold_gini else None
+    return {"line": line, "family": family, "k": n_splits,
+            "fold_gini": [float(g) for g in fold_gini], "mean_gini": mean_gini,
+            "n_groups": int(n_groups), "n_rows": len(df_work)}
+
+
+def run_cv(lines: list[str] | None = None, families: list[str] | None = None) -> list[dict]:
+    """Run GroupKFold CV across lines/families and return the per-(line,family) results.
+
+    This is an evaluation-only path: it does NOT write or overwrite any champion
+    artifact. Used by ``python offline/train_pricing_models.py --cv``.
+    """
+    lines = lines or LINES
+    families = families or ["freq", "sev", "tw"]
+    results = []
+    for line in lines:
+        freq_path = DATA_DIR / METADATA["freq_tables"][line]
+        df_freq = pd.read_csv(freq_path, low_memory=False)
+        sev_path = DATA_DIR / METADATA["sev_tables"][line]
+        df_sev = pd.read_csv(sev_path, low_memory=False) if sev_path.exists() else df_freq
+        if "exposure_id" in df_freq.columns and {"exposure_id", "incurred_amount"}.issubset(df_sev.columns):
+            loss_by_expo = df_sev.groupby("exposure_id")["incurred_amount"].sum()
+            df_freq["_loss_per_exposure"] = df_freq["exposure_id"].map(loss_by_expo).fillna(0.0)
+        for family in families:
+            df = df_sev if family == "sev" else df_freq
+            try:
+                res = groupkfold_cv(line, family, df)
+            except ValueError as e:
+                res = {"line": line, "family": family, "error": str(e)}
+            results.append(res)
+            mg = res.get("mean_gini")
+            mg_s = f"{mg:.4f}" if isinstance(mg, float) else str(mg)
+            note = res.get("skipped") or res.get("error") or ""
+            print(f"  CV {line}__{family}: mean_gini={mg_s} "
+                  f"(k={res.get('k')}, groups={res.get('n_groups')}) {note}")
+    return results
+
+
 def main():
-    """Re-fit all 18 LightGBM champion models with monotone_constraints."""
+    """Re-fit all 18 LightGBM champion models with monotone_constraints.
+
+    With ``--cv`` it instead runs the k=5 GroupKFold (grouped by customer_id)
+    anti-leakage cross-validation (task 20.8a) and prints the metrics WITHOUT
+    touching any champion artifact.
+    """
+    import argparse
+    parser = argparse.ArgumentParser(description="Offline champion training / CV")
+    parser.add_argument("--cv", action="store_true",
+                        help="Run k=5 GroupKFold (by customer_id) CV only; do not write artifacts")
+    args, _ = parser.parse_known_args()
+
+    if args.cv:
+        print(f"Running GroupKFold k={CV_FOLDS} (grouped by {GROUP_COL}) anti-leakage CV...")
+        run_cv()
+        return
+
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     results = []

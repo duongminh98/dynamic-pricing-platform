@@ -164,13 +164,22 @@ def compute_calibration_drift(line: str, data_dir: pathlib.Path = DATA_DIR) -> f
     return abs(current_rate - train_rate) / train_rate
 
 
-def evaluate_line(line: str, config: dict) -> dict:
-    """Compute drift metrics for a line and determine if recalibration is needed."""
+def evaluate_line(line: str, config: dict,
+                  psi_value: float | None = None,
+                  cal_value: float | None = None) -> dict:
+    """Compute drift metrics for a line and determine if recalibration is needed.
+
+    ``psi_value`` / ``cal_value`` may be supplied directly (e.g. to inject
+    drifted data in tests or to score precomputed production metrics); when
+    omitted they are computed from the dataset.
+    """
     psi_threshold = config.get("drift_threshold_psi", 0.2)
     cal_threshold = config.get("drift_threshold_calibration", 0.15)
 
-    psi_value = compute_feature_drift(line)
-    cal_value = compute_calibration_drift(line)
+    if psi_value is None:
+        psi_value = compute_feature_drift(line)
+    if cal_value is None:
+        cal_value = compute_calibration_drift(line)
 
     psi_drift = psi_value > psi_threshold
     cal_drift = cal_value > cal_threshold

@@ -89,11 +89,15 @@ def _predict_pure_premium(selection: dict, feature_df) -> float:
     if family == "tw":
         # Tweedie: prediction is already loss per exposure-year (pure premium).
         return float(model.predict(feature_df)[0])
-    if family == "freq_sev":
-        freq_model = model
-        sev_model = model  # placeholder; caller supplies both via selection
-        return float(freq_model.predict(feature_df)[0]) * float(sev_model.predict(feature_df)[0])
     # Generic fallback: direct prediction.
+    #
+    # NOTE: the dedicated frequency x severity path lives in ``quote_freq_sev``,
+    # which loads the distinct freq and sev champion artifacts and multiplies
+    # their predictions. ``select_model`` only ever resolves a single champion
+    # model whose ``family`` is "tw" (or, defensively, "freq"/"sev"); it never
+    # yields a "freq_sev" family here. The previous "freq_sev" branch multiplied
+    # a single model by itself (model x model), which was dead and incorrect, so
+    # it has been removed (task 20.8c).
     return float(model.predict(feature_df)[0])
 
 

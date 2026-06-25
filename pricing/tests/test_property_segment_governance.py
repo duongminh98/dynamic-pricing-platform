@@ -39,6 +39,67 @@ def _seed_champion(db, line, version_id):
     db.add(ChampionAssignment(assignment_id=str(uuid.uuid4()), line=line, model_version_id=version_id, is_current=True,
                               created_at=datetime.datetime.now(datetime.timezone.utc)))
 
+
+def _seed_model_algo(db, line, gini, monotonic, algorithm, version_id=None):
+    """Seed a ModelVersion with an explicit algorithm (for exemption tests)."""
+    version_id = version_id or str(uuid.uuid4())
+    db.add(ModelVersion(
+        model_version_id=version_id, line=line, algorithm=algorithm,
+        gini=gini, rmse=0.0, mae=0.0, deviance=0.0,
+        trained_at=datetime.datetime.now(datetime.timezone.utc),
+        dataset_desc="synthetic_real", monotonic_applied=monotonic))
+    return version_id
+
+
+# --------------------------------------------------------------------------
+# BR-19 travel exemption (task 20.8b): a GLM champion on a monotonic-exempt
+# line may promote on Gini alone; tree/LightGBM candidates still need monotonic.
+# --------------------------------------------------------------------------
+def test_travel_glm_promotes_without_monotonic_exempt():
+    db = _fresh_session()
+    try:
+        champ_id = _seed_model_algo(db, "travel", 0.50, monotonic=False, algorithm="GLM")
+        _seed_champion(db, "travel", champ_id)
+        chall_id = _seed_model_algo(db, "travel", 0.60, monotonic=False, algorithm="GLM")
+        db.commit()
+        result = promote_champion(db, "travel", chall_id)
+        # Exempt GLM line: monotonic_applied=False is allowed; Gini improved -> promote.
+        assert result["promoted"] is True
+        assert result["champion"] == chall_id
+    finally:
+        db.close()
+
+
+def test_travel_lightgbm_candidate_still_requires_monotonic():
+    db = _fresh_session()
+    try:
+        champ_id = _seed_model_algo(db, "travel", 0.50, monotonic=False, algorithm="GLM")
+        _seed_champion(db, "travel", champ_id)
+        # A tree/LightGBM candidate is NOT exempt even on an exempt line.
+        chall_id = _seed_model_algo(db, "travel", 0.70, monotonic=False, algorithm="LightGBM")
+        db.commit()
+        result = promote_champion(db, "travel", chall_id)
+        assert result["promoted"] is False
+        assert result["reason"] == "MONOTONIC_NOT_APPLIED"
+    finally:
+        db.close()
+
+
+def test_non_exempt_glm_line_still_requires_monotonic():
+    db = _fresh_session()
+    try:
+        # health is NOT in the exemption set: even a GLM must satisfy monotonic.
+        champ_id = _seed_model_algo(db, "health", 0.50, monotonic=True, algorithm="GLM")
+        _seed_champion(db, "health", champ_id)
+        chall_id = _seed_model_algo(db, "health", 0.70, monotonic=False, algorithm="GLM")
+        db.commit()
+        result = promote_champion(db, "health", chall_id)
+        assert result["promoted"] is False
+        assert result["reason"] == "MONOTONIC_NOT_APPLIED"
+    finally:
+        db.close()
+
+
 # --------------------------------------------------------------------------
 # Property 24: controlled champion promotion (BR-23)
 # --------------------------------------------------------------------------

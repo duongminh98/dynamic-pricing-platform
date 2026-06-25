@@ -7,35 +7,115 @@ on:
     branches: [master]
 
 jobs:
+  # ── Java microservices: build, unit/property tests, coverage gate ──
   java:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres-customer:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: customer_db
+          POSTGRES_USER: platform_user
+          POSTGRES_PASSWORD: platform_password_dev_only
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U platform_user -d customer_db"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      postgres-product:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: product_db
+          POSTGRES_USER: platform_user
+          POSTGRES_PASSWORD: platform_password_dev_only
+        ports: ["5434:5432"]
+        options: >-
+          --health-cmd "pg_isready -U platform_user -d product_db"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      postgres-order:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: order_db
+          POSTGRES_USER: platform_user
+          POSTGRES_PASSWORD: platform_password_dev_only
+        ports: ["5435:5432"]
+        options: >-
+          --health-cmd "pg_isready -U platform_user -d order_db"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      postgres-claims:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: claims_db
+          POSTGRES_USER: platform_user
+          POSTGRES_PASSWORD: platform_password_dev_only
+        ports: ["5437:5432"]
+        options: >-
+          --health-cmd "pg_isready -U platform_user -d claims_db"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      postgres-billing:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: billing_db
+          POSTGRES_USER: platform_user
+          POSTGRES_PASSWORD: platform_password_dev_only
+        ports: ["5438:5432"]
+        options: >-
+          --health-cmd "pg_isready -U platform_user -d billing_db"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      postgres-notification:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: notification_db
+          POSTGRES_USER: platform_user
+          POSTGRES_PASSWORD: platform_password_dev_only
+        ports: ["5439:5432"]
+        options: >-
+          --health-cmd "pg_isready -U platform_user -d notification_db"
+          --health-interval 10s --health-timeout 5s --health-retries 5
     env:
+      POSTGRES_USER: platform_user
+      POSTGRES_PASSWORD: platform_password_dev_only
+      CUSTOMER_DB_HOST: localhost
+      CUSTOMER_DB_PORT: 5433
+      CUSTOMER_DB_NAME: customer_db
       PRODUCT_DB_HOST: localhost
       PRODUCT_DB_PORT: 5434
       PRODUCT_DB_NAME: product_db
-      POSTGRES_USER: platform_user
-      POSTGRES_PASSWORD: platform_password_dev_only
+      ORDER_DB_HOST: localhost
+      ORDER_DB_PORT: 5435
+      ORDER_DB_NAME: order_db
+      CLAIMS_DB_HOST: localhost
+      CLAIMS_DB_PORT: 5437
+      CLAIMS_DB_NAME: claims_db
+      BILLING_DB_HOST: localhost
+      BILLING_DB_PORT: 5438
+      BILLING_DB_NAME: billing_db
+      NOTIFICATION_DB_HOST: localhost
+      NOTIFICATION_DB_PORT: 5439
+      NOTIFICATION_DB_NAME: notification_db
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: 17
+          java-version: '17'
           distribution: temurin
           cache: gradle
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
-      - name: Build and test Java services with coverage
-        run: ./gradlew clean test jacocoTestReport
-      - name: Verify coverage >= 70%
+      # `test` runs unit/property + product @SpringBootTest; jacocoTestReport is
+      # wired as finalizedBy test in build.gradle, so coverage data is produced.
+      - name: Run tests
+        run: ./gradlew clean test
+      - name: Verify coverage gate (service subprojects)
         run: ./gradlew jacocoTestCoverageVerification
-      - name: Upload coverage reports
+      - name: Upload coverage HTML
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: java-coverage
           path: services/*/build/reports/jacoco/test/html/
 
+  # ── Python pricing engine + offline pipeline: tests + coverage ──
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -45,87 +125,24 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-      - name: Install pricing dependencies
-        run: pip install -r pricing/requirements.txt
+      - name: Install dependencies
+        run: pip install -r pricing/requirements.txt pytest-cov
       - name: Run pricing tests with coverage
         working-directory: pricing
-        run: |
-          pip install pytest-cov
-          python -m pytest tests/ --cov=app --cov=common --cov-fail-under=70 -q
-          python -m pytest common/tests/ -q
-      - name: Upload coverage reports
+        run: python -m pytest tests/ --cov=app --cov=common --cov-report=term-missing --cov-report=xml -q
+      - name: Run pricing common tests
+        working-directory: pricing
+        run: python -m pytest common/tests/ -q
+      - name: Run offline pipeline tests (monotonic gate + model lifecycle)
+        run: python -m pytest offline/tests -q
+      - name: Upload coverage XML
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: python-coverage
-          path: pricing/.coverage
+          path: pricing/coverage.xml
 
-  docker-build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build customer-service image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/Dockerfile
-          build-args: SERVICE=customer-service
-          push: false
-          load: true
-      - name: Build product-service image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/Dockerfile
-          build-args: SERVICE=product-service
-          push: false
-          load: true
-      - name: Build order-service image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/Dockerfile
-          build-args: SERVICE=order-service
-          push: false
-          load: true
-      - name: Build billing-service image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/Dockerfile
-          build-args: SERVICE=billing-service
-          push: false
-          load: true
-      - name: Build claims-service image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/Dockerfile
-          build-args: SERVICE=claims-service
-          push: false
-          load: true
-      - name: Build notification-service image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/Dockerfile
-          build-args: SERVICE=notification-service
-          push: false
-          load: true
-      - name: Build pricing-service image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: pricing/Dockerfile
-          push: false
-          load: true
-      - name: Build frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: frontend/Dockerfile
-          push: false
-          load: true
+# NOTE: Docker image build (Task 24.4) is intentionally NOT here yet — it
+# depends on Task 20.19 which creates services/Dockerfile, pricing/Dockerfile
+# and frontend/Dockerfile. Enable the `docker-build` job after those exist.
+# CD/deploy (push to ECR + ECS update) belongs to Task 22.5 (after AWS infra).

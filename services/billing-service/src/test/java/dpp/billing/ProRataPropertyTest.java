@@ -2,6 +2,7 @@ package dpp.billing;
 
 import dpp.billing.entity.*;
 import dpp.billing.repository.AdjustmentRepository;
+import dpp.billing.repository.ProcessedEventRepository;
 import dpp.billing.service.AdjustmentService;
 import net.jqwik.api.*;
 import net.jqwik.api.constraints.*;
@@ -24,9 +25,9 @@ class ProRataPropertyTest {
             @ForAll @LongRange(min = 0, max = 365) long remainingDays,
             @ForAll @LongRange(min = 1, max = 365) long termDays) {
         AdjustmentRepository repo = mock(AdjustmentRepository.class);
-        AdjustmentService service = new AdjustmentService(repo);
+        AdjustmentService service = new AdjustmentService(repo, mock(ProcessedEventRepository.class));
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        service.applyEndorsement(UUID.randomUUID(), premiumOld, premiumNew, remainingDays, termDays);
+        service.applyEndorsement(UUID.randomUUID().toString(), UUID.randomUUID(), premiumOld, premiumNew, remainingDays, termDays);
         ArgumentCaptor<Adjustment> captor = ArgumentCaptor.forClass(Adjustment.class);
         verify(repo, times(1)).save(captor.capture());
         Adjustment adj = captor.getValue();
@@ -49,9 +50,9 @@ class ProRataPropertyTest {
             @ForAll @LongRange(min = 0, max = 365) long remainingDays,
             @ForAll @LongRange(min = 1, max = 365) long termDays) {
         AdjustmentRepository repo = mock(AdjustmentRepository.class);
-        AdjustmentService service = new AdjustmentService(repo);
+        AdjustmentService service = new AdjustmentService(repo, mock(ProcessedEventRepository.class));
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        service.applyCancellation(UUID.randomUUID(), finalPremiumVnd, remainingDays, termDays);
+        service.applyCancellation(UUID.randomUUID().toString(), UUID.randomUUID(), finalPremiumVnd, remainingDays, termDays);
         ArgumentCaptor<Adjustment> captor = ArgumentCaptor.forClass(Adjustment.class);
         verify(repo, times(1)).save(captor.capture());
         Adjustment adj = captor.getValue();
@@ -68,9 +69,9 @@ class ProRataPropertyTest {
     @Test
     void remainingFractionClampedToRange() {
         AdjustmentRepository repo = mock(AdjustmentRepository.class);
-        AdjustmentService service = new AdjustmentService(repo);
+        AdjustmentService service = new AdjustmentService(repo, mock(ProcessedEventRepository.class));
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        service.applyCancellation(UUID.randomUUID(), 1000000, 400, 365);
+        service.applyCancellation(UUID.randomUUID().toString(), UUID.randomUUID(), 1000000, 400, 365);
         ArgumentCaptor<Adjustment> captor = ArgumentCaptor.forClass(Adjustment.class);
         verify(repo).save(captor.capture());
         assertTrue(captor.getValue().getAmountVnd() <= 1000000);

@@ -16,7 +16,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 @Service
 @Transactional
@@ -56,23 +55,6 @@ public class RateVersionService {
                         .createdAt(rv.getCreatedAt())
                         .build())
                 .toList();
-    }
-
-    public LoadingFactor addLoadingFactor(UUID rateVersionId, String line, Double loadingValue) {
-        if (!VALID_LINES.contains(line)) {
-            throw new ServiceException(ErrorCode.BAD_REQUEST,
-                    Map.of("line", line, "valid_lines", VALID_LINES));
-        }
-        rateVersionRepository.findById(rateVersionId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND,
-                        Map.of("rate_version_id", rateVersionId.toString(), "reason", "not found")));
-
-        LoadingFactor lf = LoadingFactor.builder()
-                .rateVersionId(rateVersionId)
-                .line(line)
-                .loadingValue(loadingValue)
-                .build();
-        return loadingFactorRepository.save(lf);
     }
 
     /**

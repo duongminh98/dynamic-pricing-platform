@@ -16,6 +16,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from ..database import ModelVersion, ChampionAssignment, AuditTrail, EventOutbox
+from ..config import is_monotonic_exempt
 from . import loader
 from common.errors import ErrorCode, ServiceException
 
@@ -55,8 +56,16 @@ def promote_champion(db: Session, line: str, challenger_version_id: str,
     challenger_metric = getattr(challenger, PRIMARY_METRIC, 0.0) or 0.0
     current_metric = getattr(current, PRIMARY_METRIC, 0.0) or 0.0 if current else -1.0
 
-    # BR-23: promote iff metric improves AND monotonic constraint satisfied.
-    if not challenger.monotonic_applied:
+    # BR-23: promote iff metric improves AND the monotonic constraint is satisfied.
+    #
+    # BR-19 travel exemption (task 20.8b): a GLM champion on a monotonic-exempt
+    # line (see config.MONOTONIC_EXEMPT_LINES) does not carry artifact-level
+    # monotone_constraints; its coefficient signs are enforced at fit time, so it
+    # may promote on the Gini criterion alone. The exemption is GLM-only: any
+    # tree / LightGBM candidate STILL requires monotonic_applied=true, regardless
+    # of line, so BR-19 stays enforced for non-exempt lines.
+    exempt = is_monotonic_exempt(line, challenger.algorithm)
+    if not exempt and not challenger.monotonic_applied:
         _audit(db, line, "CHAMPION_PROMOTE_REJECTED",
                {"reason": "monotonic_not_applied", "challenger": challenger_version_id},
                actor)

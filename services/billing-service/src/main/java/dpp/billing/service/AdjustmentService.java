@@ -2,6 +2,7 @@ package dpp.billing.service;
 
 import dpp.billing.entity.*;
 import dpp.billing.repository.AdjustmentRepository;
+import dpp.billing.repository.ProcessedEventRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,14 +12,26 @@ import java.util.UUID;
 @Service
 public class AdjustmentService {
 
-    private final AdjustmentRepository adjustmentRepository;
+    static final String CONSUMER_ENDORSEMENT = "billing.endorsement-applied";
+    static final String CONSUMER_CANCELLATION = "billing.policy-cancelled";
 
-    public AdjustmentService(AdjustmentRepository adjustmentRepository) {
+    private final AdjustmentRepository adjustmentRepository;
+    private final ProcessedEventRepository processedEventRepository;
+
+    public AdjustmentService(AdjustmentRepository adjustmentRepository,
+                             ProcessedEventRepository processedEventRepository) {
         this.adjustmentRepository = adjustmentRepository;
+        this.processedEventRepository = processedEventRepository;
     }
 
     @Transactional
-    public void applyEndorsement(UUID policyId, long premiumOld, long premiumNew, long remainingDays, long termDays) {
+    public void applyEndorsement(String eventId, UUID policyId, long premiumOld, long premiumNew,
+                                 long remainingDays, long termDays) {
+        // R33.4: dedup on event_id within the same TX as the Adjustment insert. A
+        // redelivered EndorsementApplied is a no-op (no duplicate additional charge / refund).
+        if (alreadyProcessed(eventId)) {
+            return;
+        }
         double fraction = termDays > 0 ? remainingDays / (double) termDays : 0;
         fraction = Math.max(0.0, Math.min(1.0, fraction));
         long delta = Math.round((premiumNew - premiumOld) * fraction);
@@ -30,10 +43,17 @@ public class AdjustmentService {
         adj.setReason(AdjustmentReason.endorsement);
         adj.setCreatedAt(OffsetDateTime.now());
         adjustmentRepository.save(adj);
+        recordProcessed(eventId, CONSUMER_ENDORSEMENT);
     }
 
     @Transactional
-    public void applyCancellation(UUID policyId, long finalPremiumVnd, long remainingDays, long termDays) {
+    public void applyCancellation(String eventId, UUID policyId, long finalPremiumVnd,
+                                  long remainingDays, long termDays) {
+        // R33.4: dedup on event_id within the same TX as the Adjustment insert. A
+        // redelivered PolicyCancelled is a no-op (no duplicate refund).
+        if (alreadyProcessed(eventId)) {
+            return;
+        }
         double fraction = termDays > 0 ? remainingDays / (double) termDays : 0;
         fraction = Math.max(0.0, Math.min(1.0, fraction));
         long refund = Math.round(finalPremiumVnd * fraction);
@@ -45,5 +65,21 @@ public class AdjustmentService {
         adj.setReason(AdjustmentReason.cancellation);
         adj.setCreatedAt(OffsetDateTime.now());
         adjustmentRepository.save(adj);
+        recordProcessed(eventId, CONSUMER_CANCELLATION);
+    }
+
+    private boolean alreadyProcessed(String eventId) {
+        return eventId != null && processedEventRepository.existsById(eventId);
+    }
+
+    private void recordProcessed(String eventId, String consumer) {
+        if (eventId == null) {
+            return;
+        }
+        ProcessedEvent pe = new ProcessedEvent();
+        pe.setEventId(eventId);
+        pe.setConsumer(consumer);
+        pe.setProcessedAt(OffsetDateTime.now());
+        processedEventRepository.save(pe);
     }
 }

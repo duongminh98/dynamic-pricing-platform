@@ -42,17 +42,29 @@ public class BillingService {
         this.objectMapper = new ObjectMapper();
     }
 
+    /**
+     * Create an invoice for an order, idempotent on order_id (task 20.11, R33.4).
+     *
+     * <p>Order_Service issues this call after committing the order (commit-then-REST),
+     * so a transient failure or retry can replay it. Returning the existing invoice
+     * instead of inserting a new one keeps approve() retries safe and prevents
+     * duplicate invoices for the same order. A UNIQUE constraint on invoice.order_id
+     * (Flyway V4) is the backstop if two replays race past this check.</p>
+     */
     @Transactional
     public InvoiceResponse createInvoice(CreateInvoiceRequest request) {
-        Invoice invoice = new Invoice();
-        invoice.setInvoiceId(UUID.randomUUID());
-        invoice.setOrderId(request.getOrderId());
-        invoice.setPolicyId(request.getPolicyId());
-        invoice.setAmountVnd(request.getAmountVnd());
-        invoice.setStatus(InvoiceStatus.unpaid);
-        invoice.setCreatedAt(OffsetDateTime.now());
-        invoice = invoiceRepository.save(invoice);
-        return toResponse(invoice);
+        return invoiceRepository.findByOrderId(request.getOrderId())
+                .map(this::toResponse)
+                .orElseGet(() -> {
+                    Invoice invoice = new Invoice();
+                    invoice.setInvoiceId(UUID.randomUUID());
+                    invoice.setOrderId(request.getOrderId());
+                    invoice.setPolicyId(request.getPolicyId());
+                    invoice.setAmountVnd(request.getAmountVnd());
+                    invoice.setStatus(InvoiceStatus.unpaid);
+                    invoice.setCreatedAt(OffsetDateTime.now());
+                    return toResponse(invoiceRepository.save(invoice));
+                });
     }
 
     @Transactional
@@ -73,6 +85,40 @@ public class BillingService {
             throw new RuntimeException("Failed to enqueue InvoicePaid event", e);
         }
         return toResponse(invoice);
+    }
+
+    /**
+     * Customer-initiated payment of an invoice (task 20.13, R33.5, BR-10).
+     *
+     * <p>Enforces data-ownership isolation: the JWT subject must own the order
+     * (or policy) the invoice belongs to. Ownership is resolved through
+     * Order_Service via {@link OrderClient}; a mismatch maps to FORBIDDEN_RESOURCE
+     * so a user cannot pay another customer's invoice. The server-to-server VNPAY
+     * IPN path uses {@link #payInvoice(UUID)} directly and is not subject to this
+     * check (the gateway/IPN signature is its trust boundary).</p>
+     */
+    @Transactional
+    public InvoiceResponse payInvoiceAsCustomer(UUID invoiceId, UUID callerCustomerId) {
+        Invoice invoice = invoiceRepository.findById(invoiceId)
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Invoice not found", null));
+        UUID owner = resolveInvoiceOwner(invoice);
+        if (owner == null || !owner.equals(callerCustomerId)) {
+            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
+        }
+        return payInvoice(invoiceId);
+    }
+
+    /**
+     * Resolve the owning customer of an invoice. Invoices created at order
+     * approval carry order_id with a null policy_id (the policy is issued only
+     * after payment), so the order is the primary resolution path; the policy
+     * path covers invoices that already reference an issued policy.
+     */
+    private UUID resolveInvoiceOwner(Invoice invoice) {
+        if (invoice.getPolicyId() != null) {
+            return orderClient.getPolicyOwner(invoice.getPolicyId());
+        }
+        return orderClient.getOrderOwner(invoice.getOrderId());
     }
 
     @Transactional(readOnly = true)
