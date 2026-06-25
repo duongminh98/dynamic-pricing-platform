@@ -182,6 +182,58 @@ class MaterialChangeEndorsementTest {
         verify(endRepo, never()).save(any(EndorsementRequestEntity.class));
     }
 
+    @Test
+    void adminApproveReRatesWithFullMergedProfile() {
+        Policy policy = activePolicy();
+        PricingClient pricing = mock(PricingClient.class);
+        when(pricing.rerate(eq("MOTOR_BASIC"), anyMap()))
+                .thenReturn(Map.of("final_premium_vnd", 2_500_000L));
+        ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
+        PolicyDocumentRepository docRepo = mock(PolicyDocumentRepository.class);
+        PolicyRepository repo = mock(PolicyRepository.class);
+        EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
+        when(repo.findById(policy.getPolicyId())).thenReturn(Optional.of(policy));
+        when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(docRepo.findByPolicyIdOrderByVersionDesc(policy.getPolicyId())).thenReturn(List.of());
+        when(docRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(segRepo.save(any(ExposureSegment.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(endRepo.save(any(EndorsementRequestEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // Prior segment carries the full base profile stamped at issuance.
+        ExposureSegment base = new ExposureSegment();
+        base.setSegmentId(UUID.randomUUID());
+        base.setPolicyId(policy.getPolicyId());
+        base.setExposureSegmentSeq(0);
+        base.setSegmentStart(policy.getPolicyEffectiveDate());
+        base.setSegmentEnd(policy.getPolicyExpirationDate());
+        base.setCoverageAmountVnd(300_000_000L);
+        base.setDeductibleVnd(500_000L);
+        base.setRiskSnapshot("{\"age\":40,\"gender\":\"Male\",\"province\":\"Ha Noi\","
+                + "\"vehicle_value_vnd\":300000000}");
+        when(segRepo.findByPolicyIdOrderByExposureSegmentSeqAsc(policy.getPolicyId()))
+                .thenReturn(List.of(base));
+
+        PolicyLifecycleService s = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo,
+                pricing, mock(OutboxPublisher.class));
+        EndorsementRequestEntity pending = pendingEntity(policy);
+        when(endRepo.findById(pending.getEndorsementRequestId())).thenReturn(Optional.of(pending));
+
+        s.approveEndorsement(pending.getEndorsementRequestId(), ADMIN);
+
+        // The re-rate profile must merge the base profile with the changed attributes,
+        // not carry only the delta.
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> profileCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(pricing).rerate(eq("MOTOR_BASIC"), profileCaptor.capture());
+        Map<String, Object> sent = profileCaptor.getValue();
+        assertEquals(40, ((Number) sent.get("age")).intValue(), "base profile field must be preserved");
+        assertEquals("Male", sent.get("gender"), "base profile field must be preserved");
+        assertEquals(500_000_000L, ((Number) sent.get("vehicle_value_vnd")).longValue(),
+                "changed attribute must override the base profile");
+        assertEquals(500_000_000L, ((Number) sent.get("coverage_amount_vnd")).longValue());
+        assertEquals(1_000_000L, ((Number) sent.get("deductible_vnd")).longValue());
+    }
+
     private EndorsementRequestEntity pendingEntity(Policy policy) {
         EndorsementRequestEntity e = new EndorsementRequestEntity();
         e.setEndorsementRequestId(UUID.randomUUID());

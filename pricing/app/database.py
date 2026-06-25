@@ -31,8 +31,10 @@ class Quote(Base):
     trip_duration_days = Column(Integer, nullable=True)
     coverage_amount_vnd = Column(BigInteger, nullable=True)
     deductible_vnd = Column(BigInteger, nullable=True)
+    profile = Column(JSON, nullable=True)
     pure_premium_vnd = Column(Integer, nullable=False)
     final_premium_vnd = Column(Integer, nullable=False)
+    explanation = Column(JSON, nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
 

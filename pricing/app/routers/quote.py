@@ -33,8 +33,10 @@ async def create_quote(request: QuoteRequest, db: Session = Depends(get_db)):
                 trip_duration_days=result.get("trip_duration_days"),
                 coverage_amount_vnd=result.get("coverage_amount_vnd", 0),
                 deductible_vnd=result.get("deductible_vnd", 0),
+                profile=request.profile,
                 pure_premium_vnd=result["pure_premium_vnd"],
                 final_premium_vnd=result["final_premium_vnd"],
+                explanation=result.get("explanation"),
                 expires_at=datetime.datetime.fromisoformat(result["expires_at"]),
                 created_at=datetime.datetime.fromisoformat(result["created_at"]),
             )
@@ -66,8 +68,10 @@ async def get_quote(quote_id: str, db: Session = Depends(get_db)):
         'trip_duration_days': db_quote.trip_duration_days,
         'coverage_amount_vnd': db_quote.coverage_amount_vnd or 0,
         'deductible_vnd': db_quote.deductible_vnd or 0,
+        'profile': db_quote.profile or {},
         'pure_premium_vnd': db_quote.pure_premium_vnd,
         'final_premium_vnd': db_quote.final_premium_vnd,
+        'explanation': db_quote.explanation or {"available": False, "items": []},
         'expires_at': db_quote.expires_at.isoformat(),
         'created_at': db_quote.created_at.isoformat(),
     }

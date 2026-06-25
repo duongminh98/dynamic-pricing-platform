@@ -100,7 +100,11 @@ public class PolicyIssuanceService {
         segment.setEarnedExposureYears(days / 365.25);
         segment.setCoverageAmountVnd(order.getCoverageAmountVnd() != null ? order.getCoverageAmountVnd() : 0);
         segment.setDeductibleVnd(order.getDeductibleVnd() != null ? order.getDeductibleVnd() : 0);
-        segment.setRiskSnapshot("{}");
+        // Stamp the first segment with the full risk profile that was priced so an
+        // endorsement can merge its change set onto a complete base and re-rate the
+        // remaining term against the full feature set (R23.2/R23.8).
+        String riskProfile = order.getRiskProfile();
+        segment.setRiskSnapshot(riskProfile != null && !riskProfile.isBlank() ? riskProfile : "{}");
         segmentRepository.save(segment);
 
         PolicyDocument doc = new PolicyDocument();

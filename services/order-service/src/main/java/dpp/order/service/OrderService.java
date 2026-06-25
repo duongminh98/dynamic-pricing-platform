@@ -10,6 +10,8 @@ import dpp.order.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +24,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final PricingClient pricingClient;
     private final BillingClient billingClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public OrderService(OrderRepository orderRepository, PricingClient pricingClient, BillingClient billingClient) {
         this.orderRepository = orderRepository;
@@ -56,6 +59,16 @@ public class OrderService {
         order.setCoverageAmountVnd(coverage instanceof Number ? ((Number) coverage).longValue() : null);
         Object deductible = quote.get("deductible_vnd");
         order.setDeductibleVnd(deductible instanceof Number ? ((Number) deductible).longValue() : null);
+        // Persist the full risk profile that was priced so it can be propagated to the
+        // issued policy and used as the re-rate base for endorsements (R23.2/R23.8).
+        Object profile = quote.get("profile");
+        if (profile instanceof Map<?, ?> profileMap && !profileMap.isEmpty()) {
+            try {
+                order.setRiskProfile(objectMapper.writeValueAsString(profileMap));
+            } catch (Exception e) {
+                order.setRiskProfile(null);
+            }
+        }
         order.setStatus(OrderStatus.PENDING_REVIEW);
         order.setCreatedAt(OffsetDateTime.now());
         order = orderRepository.save(order);

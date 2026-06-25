@@ -75,3 +75,16 @@ token_*.json
 
 # Stray exploded fat-jar artifacts
 BOOT-INF/
+
+# Coverage reports
+.coverage
+coverage.xml
+
+# Local scratch / e2e helper artifacts (tokens, request bodies, captured ids)
+*_token.txt
+*_body.json
+*_id.txt
+h.txt
+wsl.txt
+cbuild.txt
+logs/

@@ -160,6 +160,20 @@ public class PolicyLifecycleService {
         }
     }
 
+    /** Read the full risk profile stored on an exposure segment (the re-rate base). */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readRiskSnapshot(ExposureSegment segment) {
+        String snapshot = segment.getRiskSnapshot();
+        if (snapshot == null || snapshot.isBlank()) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            return objectMapper.readValue(snapshot, Map.class);
+        } catch (Exception e) {
+            return new LinkedHashMap<>();
+        }
+    }
+
     private EndorsementRequestResponse toEndorsementResponse(EndorsementRequestEntity req) {
         EndorsementRequestResponse r = new EndorsementRequestResponse();
         r.setEndorsementRequestId(req.getEndorsementRequestId());
@@ -197,19 +211,23 @@ public class PolicyLifecycleService {
         long premiumOld = policy.getFinalPremiumVnd();
         long premiumNew = premiumOld;
 
+        // Build the new effective risk profile by merging the change set onto the full
+        // base profile carried by the most recent segment (stamped at issuance and on
+        // every prior endorsement). This lets a material change re-rate against the
+        // complete product feature set rather than only the changed attributes, and
+        // keeps the full profile available for subsequent endorsements (R23.2/R23.8).
+        Map<String, Object> mergedProfile = prior != null ? readRiskSnapshot(prior) : new LinkedHashMap<>();
+        mergedProfile.putAll(change);
+        mergedProfile.put("coverage_amount_vnd", newCoverage);
+        mergedProfile.put("deductible_vnd", newDeductible);
+
         // R23.2/R23.8: re-rate the remaining term for a material change using the new risk profile.
         if (material) {
-            Map<String, Object> profile = new LinkedHashMap<>();
-            profile.putAll(change);
-            profile.put("coverage_amount_vnd", newCoverage);
-            profile.put("deductible_vnd", newDeductible);
-            // The full original risk profile is not persisted in order-service (it lives in
-            // the pricing quote at issuance time and is not echoed back), so a material change
-            // carries only the changed attributes. If pricing rejects the partial profile
-            // (e.g. MISSING_FEATURES), fail safe by keeping the prior premium instead of
-            // blocking the endorsement — mirrors the renewal re-rate fallback (R24.2).
+            // If pricing is unavailable or rejects the profile, fail safe by keeping the
+            // prior premium instead of blocking the endorsement — mirrors the renewal
+            // re-rate fallback (R24.2).
             try {
-                Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), profile);
+                Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), mergedProfile);
                 Object premium = requote != null ? requote.get("final_premium_vnd") : null;
                 if (premium instanceof Number n) {
                     premiumNew = n.longValue();
@@ -231,8 +249,10 @@ public class PolicyLifecycleService {
         seg.setEarnedExposureYears(days / 365.25);
         seg.setCoverageAmountVnd(newCoverage);
         seg.setDeductibleVnd(newDeductible);
+        // Persist the full merged profile (not just the delta) so the next endorsement
+        // can re-rate against the complete, up-to-date feature set.
         try {
-            seg.setRiskSnapshot(objectMapper.writeValueAsString(change));
+            seg.setRiskSnapshot(objectMapper.writeValueAsString(mergedProfile));
         } catch (Exception e) {
             seg.setRiskSnapshot("{}");
         }
