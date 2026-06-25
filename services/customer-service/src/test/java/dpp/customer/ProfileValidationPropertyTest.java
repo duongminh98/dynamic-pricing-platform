@@ -43,7 +43,7 @@ class ProfileValidationPropertyTest {
     private ProfileRequest request(String line, Map<String, Object> attrs) {
         ProfileRequest r = new ProfileRequest();
         r.setAge(30);
-        r.setGender("Male");
+        r.setGender("male");
         r.setProvince("Ha Noi");
         r.setRegion("Red River Delta");
         r.setUrbanTier("tier1");
@@ -106,7 +106,7 @@ class ProfileValidationPropertyTest {
 
     @Property(tries = 100)
     void invalidGenderRejectedWithCategoricalError(@ForAll int seed) {
-        String[] bad = {"male", "M", "other", "", "FEMALE"};
+        String[] bad = {"M", "", "FEMALE", "nam", "unknown"};
         ProfileRequest r = request("health", validHealthAttrs());
         r.setGender(bad[Math.floorMod(seed, bad.length)]);
         ServiceException ex = assertThrows(ServiceException.class, () -> validator.validate(r));

@@ -21,7 +21,8 @@ public class ProfileValidator {
     private static final Set<String> VALID_LINES = Set.of("health", "motorbike", "car", "home", "accident", "travel");
 
     // Base demographic categoricals (dataset-aligned).
-    private static final Set<String> GENDERS = Set.of("Male", "Female");
+    // R2.2: gender ∈ {male, female, other} (English, lowercase — project convention).
+    private static final Set<String> GENDERS = Set.of("male", "female", "other");
     private static final Set<String> URBAN_TIERS = Set.of("tier1", "urban", "rural");
     private static final Set<String> INCOME_LEVELS = Set.of("low", "lower_middle", "middle", "upper_middle", "high");
     private static final Set<String> MARITAL = Set.of("single", "married", "divorced_widowed");

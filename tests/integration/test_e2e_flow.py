@@ -284,10 +284,17 @@ def test_products_response_uses_snake_case_keys():
     assert "productId" not in first, "camelCase productId must not be present"
 
 
-def test_profile_update_uses_snake_case(customer_token):
-    """R15.1/R15.2: PUT /customers/me/profile accepts and returns snake_case."""
+def test_profile_update_uses_snake_case():
+    """R15.1/R15.2: PUT /customers/me/profile accepts and returns snake_case.
+
+    Uses a freshly registered customer (which creates the backing Account row);
+    demo.customer is a Keycloak-only convenience user without a customer Account,
+    so profile writes for it are not applicable.
+    """
+    email = f"e2e.profile.{uuid.uuid4().hex[:12]}@example.com"
+    token = _register_and_login(email, "profile_dev_only_pw")
     r = httpx.put(f"{GATEWAY}/customers/me/profile", json=_profile_payload(),
-                  headers=_auth(customer_token), timeout=15.0)
+                  headers=_auth(token), timeout=15.0)
     assert r.status_code in (200, 201), r.text
     body = r.json()
     assert "customer_id" in body, f"expected snake_case customer_id, keys: {list(body.keys())}"

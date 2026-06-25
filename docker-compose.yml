@@ -19,7 +19,7 @@ x-java-env: &java-env
   KEYCLOAK_REALM: ${KEYCLOAK_REALM:-dynamic-pricing}
 
 x-java-healthcheck: &java-healthcheck
-  test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || exit 1"]
+  test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/actuator/health || exit 1"]
   interval: 15s
   timeout: 5s
   retries: 10
@@ -600,7 +600,7 @@ services:
       MAIL_PORT: 1025
       MAIL_FROM: noreply@dynamic-pricing.local
       NOTIFICATION_EMAIL_ENABLED: "true"
-      CUSTOMER_BASE_URL: http://customer-service-1:8082
+      CUSTOMER_BASE_URL: http://customer-service-1:8080
     depends_on:
       postgres-notification:
         condition: service_healthy
@@ -633,7 +633,7 @@ services:
       MAIL_PORT: 1025
       MAIL_FROM: noreply@dynamic-pricing.local
       NOTIFICATION_EMAIL_ENABLED: "true"
-      CUSTOMER_BASE_URL: http://customer-service-1:8082
+      CUSTOMER_BASE_URL: http://customer-service-1:8080
     depends_on:
       postgres-notification:
         condition: service_healthy

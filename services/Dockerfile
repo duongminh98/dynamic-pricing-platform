@@ -11,6 +11,8 @@ RUN chmod +x gradlew && ./gradlew --no-daemon :services:${SERVICE}:bootJar
 FROM eclipse-temurin:17-jre AS runtime
 ARG SERVICE
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 appuser
 COPY --from=build /workspace/services/${SERVICE}/build/libs/*.jar /app/app.jar
 USER appuser
