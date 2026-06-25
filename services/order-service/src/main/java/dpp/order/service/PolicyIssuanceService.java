@@ -98,8 +98,8 @@ public class PolicyIssuanceService {
         segment.setSegmentEnd(expiration);
         long days = Math.max(1, ChronoUnit.DAYS.between(now, expiration));
         segment.setEarnedExposureYears(days / 365.25);
-        segment.setCoverageAmountVnd(0);
-        segment.setDeductibleVnd(0);
+        segment.setCoverageAmountVnd(order.getCoverageAmountVnd() != null ? order.getCoverageAmountVnd() : 0);
+        segment.setDeductibleVnd(order.getDeductibleVnd() != null ? order.getDeductibleVnd() : 0);
         segment.setRiskSnapshot("{}");
         segmentRepository.save(segment);
 

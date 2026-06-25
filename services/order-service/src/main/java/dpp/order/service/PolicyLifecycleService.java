@@ -203,10 +203,22 @@ public class PolicyLifecycleService {
             profile.putAll(change);
             profile.put("coverage_amount_vnd", newCoverage);
             profile.put("deductible_vnd", newDeductible);
-            Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), profile);
-            premiumNew = ((Number) requote.get("final_premium_vnd")).longValue();
-            policy.setFinalPremiumVnd(premiumNew);
-            policyRepository.save(policy);
+            // The full original risk profile is not persisted in order-service (it lives in
+            // the pricing quote at issuance time and is not echoed back), so a material change
+            // carries only the changed attributes. If pricing rejects the partial profile
+            // (e.g. MISSING_FEATURES), fail safe by keeping the prior premium instead of
+            // blocking the endorsement — mirrors the renewal re-rate fallback (R24.2).
+            try {
+                Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), profile);
+                Object premium = requote != null ? requote.get("final_premium_vnd") : null;
+                if (premium instanceof Number n) {
+                    premiumNew = n.longValue();
+                    policy.setFinalPremiumVnd(premiumNew);
+                    policyRepository.save(policy);
+                }
+            } catch (RuntimeException e) {
+                premiumNew = premiumOld;
+            }
         }
 
         ExposureSegment seg = new ExposureSegment();

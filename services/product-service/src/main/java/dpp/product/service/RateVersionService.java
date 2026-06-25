@@ -31,9 +31,16 @@ public class RateVersionService {
     private final LoadingFactorRepository loadingFactorRepository;
 
     public RateVersion createNewRateVersion(String createdBy) {
-        // Set all current versions to false (append-only: never DELETE old ones)
-        rateVersionRepository.findByIsCurrentTrue()
-                .ifPresent(rv -> rv.setIsCurrent(false));
+        // Retire the previous current version FIRST and flush it, so the partial
+        // unique index idx_rate_version_current (WHERE is_current=true) never sees
+        // two current rows. Hibernate orders INSERTs before UPDATEs within a flush,
+        // so without an explicit saveAndFlush the new current row would be inserted
+        // while the old one is still is_current=true -> constraint violation.
+        // Append-only: the old version is retired (is_current=false), never deleted.
+        rateVersionRepository.findByIsCurrentTrue().ifPresent(rv -> {
+            rv.setIsCurrent(false);
+            rateVersionRepository.saveAndFlush(rv);
+        });
 
         RateVersion newVersion = RateVersion.builder()
                 .effectiveAt(Instant.now())

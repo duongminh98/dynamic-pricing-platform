@@ -543,6 +543,13 @@ services:
       BILLING_DB_HOST: postgres-billing
       BILLING_DB_PORT: 5432
       ORDER_BASE_URL: http://order-service-1:8080
+      VNP_TMN_CODE: ${VNP_TMN_CODE:-}
+      VNP_HASH_SECRET: ${VNP_HASH_SECRET:-}
+      VNP_PAY_URL: ${VNP_PAY_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+      VNP_API_URL: ${VNP_API_URL:-https://sandbox.vnpayment.vn/merchant_webapi/api/transaction}
+      VNP_RETURN_URL: ${VNP_RETURN_URL:-http://localhost:3001/payment-result}
+      VNP_VERSION: ${VNP_VERSION:-2.1.0}
+      VNP_LOCALE: ${VNP_LOCALE:-vn}
     depends_on:
       postgres-billing:
         condition: service_healthy
@@ -570,6 +577,13 @@ services:
       BILLING_DB_HOST: postgres-billing
       BILLING_DB_PORT: 5432
       ORDER_BASE_URL: http://order-service-1:8080
+      VNP_TMN_CODE: ${VNP_TMN_CODE:-}
+      VNP_HASH_SECRET: ${VNP_HASH_SECRET:-}
+      VNP_PAY_URL: ${VNP_PAY_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+      VNP_API_URL: ${VNP_API_URL:-https://sandbox.vnpayment.vn/merchant_webapi/api/transaction}
+      VNP_RETURN_URL: ${VNP_RETURN_URL:-http://localhost:3001/payment-result}
+      VNP_VERSION: ${VNP_VERSION:-2.1.0}
+      VNP_LOCALE: ${VNP_LOCALE:-vn}
     depends_on:
       postgres-billing:
         condition: service_healthy

@@ -57,6 +57,13 @@ public class VnpayService {
                     "Invoice is not in unpaid state", null);
         }
 
+        // Fail gracefully (503) instead of a raw 500 when the VNPAY merchant
+        // credentials are not configured (VNP_TMN_CODE / VNP_HASH_SECRET unset).
+        if (isBlank(vnpayConfig.getTmnCode()) || isBlank(vnpayConfig.getHashSecret())) {
+            throw new ServiceException(ErrorCode.SERVICE_UNAVAILABLE,
+                    "VNPAY merchant credentials are not configured", null);
+        }
+
         String txnRef = invoiceId.toString() + "-" + System.currentTimeMillis();
         long amountVnd = invoice.getAmountVnd();
 
@@ -96,6 +103,10 @@ public class VnpayService {
         result.put("payment_url", paymentUrl);
         result.put("vnp_txn_ref", txnRef);
         return result;
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     /**

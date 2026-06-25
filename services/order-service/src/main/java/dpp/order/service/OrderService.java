@@ -52,6 +52,10 @@ public class OrderService {
         order.setLine(quote.get("line") != null ? String.valueOf(quote.get("line")) : null);
         Object tripDays = quote.get("trip_duration_days");
         order.setTripDurationDays(tripDays instanceof Number ? ((Number) tripDays).intValue() : null);
+        Object coverage = quote.get("coverage_amount_vnd");
+        order.setCoverageAmountVnd(coverage instanceof Number ? ((Number) coverage).longValue() : null);
+        Object deductible = quote.get("deductible_vnd");
+        order.setDeductibleVnd(deductible instanceof Number ? ((Number) deductible).longValue() : null);
         order.setStatus(OrderStatus.PENDING_REVIEW);
         order.setCreatedAt(OffsetDateTime.now());
         order = orderRepository.save(order);

@@ -1,7 +1,7 @@
 import os
 import uuid
 import datetime
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, Float, ForeignKey, JSON
+from sqlalchemy import create_engine, Column, String, Integer, BigInteger, Boolean, DateTime, Float, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -29,6 +29,8 @@ class Quote(Base):
     product_id = Column(String, nullable=False)
     line = Column(String, nullable=False)
     trip_duration_days = Column(Integer, nullable=True)
+    coverage_amount_vnd = Column(BigInteger, nullable=True)
+    deductible_vnd = Column(BigInteger, nullable=True)
     pure_premium_vnd = Column(Integer, nullable=False)
     final_premium_vnd = Column(Integer, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)

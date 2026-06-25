@@ -34,6 +34,12 @@ public class OrderEntity {
     @Column(name = "trip_duration_days")
     private Integer tripDurationDays;
 
+    @Column(name = "coverage_amount_vnd")
+    private Long coverageAmountVnd;
+
+    @Column(name = "deductible_vnd")
+    private Long deductibleVnd;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private OrderStatus status;

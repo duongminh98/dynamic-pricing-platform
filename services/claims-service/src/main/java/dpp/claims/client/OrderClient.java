@@ -28,7 +28,7 @@ public class OrderClient {
     @SuppressWarnings("unchecked")
     public Map<String, Object> getPolicy(UUID policyId) {
         try {
-            return restTemplate.getForObject(baseUrl + "/policies/" + policyId, Map.class);
+            return restTemplate.getForObject(baseUrl + "/internal/policies/" + policyId, Map.class);
         } catch (Exception e) {
             throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null);
         }
@@ -42,7 +42,7 @@ public class OrderClient {
     public List<Map<String, Object>> getExposureSegments(UUID policyId) {
         try {
             ResponseEntity<List<Map<String, Object>>> resp = restTemplate.exchange(
-                    baseUrl + "/policies/" + policyId + "/exposure-segments",
+                    baseUrl + "/internal/policies/" + policyId + "/exposure-segments",
                     HttpMethod.GET, null,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {});
             List<Map<String, Object>> body = resp.getBody();

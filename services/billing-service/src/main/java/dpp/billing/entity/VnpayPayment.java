@@ -3,6 +3,8 @@ package dpp.billing.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -38,9 +40,11 @@ public class VnpayPayment {
     @Column(name = "vnp_bank_code", length = 20)
     private String vnpBankCode;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "raw_return", columnDefinition = "jsonb")
     private String rawReturn;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "raw_ipn", columnDefinition = "jsonb")
     private String rawIpn;
 

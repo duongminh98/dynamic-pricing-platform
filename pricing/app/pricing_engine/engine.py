@@ -22,6 +22,24 @@ from .explain import explain
 
 QUOTE_VALIDITY_DAYS = 7
 
+def _coverage_of(profile: dict) -> int:
+    """Read coverage_amount_vnd from the profile (top-level or line_attributes)."""
+    attrs = profile.get("line_attributes", {}) or {}
+    val = profile.get("coverage_amount_vnd", attrs.get("coverage_amount_vnd", 0))
+    try:
+        return int(val or 0)
+    except (TypeError, ValueError):
+        return 0
+
+def _deductible_of(profile: dict) -> int:
+    """Read deductible_vnd from the profile (top-level or line_attributes)."""
+    attrs = profile.get("line_attributes", {}) or {}
+    val = profile.get("deductible_vnd", attrs.get("deductible_vnd", 0))
+    try:
+        return int(val or 0)
+    except (TypeError, ValueError):
+        return 0
+
 def _quote_audit_enabled() -> bool:
     """Read the bonus flag dynamically so tests/deployments can toggle it at runtime."""
     from .. import config
@@ -146,6 +164,8 @@ def quote(db, product_id: str, profile: dict,
         "line": line,
         "product_id": product_id,
         "trip_duration_days": profile.get("trip_duration_days") if line == "travel" else None,
+        "coverage_amount_vnd": _coverage_of(profile),
+        "deductible_vnd": _deductible_of(profile),
         "frequency": None,
         "severity": None,
         "pure_premium_vnd": pure_int,
@@ -201,6 +221,8 @@ def quote_freq_sev(db, product_id: str, profile: dict,
         "quote_id": quote_id,
         "line": line,
         "product_id": product_id,
+        "coverage_amount_vnd": _coverage_of(profile),
+        "deductible_vnd": _deductible_of(profile),
         "frequency": frequency,
         "severity": severity,
         "pure_premium_vnd": pure_int,
