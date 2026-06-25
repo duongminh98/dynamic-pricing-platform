@@ -67,12 +67,30 @@ skip_if_no_artifacts = pytest.mark.skipif(
 )
 
 
+# Test files in pricing/tests/ that do NOT require model artifacts.
+# When artifacts are absent (e.g. CI runner without gitignored data/ and reports/),
+# only these files will run; all other pricing/tests/ files are skipped.
+_ARTIFACT_FREE_TESTS = frozenset({
+    "test_config.py",
+    "test_schemas.py",
+    "test_engine_no_artifacts.py",
+    "test_explain_no_artifacts.py",
+    "test_features_no_artifacts.py",
+    "test_governance_no_artifacts.py",
+    "test_routers_no_artifacts.py",
+    "test_common_no_artifacts.py",
+})
+
+
 def pytest_collection_modifyitems(config, items):
-    """Skip every test in pricing/tests/ when model artifacts are absent."""
+    """Skip pricing/tests/ items that need model artifacts when they are absent."""
     if not ARTIFACTS_AVAILABLE:
         skip = pytest.mark.skip(reason="Model artifacts not available (data/ and reports/ are gitignored)")
+        tests_dir = str(PRICING_DIR / "tests")
         for item in items:
-            item.add_marker(skip)
+            item_path = pathlib.Path(item.fspath)
+            if str(item_path.parent) == tests_dir and item_path.name not in _ARTIFACT_FREE_TESTS:
+                item.add_marker(skip)
 
 
 @pytest.fixture(scope="session", autouse=True)
