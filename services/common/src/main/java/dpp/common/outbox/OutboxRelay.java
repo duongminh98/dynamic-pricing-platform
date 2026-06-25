@@ -28,7 +28,7 @@ import java.util.List;
  * the service layer, then this relay polls and publishes asynchronously.</p>
  *
  * <p>Events are published to the shared topic exchange {@code platform.events}
- * (declared in {@code infra/rabbitmq/definitions.json}, Ãƒâ€šÃ‚Â§2.4.2) using the event
+ * (declared in {@code infra/rabbitmq/definitions.json}, §2.4.2) using the event
  * type as the routing key; queues bind by routing key and dead-letter to
  * {@code platform.events.dlx} after {@code x-delivery-limit} redeliveries.</p>
  */
@@ -40,7 +40,7 @@ public class OutboxRelay {
     private final OutboxRepository outboxRepository;
     private final RabbitTemplate rabbitTemplate;
 
-    /** Shared topic exchange that fans events out to per-event-type queues (Ãƒâ€šÃ‚Â§2.4.2). */
+    /** Shared topic exchange that fans events out to per-event-type queues (§2.4.2). */
     private final String eventsExchange;
 
     public OutboxRelay(OutboxRepository outboxRepository,
@@ -74,7 +74,7 @@ public class OutboxRelay {
                 outboxRepository.save(entry);
                 log.info("Outbox relay: published event {} type={}", entry.getEventId(), entry.getEventType());
             } catch (Exception e) {
-                // Keep NEW ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â will retry on next poll (R10.5)
+                // Keep NEW — will retry on next poll (R10.5)
                 log.warn("Outbox relay: failed to publish event {} type={}, will retry: {}",
                         entry.getEventId(), entry.getEventType(), e.getMessage());
             }
@@ -83,12 +83,12 @@ public class OutboxRelay {
 
     private void publishEvent(OutboxEntity entry) {
         // Publish to the shared topic exchange; the event type is the routing key
-        // so queues bound by routing key receive it (Ãƒâ€šÃ‚Â§2.4.2, definitions.json).
+        // so queues bound by routing key receive it (§2.4.2, definitions.json).
         String routingKey = entry.getEventType();
 
         rabbitTemplate.convertAndSend(eventsExchange, routingKey, entry.getPayload(), message -> {
             MessageProperties props = message.getMessageProperties();
-            // Payload is a JSON string (jsonb column) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â tag it so consumers deserialize correctly.
+            // Payload is a JSON string (jsonb column) — tag it so consumers deserialize correctly.
             props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
             props.setContentEncoding(StandardCharsets.UTF_8.name());
             // Survive broker restarts to match the durable quorum queues.

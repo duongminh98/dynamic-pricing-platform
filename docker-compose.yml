@@ -276,19 +276,12 @@ services:
       dpp-network:
         aliases:
           - customer-service-1
-          - customer-service-2
           - product-service-1
-          - product-service-2
           - order-service-1
-          - order-service-2
           - claims-service-1
-          - claims-service-2
           - billing-service-1
-          - billing-service-2
           - notification-service-1
-          - notification-service-2
           - pricing-service-1
-          - pricing-service-2
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/actuator/health || exit 1"]
       interval: 10s
@@ -296,9 +289,9 @@ services:
       retries: 5
       start_period: 10s
 
-  # ?? Application services (one-command bring-up, R16.1) ?????????????????????
-  # Each Java service runs two replicas (-1/-2) on dpp-network so Kong has >=2
-  # round-robin targets (R17.2). Flyway migrations run at service startup.
+  # Application services (one-command bring-up, R16.1)
+  # Each Java service runs a single container on dpp-network behind Kong.
+  # Flyway migrations run at service startup.
 
 
   mailpit:
@@ -317,15 +310,17 @@ services:
   customer-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile.prebuilt
+      dockerfile: services/Dockerfile
       args:
-        JAR_FILE: services/customer-service/build/libs/customer-service-0.1.0-SNAPSHOT.jar
+        SERVICE: customer-service
     image: dpp/customer-service:latest
     container_name: dpp-customer-service-1
     environment:
       <<: *java-env
       CUSTOMER_DB_HOST: postgres-customer
       CUSTOMER_DB_PORT: 5432
+    ports:
+      - "${CUSTOMER_SERVICE_PORT:-8081}:8080"
     depends_on:
       postgres-customer:
         condition: service_healthy
@@ -340,44 +335,20 @@ services:
     healthcheck: *java-healthcheck
     restart: on-failure
 
-  customer-service-2:
-    build:
-      context: .
-      dockerfile: services/Dockerfile.prebuilt
-      args:
-        JAR_FILE: services/customer-service/build/libs/customer-service-0.1.0-SNAPSHOT.jar
-    image: dpp/customer-service:latest
-    container_name: dpp-customer-service-2
-    environment:
-      <<: *java-env
-      CUSTOMER_DB_HOST: postgres-customer
-      CUSTOMER_DB_PORT: 5432
-    depends_on:
-      postgres-customer:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-    networks:
-      dpp-network:
-        aliases:
-          - customer-service-2
-    healthcheck: *java-healthcheck
-    restart: on-failure
-
   product-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile.prebuilt
+      dockerfile: services/Dockerfile
       args:
-        JAR_FILE: services/product-service/build/libs/product-service-0.1.0-SNAPSHOT.jar
+        SERVICE: product-service
     image: dpp/product-service:latest
     container_name: dpp-product-service-1
     environment:
       <<: *java-env
       PRODUCT_DB_HOST: postgres-product
       PRODUCT_DB_PORT: 5432
+    ports:
+      - "${PRODUCT_SERVICE_PORT:-8082}:8080"
     depends_on:
       postgres-product:
         condition: service_healthy
@@ -392,38 +363,12 @@ services:
     healthcheck: *java-healthcheck
     restart: on-failure
 
-  product-service-2:
-    build:
-      context: .
-      dockerfile: services/Dockerfile.prebuilt
-      args:
-        JAR_FILE: services/product-service/build/libs/product-service-0.1.0-SNAPSHOT.jar
-    image: dpp/product-service:latest
-    container_name: dpp-product-service-2
-    environment:
-      <<: *java-env
-      PRODUCT_DB_HOST: postgres-product
-      PRODUCT_DB_PORT: 5432
-    depends_on:
-      postgres-product:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-    networks:
-      dpp-network:
-        aliases:
-          - product-service-2
-    healthcheck: *java-healthcheck
-    restart: on-failure
-
   order-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile.prebuilt
+      dockerfile: services/Dockerfile
       args:
-        JAR_FILE: services/order-service/build/libs/order-service-0.1.0-SNAPSHOT.jar
+        SERVICE: order-service
     image: dpp/order-service:latest
     container_name: dpp-order-service-1
     environment:
@@ -432,6 +377,8 @@ services:
       ORDER_DB_PORT: 5432
       PRICING_BASE_URL: http://pricing-service-1:8000
       BILLING_BASE_URL: http://billing-service-1:8080
+    ports:
+      - "${ORDER_SERVICE_PORT:-8083}:8080"
     depends_on:
       postgres-order:
         condition: service_healthy
@@ -446,40 +393,12 @@ services:
     healthcheck: *java-healthcheck
     restart: on-failure
 
-  order-service-2:
-    build:
-      context: .
-      dockerfile: services/Dockerfile.prebuilt
-      args:
-        JAR_FILE: services/order-service/build/libs/order-service-0.1.0-SNAPSHOT.jar
-    image: dpp/order-service:latest
-    container_name: dpp-order-service-2
-    environment:
-      <<: *java-env
-      ORDER_DB_HOST: postgres-order
-      ORDER_DB_PORT: 5432
-      PRICING_BASE_URL: http://pricing-service-1:8000
-      BILLING_BASE_URL: http://billing-service-1:8080
-    depends_on:
-      postgres-order:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-    networks:
-      dpp-network:
-        aliases:
-          - order-service-2
-    healthcheck: *java-healthcheck
-    restart: on-failure
-
   claims-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile.prebuilt
+      dockerfile: services/Dockerfile
       args:
-        JAR_FILE: services/claims-service/build/libs/claims-service-0.1.0-SNAPSHOT.jar
+        SERVICE: claims-service
     image: dpp/claims-service:latest
     container_name: dpp-claims-service-1
     environment:
@@ -488,6 +407,8 @@ services:
       CLAIMS_DB_PORT: 5432
       ORDER_BASE_URL: http://order-service-1:8080
       PRODUCT_BASE_URL: http://product-service-1:8080
+    ports:
+      - "${CLAIMS_SERVICE_PORT:-8087}:8080"
     depends_on:
       postgres-claims:
         condition: service_healthy
@@ -502,40 +423,12 @@ services:
     healthcheck: *java-healthcheck
     restart: on-failure
 
-  claims-service-2:
-    build:
-      context: .
-      dockerfile: services/Dockerfile.prebuilt
-      args:
-        JAR_FILE: services/claims-service/build/libs/claims-service-0.1.0-SNAPSHOT.jar
-    image: dpp/claims-service:latest
-    container_name: dpp-claims-service-2
-    environment:
-      <<: *java-env
-      CLAIMS_DB_HOST: postgres-claims
-      CLAIMS_DB_PORT: 5432
-      ORDER_BASE_URL: http://order-service-1:8080
-      PRODUCT_BASE_URL: http://product-service-1:8080
-    depends_on:
-      postgres-claims:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-    networks:
-      dpp-network:
-        aliases:
-          - claims-service-2
-    healthcheck: *java-healthcheck
-    restart: on-failure
-
   billing-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile.prebuilt
+      dockerfile: services/Dockerfile
       args:
-        JAR_FILE: services/billing-service/build/libs/billing-service-0.1.0-SNAPSHOT.jar
+        SERVICE: billing-service
     image: dpp/billing-service:latest
     container_name: dpp-billing-service-1
     environment:
@@ -550,6 +443,8 @@ services:
       VNP_RETURN_URL: ${VNP_RETURN_URL:-http://localhost:3001/payment-result}
       VNP_VERSION: ${VNP_VERSION:-2.1.0}
       VNP_LOCALE: ${VNP_LOCALE:-vn}
+    ports:
+      - "${BILLING_SERVICE_PORT:-8086}:8080"
     depends_on:
       postgres-billing:
         condition: service_healthy
@@ -564,46 +459,12 @@ services:
     healthcheck: *java-healthcheck
     restart: on-failure
 
-  billing-service-2:
-    build:
-      context: .
-      dockerfile: services/Dockerfile.prebuilt
-      args:
-        JAR_FILE: services/billing-service/build/libs/billing-service-0.1.0-SNAPSHOT.jar
-    image: dpp/billing-service:latest
-    container_name: dpp-billing-service-2
-    environment:
-      <<: *java-env
-      BILLING_DB_HOST: postgres-billing
-      BILLING_DB_PORT: 5432
-      ORDER_BASE_URL: http://order-service-1:8080
-      VNP_TMN_CODE: ${VNP_TMN_CODE:-}
-      VNP_HASH_SECRET: ${VNP_HASH_SECRET:-}
-      VNP_PAY_URL: ${VNP_PAY_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
-      VNP_API_URL: ${VNP_API_URL:-https://sandbox.vnpayment.vn/merchant_webapi/api/transaction}
-      VNP_RETURN_URL: ${VNP_RETURN_URL:-http://localhost:3001/payment-result}
-      VNP_VERSION: ${VNP_VERSION:-2.1.0}
-      VNP_LOCALE: ${VNP_LOCALE:-vn}
-    depends_on:
-      postgres-billing:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-    networks:
-      dpp-network:
-        aliases:
-          - billing-service-2
-    healthcheck: *java-healthcheck
-    restart: on-failure
-
   notification-service-1:
     build:
       context: .
-      dockerfile: services/Dockerfile.prebuilt
+      dockerfile: services/Dockerfile
       args:
-        JAR_FILE: services/notification-service/build/libs/notification-service-0.1.0-SNAPSHOT.jar
+        SERVICE: notification-service
     image: dpp/notification-service:latest
     container_name: dpp-notification-service-1
     environment:
@@ -615,6 +476,8 @@ services:
       MAIL_FROM: noreply@dynamic-pricing.local
       NOTIFICATION_EMAIL_ENABLED: "true"
       CUSTOMER_BASE_URL: http://customer-service-1:8080
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT:-8088}:8080"
     depends_on:
       postgres-notification:
         condition: service_healthy
@@ -631,39 +494,6 @@ services:
     healthcheck: *java-healthcheck
     restart: on-failure
 
-  notification-service-2:
-    build:
-      context: .
-      dockerfile: services/Dockerfile.prebuilt
-      args:
-        JAR_FILE: services/notification-service/build/libs/notification-service-0.1.0-SNAPSHOT.jar
-    image: dpp/notification-service:latest
-    container_name: dpp-notification-service-2
-    environment:
-      <<: *java-env
-      NOTIFICATION_DB_HOST: postgres-notification
-      NOTIFICATION_DB_PORT: 5432
-      MAIL_HOST: mailpit
-      MAIL_PORT: 1025
-      MAIL_FROM: noreply@dynamic-pricing.local
-      NOTIFICATION_EMAIL_ENABLED: "true"
-      CUSTOMER_BASE_URL: http://customer-service-1:8080
-    depends_on:
-      postgres-notification:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-      mailpit:
-        condition: service_started
-    networks:
-      dpp-network:
-        aliases:
-          - notification-service-2
-    healthcheck: *java-healthcheck
-    restart: on-failure
-
   pricing-service-1:
     build:
       context: .
@@ -673,6 +503,8 @@ services:
     environment:
       PRICING_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
+    ports:
+      - "${PRICING_SERVICE_PORT:-8090}:8000"
     volumes:
       - ./reports/modeling/models:/reports/modeling/models:ro
       - ./data/synthetic_real:/data/synthetic_real:ro
@@ -685,35 +517,6 @@ services:
       dpp-network:
         aliases:
           - pricing-service-1
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-    restart: on-failure
-
-  pricing-service-2:
-    build:
-      context: .
-      dockerfile: pricing/Dockerfile
-    image: dpp/pricing-service:latest
-    container_name: dpp-pricing-service-2
-    environment:
-      PRICING_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
-      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
-    volumes:
-      - ./reports/modeling/models:/reports/modeling/models:ro
-      - ./data/synthetic_real:/data/synthetic_real:ro
-    depends_on:
-      postgres-pricing:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      dpp-network:
-        aliases:
-          - pricing-service-2
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health || exit 1"]
       interval: 15s

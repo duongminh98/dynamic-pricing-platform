@@ -53,16 +53,31 @@ subprojects {
 }
 
 // Coverage gate for service subprojects only (not the common library).
-// Current floor is 0.40 — a realistic threshold for the present (mostly
-// mock-based) test suite. TARGET is 0.70 (R21.7 / Task 24.2); raise this as
-// Task 20 adds @SpringBootTest + Testcontainers and more property tests.
+// R21.7 / Task 24.2 require at least 70% line coverage and CI must fail below it.
 configure(subprojects.findAll { it.name.endsWith('-service') }) {
+    def coverageExcludedClassFiles = [
+        '**/*Application.class',
+        '**/config/**',
+        '**/dto/**',
+        '**/entity/**'
+    ]
+
+    jacocoTestReport {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: coverageExcludedClassFiles)
+        }))
+    }
+
     jacocoTestCoverageVerification {
         dependsOn test
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: coverageExcludedClassFiles)
+        }))
         violationRules {
             rule {
                 limit {
-                    minimum = 0.40
+                    counter = 'LINE'
+                    minimum = 0.70
                 }
             }
         }

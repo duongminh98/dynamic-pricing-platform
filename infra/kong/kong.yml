@@ -243,9 +243,6 @@ upstreams:
     targets:
       - target: customer-service-1:8080
         weight: 100
-      - target: customer-service-2:8080
-        weight: 100
-
   - name: product-service-upstream
     algorithm: round-robin
     healthchecks:
@@ -276,9 +273,6 @@ upstreams:
     targets:
       - target: product-service-1:8080
         weight: 100
-      - target: product-service-2:8080
-        weight: 100
-
   - name: order-service-upstream
     algorithm: round-robin
     healthchecks:
@@ -309,9 +303,6 @@ upstreams:
     targets:
       - target: order-service-1:8080
         weight: 100
-      - target: order-service-2:8080
-        weight: 100
-
   - name: claims-service-upstream
     algorithm: round-robin
     healthchecks:
@@ -342,9 +333,6 @@ upstreams:
     targets:
       - target: claims-service-1:8080
         weight: 100
-      - target: claims-service-2:8080
-        weight: 100
-
   - name: billing-service-upstream
     algorithm: round-robin
     healthchecks:
@@ -375,9 +363,6 @@ upstreams:
     targets:
       - target: billing-service-1:8080
         weight: 100
-      - target: billing-service-2:8080
-        weight: 100
-
   - name: notification-service-upstream
     algorithm: round-robin
     healthchecks:
@@ -408,9 +393,6 @@ upstreams:
     targets:
       - target: notification-service-1:8080
         weight: 100
-      - target: notification-service-2:8080
-        weight: 100
-
   - name: pricing-service-upstream
     algorithm: round-robin
     healthchecks:
@@ -440,6 +422,4 @@ upstreams:
             - 505
     targets:
       - target: pricing-service-1:8000
-        weight: 100
-      - target: pricing-service-2:8000
         weight: 100

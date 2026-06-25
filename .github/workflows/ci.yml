@@ -7,7 +7,7 @@ on:
     branches: [master]
 
 jobs:
-  # ── Java microservices: build, unit/property tests, coverage gate ──
+  # Java microservices: build, unit/property tests, coverage gate
   java:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -102,11 +102,9 @@ jobs:
           cache: gradle
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
-      # `test` runs unit/property + product @SpringBootTest; jacocoTestReport is
-      # wired as finalizedBy test in build.gradle, so coverage data is produced.
-      - name: Run tests
-        run: ./gradlew clean test
-      - name: Verify coverage gate (service subprojects)
+      - name: Run build and tests
+        run: ./gradlew clean build
+      - name: Verify coverage gate (service subprojects, >=70%)
         run: ./gradlew jacocoTestCoverageVerification
       - name: Upload coverage HTML
         if: always()
@@ -115,7 +113,7 @@ jobs:
           name: java-coverage
           path: services/*/build/reports/jacoco/test/html/
 
-  # ── Python pricing engine + offline pipeline: tests + coverage ──
+  # Python pricing engine + offline pipeline: tests + coverage
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -127,12 +125,9 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r pricing/requirements.txt pytest-cov
-      - name: Run pricing tests with coverage
+      - name: Run pricing and common tests with coverage gate (>=70%)
         working-directory: pricing
-        run: python -m pytest tests/ --cov=app --cov=common --cov-report=term-missing --cov-report=xml -q
-      - name: Run pricing common tests
-        working-directory: pricing
-        run: python -m pytest common/tests/ -q
+        run: python -m pytest tests/ common/tests/ --cov=app --cov=common --cov-report=term-missing --cov-report=xml --cov-fail-under=70 -q
       - name: Run offline pipeline tests (monotonic gate + model lifecycle)
         run: python -m pytest offline/tests -q
       - name: Upload coverage XML
@@ -142,7 +137,63 @@ jobs:
           name: python-coverage
           path: pricing/coverage.xml
 
-# NOTE: Docker image build (Task 24.4) is intentionally NOT here yet — it
-# depends on Task 20.19 which creates services/Dockerfile, pricing/Dockerfile
-# and frontend/Dockerfile. Enable the `docker-build` job after those exist.
-# CD/deploy (push to ECR + ECS update) belongs to Task 22.5 (after AWS infra).
+  # Docker image build only (no push). CD/deploy to ECR/ECS belongs to Task 22.5.
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: []
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: customer-service
+            context: .
+            file: services/Dockerfile
+            build-args: |
+              SERVICE=customer-service
+          - image: product-service
+            context: .
+            file: services/Dockerfile
+            build-args: |
+              SERVICE=product-service
+          - image: order-service
+            context: .
+            file: services/Dockerfile
+            build-args: |
+              SERVICE=order-service
+          - image: claims-service
+            context: .
+            file: services/Dockerfile
+            build-args: |
+              SERVICE=claims-service
+          - image: billing-service
+            context: .
+            file: services/Dockerfile
+            build-args: |
+              SERVICE=billing-service
+          - image: notification-service
+            context: .
+            file: services/Dockerfile
+            build-args: |
+              SERVICE=notification-service
+          - image: pricing-service
+            context: .
+            file: pricing/Dockerfile
+            build-args: ''
+          - image: frontend
+            context: .
+            file: frontend/Dockerfile
+            build-args: |
+              VITE_API_BASE=http://localhost:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.image }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: ${{ matrix.build-args }}
+          push: false
+          load: false
+          tags: dynamic-pricing/${{ matrix.image }}:${{ github.sha }}

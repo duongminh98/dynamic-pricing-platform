@@ -12,3 +12,6 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "prometheus_client>=0.21.0",
 ]
+
+[tool.coverage.run]
+omit = ["common/tests/*"]
