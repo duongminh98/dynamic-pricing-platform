@@ -1,12 +1,14 @@
 package dpp.billing.controller;
 
 import dpp.billing.dto.InvoiceResponse;
+import dpp.billing.dto.PageResponse;
 import dpp.billing.entity.InvoiceStatus;
 import dpp.billing.service.BillingService;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -24,11 +26,13 @@ public class AdminBillingController {
 
     @GetMapping("/invoices")
     @PreAuthorize("hasRole('Administrator')")
-    public List<InvoiceResponse> listInvoices(@RequestParam(required = false) InvoiceStatus status) {
-        if (status != null) {
-            return billingService.adminListInvoicesByStatus(status);
-        }
-        return billingService.adminListAllInvoices();
+    public PageResponse<InvoiceResponse> listInvoices(
+            @RequestParam(required = false) InvoiceStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        size = Math.min(size, 100);
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return billingService.adminListInvoicesPaged(status, pageable);
     }
 
     @GetMapping("/invoices/{id}")

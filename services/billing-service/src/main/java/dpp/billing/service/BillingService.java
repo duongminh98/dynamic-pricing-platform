@@ -5,6 +5,7 @@ import dpp.billing.dto.AdjustmentResponse;
 import dpp.billing.dto.CreateInvoiceRequest;
 import dpp.billing.dto.CreditResponse;
 import dpp.billing.dto.InvoiceResponse;
+import dpp.billing.dto.PageResponse;
 import dpp.billing.dto.PolicyBillingResponse;
 import dpp.billing.entity.*;
 import dpp.billing.repository.*;
@@ -115,22 +116,17 @@ public class BillingService {
     public InvoiceResponse payInvoice(UUID invoiceId) {
         Invoice invoice = invoiceRepository.findById(invoiceId)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Invoice not found", null));
+        if (invoice.getStatus() == InvoiceStatus.paid) {
+            return toResponse(invoice);
+        }
+        if (invoice.getStatus() == InvoiceStatus.voided) {
+            throw new ServiceException(ErrorCode.BAD_REQUEST, "Cannot pay a voided invoice", null);
+        }
         invoice.setStatus(InvoiceStatus.paid);
         invoice.setPaidAt(OffsetDateTime.now());
         invoice = invoiceRepository.save(invoice);
 
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("order_id", invoice.getOrderId());
-        payload.put("policy_id", invoice.getPolicyId());
-        payload.put("invoice_id", invoice.getInvoiceId());
-        if (invoice.getEndorsementRequestId() != null) {
-            payload.put("endorsement_request_id", invoice.getEndorsementRequestId());
-        }
-        try {
-            outboxPublisher.enqueue("InvoicePaid", objectMapper.writeValueAsString(payload));
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to enqueue InvoicePaid event", e);
-        }
+        enqueueInvoicePaid(invoice);
         return toResponse(invoice);
     }
 
@@ -240,6 +236,12 @@ public class BillingService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<InvoiceResponse> adminListInvoicesPaged(InvoiceStatus status, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.domain.Page<Invoice> page = invoiceRepository.findFiltered(status, pageable);
+        return PageResponse.from(page.map(this::toResponse));
+    }
+
+    @Transactional(readOnly = true)
     public List<InvoiceResponse> adminListInvoicesByStatus(InvoiceStatus status) {
         return invoiceRepository.findByStatusOrderByCreatedAtDesc(status)
                 .stream().map(this::toResponse).collect(java.util.stream.Collectors.toList());
@@ -261,6 +263,19 @@ public class BillingService {
         }
         invoice.setStatus(InvoiceStatus.voided);
         invoice = invoiceRepository.save(invoice);
+
+        UUID customerId = resolveInvoiceOwner(invoice);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("invoice_id", invoice.getInvoiceId());
+        payload.put("order_id", invoice.getOrderId());
+        payload.put("policy_id", invoice.getPolicyId());
+        payload.put("customer_id", customerId);
+        payload.put("amount_vnd", invoice.getAmountVnd());
+        try {
+            outboxPublisher.enqueue("InvoiceVoided", objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to enqueue InvoiceVoided event", e);
+        }
         return toResponse(invoice);
     }
 

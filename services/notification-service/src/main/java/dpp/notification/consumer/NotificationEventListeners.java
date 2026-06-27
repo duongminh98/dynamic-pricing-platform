@@ -92,6 +92,11 @@ public class NotificationEventListeners {
         handle(msg, eventId, "RefundCompleted", this::buildRefundCompletedMessage);
     }
 
+    @RabbitListener(queues = "invoice.voided.queue")
+    public void onInvoiceVoided(@Payload String msg, @Header(name = "X-Event-Id", required = false) String eventId) {
+        handle(msg, eventId, "InvoiceVoided", this::buildInvoiceVoidedMessage);
+    }
+
     private void handle(String msg, String eventId, String type, MessageBuilder builder) {
         try {
             JsonNode n = objectMapper.readTree(msg);
@@ -301,6 +306,19 @@ public class NotificationEventListeners {
         if (refundId != null) sb.append(" Refund ID: ").append(refundId).append(".");
         if (amount != null) sb.append(" Refund amount: ").append(formatVnd(amount)).append(" VND.");
         if (paymentRef != null) sb.append(" Payment reference: ").append(paymentRef).append(".");
+        return sb.toString();
+    }
+
+    private String buildInvoiceVoidedMessage(JsonNode n) {
+        String invoiceId = text(n, "invoice_id");
+        String orderId = text(n, "order_id");
+        String amount = text(n, "amount_vnd");
+        StringBuilder sb = new StringBuilder();
+        sb.append("Your invoice has been voided by an administrator.");
+        if (invoiceId != null) sb.append(" Invoice ID: ").append(invoiceId).append(".");
+        if (orderId != null) sb.append(" Order ID: ").append(orderId).append(".");
+        if (amount != null) sb.append(" Amount: ").append(formatVnd(amount)).append(" VND.");
+        sb.append(" No payment is required.");
         return sb.toString();
     }
 

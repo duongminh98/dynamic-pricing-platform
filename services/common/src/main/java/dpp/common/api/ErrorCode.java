@@ -33,6 +33,7 @@ public enum ErrorCode {
 
     // ── Billing (R33) ──
     PAYMENT_FAILED(402, "Payment failed"),
+    INVOICE_NOT_PAYABLE(409, "Invoice is not payable"),
 
     // ── Authorization (R18) ──
     FORBIDDEN_RESOURCE(403, "Access denied to resource"),

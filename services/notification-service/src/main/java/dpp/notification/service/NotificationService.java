@@ -141,6 +141,7 @@ public class NotificationService {
             case "EndorsementCreditIssued" -> "Premium credit issued for your endorsement";
             case "RefundRequested" -> "Refund request created for your policy";
             case "RefundCompleted" -> "Your refund has been completed";
+            case "InvoiceVoided" -> "Your invoice has been voided";
             default -> "Insurance notification";
         };
     }

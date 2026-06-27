@@ -1,7 +1,11 @@
 package dpp.billing.controller;
 
+import dpp.billing.dto.CreateInvoiceRequest;
+import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.service.BillingService;
 import dpp.billing.service.CreditService;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,6 +26,12 @@ public class InternalBillingController {
     public InternalBillingController(BillingService billingService, CreditService creditService) {
         this.billingService = billingService;
         this.creditService = creditService;
+    }
+
+    @PostMapping("/invoices")
+    @ResponseStatus(HttpStatus.CREATED)
+    public InvoiceResponse createInvoice(@Valid @RequestBody CreateInvoiceRequest request) {
+        return billingService.createInvoice(request);
     }
 
     @PostMapping("/invoices/void-by-endorsement")

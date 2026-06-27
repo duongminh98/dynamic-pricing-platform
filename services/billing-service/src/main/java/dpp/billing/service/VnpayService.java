@@ -16,7 +16,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-
 /**
  * VNPAY payment integration service (task 21.2-21.4, R33.2).
  *
@@ -53,8 +52,8 @@ public class VnpayService {
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Invoice not found", null));
 
         if (invoice.getStatus() != InvoiceStatus.unpaid) {
-            throw new ServiceException(ErrorCode.ORDER_NOT_APPROVED,
-                    "Invoice is not in unpaid state", null);
+            throw new ServiceException(ErrorCode.INVOICE_NOT_PAYABLE,
+                    "Invoice is not in a payable state", Map.of("status", invoice.getStatus().name()));
         }
 
         // Fail gracefully (503) instead of a raw 500 when the VNPAY merchant

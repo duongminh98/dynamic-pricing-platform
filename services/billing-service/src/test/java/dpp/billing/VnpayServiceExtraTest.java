@@ -63,7 +63,7 @@ class VnpayServiceExtraTest {
         VnpayService svc = serviceWith(payRepo, invRepo, mock(BillingService.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.createPaymentUrl(invoiceId, "127.0.0.1"));
-        assertEquals(ErrorCode.ORDER_NOT_APPROVED, ex.getErrorCode());
+        assertEquals(ErrorCode.INVOICE_NOT_PAYABLE, ex.getErrorCode());
     }
 
     @Test

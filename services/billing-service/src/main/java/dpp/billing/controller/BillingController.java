@@ -9,7 +9,6 @@ import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.security.CustomerId;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -34,12 +33,6 @@ public class BillingController {
         this.directPayEnabled = directPayEnabled;
     }
 
-    @PostMapping("/invoices")
-    @ResponseStatus(HttpStatus.CREATED)
-    public InvoiceResponse createInvoice(@Valid @RequestBody CreateInvoiceRequest request) {
-        return billingService.createInvoice(request);
-    }
-
     @PostMapping("/invoices/{id}/pay")
     public InvoiceResponse payInvoice(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         if (!directPayEnabled) {
@@ -50,19 +43,18 @@ public class BillingController {
         return billingService.payInvoiceAsCustomer(id, customerId);
     }
 
-    @GetMapping("/invoices")
-    public Object getInvoices(@AuthenticationPrincipal Jwt jwt,
-                              @RequestParam(value = "order_id", required = false) UUID orderId,
-                              @RequestParam(value = "policy_id", required = false) UUID policyId) {
+    @GetMapping("/invoices/by-order/{orderId}")
+    public InvoiceResponse getInvoiceByOrder(@AuthenticationPrincipal Jwt jwt,
+                                             @PathVariable UUID orderId) {
         UUID customerId = CustomerId.fromSubject(jwt.getSubject());
-        if (orderId != null) {
-            return billingService.getInvoiceByOrder(orderId, customerId);
-        }
-        if (policyId != null) {
-            return billingService.getPolicyBilling(policyId, customerId);
-        }
-        throw new dpp.common.api.ServiceException(dpp.common.api.ErrorCode.BAD_REQUEST,
-                "Either order_id or policy_id query parameter is required", null);
+        return billingService.getInvoiceByOrder(orderId, customerId);
+    }
+
+    @GetMapping("/policies/{policyId}/billing")
+    public PolicyBillingResponse getPolicyBilling(@AuthenticationPrincipal Jwt jwt,
+                                                  @PathVariable UUID policyId) {
+        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
+        return billingService.getPolicyBilling(policyId, customerId);
     }
 
     // --- VNPAY endpoints (task 21.2-21.4, R33.2) ---

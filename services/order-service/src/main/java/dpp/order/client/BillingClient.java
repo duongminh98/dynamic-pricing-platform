@@ -36,7 +36,7 @@ public class BillingClient {
 
     private Map<String, Object> createInvoice(UUID orderId, UUID policyId, long amountVnd,
                                                UUID endorsementRequestId, java.time.OffsetDateTime dueDate) {
-        String url = baseUrl + "/billing/invoices";
+        String url = baseUrl + "/internal/invoices";
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("order_id", orderId.toString());
         if (policyId != null) body.put("policy_id", policyId.toString());
