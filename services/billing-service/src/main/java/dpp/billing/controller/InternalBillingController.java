@@ -50,4 +50,12 @@ public class InternalBillingController {
         resp.put("net_due_vnd", netDue);
         return resp;
     }
+
+    @GetMapping("/credits/refundable")
+    public Map<String, Object> getRefundableCredit(@RequestParam("policy_id") UUID policyId) {
+        long refundable = creditService.getRefundableCreditVnd(policyId);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("refundable_credit_vnd", refundable);
+        return resp;
+    }
 }

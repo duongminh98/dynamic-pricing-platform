@@ -82,4 +82,18 @@ public class BillingClient {
             throw new ServiceException(ErrorCode.INTERNAL_ERROR, "Failed to apply credit: " + e.getMessage(), null);
         }
     }
+
+    public long getRefundableCredit(UUID policyId) {
+        String url = baseUrl + "/internal/credits/refundable?policy_id=" + policyId;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = restTemplate.getForObject(url, Map.class);
+            if (resp != null && resp.get("refundable_credit_vnd") != null) {
+                return Long.parseLong(String.valueOf(resp.get("refundable_credit_vnd")));
+            }
+            return 0L;
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
 }

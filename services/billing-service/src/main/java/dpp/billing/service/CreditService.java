@@ -164,6 +164,14 @@ public class CreditService {
         return creditRepository.findByPolicyIdAndRemainingAmountVndGreaterThan(policyId, 0);
     }
 
+    @Transactional(readOnly = true)
+    public long getRefundableCreditVnd(UUID policyId) {
+        return creditRepository.findByPolicyIdAndRemainingAmountVndGreaterThan(policyId, 0)
+                .stream()
+                .mapToLong(PremiumCredit::getRemainingAmountVnd)
+                .sum();
+    }
+
     private void updateCreditStatus(PremiumCredit credit) {
         if (credit.getRemainingAmountVnd() <= 0) {
             credit.setStatus(CreditStatus.exhausted);

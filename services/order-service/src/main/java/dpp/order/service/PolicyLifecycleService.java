@@ -364,13 +364,18 @@ public class PolicyLifecycleService {
 
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(cancelDate, policy.getPolicyExpirationDate());
+        long refundableCreditVnd = 0L;
+        try {
+            refundableCreditVnd = billingClient.getRefundableCredit(policyId);
+        } catch (Exception ignored) {
+        }
         enqueueEvent("PolicyCancelled", policyId, Map.of(
                 "customer_id", policy.getCustomerId().toString(),
                 "cancel_date", cancelDate.toString(),
                 "final_premium_vnd", policy.getFinalPremiumVnd(),
                 "remaining_days", remainingDays,
                 "term_days", termDays,
-                "refundable_credit_vnd", 0L));
+                "refundable_credit_vnd", refundableCreditVnd));
 
         CancelResponse resp = new CancelResponse();
         resp.setPolicyId(policyId);
@@ -378,6 +383,7 @@ public class PolicyLifecycleService {
         resp.setCancelDate(cancelDate);
         resp.setRemainingDays(remainingDays);
         resp.setTermDays(termDays);
+        resp.setRefundableCreditVnd(refundableCreditVnd);
         return resp;
     }
 
@@ -1192,6 +1198,23 @@ public class PolicyLifecycleService {
     }
 
     @Transactional
+    public void activateRenewedPolicy(UUID policyId) {
+        Policy policy = policyRepository.findById(policyId).orElse(null);
+        if (policy == null || policy.getStatus() != PolicyStatus.pending_payment) {
+            return;
+        }
+        policy.setStatus(PolicyStatus.active);
+        policyRepository.save(policy);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("customer_id", policy.getCustomerId().toString());
+        payload.put("renewal_number", policy.getRenewalNumber());
+        payload.put("renewed_premium_vnd", policy.getFinalPremiumVnd());
+        payload.put("new_effective_date", policy.getPolicyEffectiveDate().toString());
+        payload.put("new_expiration_date", policy.getPolicyExpirationDate().toString());
+        enqueueEvent("PolicyRenewed", policyId, payload);
+    }
+
+    @Transactional
     public CancelResponse cancel(UUID policyId, CancelRequest request, String keycloakSubject) {
         Policy policy = findOwnedPolicy(policyId, keycloakSubject);
         if (policy.getStatus() != PolicyStatus.active) {
@@ -1226,10 +1249,11 @@ public class PolicyLifecycleService {
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(cancelDate, policy.getPolicyExpirationDate());
 
-        // E4: Include refundable_credit_vnd in the event (billing is the source of truth).
         long refundableCreditVnd = 0L;
-        // The credit amount is resolved by billing when processing the event;
-        // order-service passes 0 as a placeholder — billing enriches at event processing time.
+        try {
+            refundableCreditVnd = billingClient.getRefundableCredit(policyId);
+        } catch (Exception ignored) {
+        }
         enqueueEvent("PolicyCancelled", policyId, Map.of(
                 "customer_id", policy.getCustomerId().toString(),
                 "cancel_date", cancelDate.toString(),
@@ -1244,6 +1268,7 @@ public class PolicyLifecycleService {
         resp.setCancelDate(cancelDate);
         resp.setRemainingDays(remainingDays);
         resp.setTermDays(termDays);
+        resp.setRefundableCreditVnd(refundableCreditVnd);
         return resp;
     }
 

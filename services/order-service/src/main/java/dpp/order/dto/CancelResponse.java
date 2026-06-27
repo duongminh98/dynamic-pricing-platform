@@ -15,4 +15,5 @@ public class CancelResponse {
     private OffsetDateTime cancelDate;
     private long remainingDays;
     private long termDays;
+    private long refundableCreditVnd;
 }
