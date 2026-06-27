@@ -79,6 +79,9 @@ _ARTIFACT_FREE_TESTS = frozenset({
     "test_governance_no_artifacts.py",
     "test_routers_no_artifacts.py",
     "test_common_no_artifacts.py",
+    "test_governance_hardening.py",
+    "test_routers_reports.py",
+    "test_routers_admin.py",
 })
 
 

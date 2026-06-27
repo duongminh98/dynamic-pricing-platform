@@ -10,12 +10,25 @@ from httpx import AsyncClient, ASGITransport
 from fastapi import FastAPI
 
 from app.routers import reports
+from common.errors import setup_exception_handlers
 import app.config as config
+
+
+def make_token(roles):
+    import base64
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).decode().rstrip("=")
+    payload = base64.urlsafe_b64encode(json.dumps({"realm_access": {"roles": roles}}).encode()).decode().rstrip("=")
+    return header + "." + payload + ".sig"
+
+
+def auth_header(roles):
+    return {"Authorization": "Bearer " + make_token(roles)}
 
 
 @pytest.fixture
 def app():
     app = FastAPI()
+    setup_exception_handlers(app)
     app.include_router(reports.router)
     return app
 
@@ -23,6 +36,7 @@ def app():
 @pytest.fixture
 def enabled_app():
     app = FastAPI()
+    setup_exception_handlers(app)
     app.include_router(reports.router)
     saved = config.VALIDATION_ENDPOINTS_ENABLED
     config.VALIDATION_ENDPOINTS_ENABLED = True
@@ -34,39 +48,52 @@ def enabled_app():
 async def test_validation_disabled_returns_404(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/pricing/validation/health")
+        resp = await client.get("/pricing/validation/health", headers=auth_header(["Administrator"]))
     assert resp.status_code == 404
-    assert resp.json()["detail"] == "VALIDATION_REPORT_UNAVAILABLE"
+    assert resp.json()["error_code"] == "VALIDATION_REPORT_UNAVAILABLE"
 
 
 @pytest.mark.asyncio
 async def test_fairness_disabled_returns_404(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/pricing/fairness/health")
+        resp = await client.get("/pricing/fairness/health", headers=auth_header(["Administrator"]))
     assert resp.status_code == 404
-    assert resp.json()["detail"] == "VALIDATION_REPORT_UNAVAILABLE"
+    assert resp.json()["error_code"] == "FAIRNESS_REPORT_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_validation_requires_admin(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/pricing/validation/health")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_fairness_requires_admin(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/pricing/fairness/health")
+    assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_validation_enabled_but_file_missing_returns_404(enabled_app):
     transport = ASGITransport(app=enabled_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/pricing/validation/nonexistent_line")
+        resp = await client.get("/pricing/validation/nonexistent_line", headers=auth_header(["Administrator"]))
     assert resp.status_code == 404
-    assert resp.json()["detail"] == "VALIDATION_REPORT_UNAVAILABLE"
+    assert resp.json()["error_code"] == "VALIDATION_REPORT_UNAVAILABLE"
 
 
 @pytest.mark.asyncio
-async def test_fairness_enabled_returns_dummy_when_file_missing(enabled_app):
+async def test_fairness_enabled_file_missing_returns_404(enabled_app):
     transport = ASGITransport(app=enabled_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/pricing/fairness/nonexistent_line")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "gender_split" in body
-    assert "age_groups" in body
-    assert "requires_review" in body
+        resp = await client.get("/pricing/fairness/nonexistent_line", headers=auth_header(["Administrator"]))
+    assert resp.status_code == 404
+    assert resp.json()["error_code"] == "FAIRNESS_REPORT_UNAVAILABLE"
 
 
 @pytest.mark.asyncio
@@ -82,7 +109,7 @@ async def test_fairness_enabled_returns_file_when_exists(enabled_app, tmp_path, 
 
     transport = ASGITransport(app=enabled_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/pricing/fairness/health")
+        resp = await client.get("/pricing/fairness/health", headers=auth_header(["Administrator"]))
     assert resp.status_code == 200
     body = resp.json()
     assert body["gender_split"]["male"] == 0.6
@@ -98,7 +125,7 @@ async def test_validation_enabled_returns_file_when_exists(enabled_app, tmp_path
 
     transport = ASGITransport(app=enabled_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/pricing/validation/health")
+        resp = await client.get("/pricing/validation/health", headers=auth_header(["Administrator"]))
     assert resp.status_code == 200
     body = resp.json()
     assert body["gini"] == 0.72

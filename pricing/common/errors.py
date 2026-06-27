@@ -80,6 +80,7 @@ class ErrorCode(Enum):
 
     # ── Pricing validation (R20) ──
     VALIDATION_REPORT_UNAVAILABLE = ("VALIDATION_REPORT_UNAVAILABLE", 404, "Validation report unavailable")
+    FAIRNESS_REPORT_UNAVAILABLE = ("FAIRNESS_REPORT_UNAVAILABLE", 404, "Fairness report unavailable")
 
     # ── Generic ──
     INTERNAL_ERROR = ("INTERNAL_ERROR", 500, "Internal server error")

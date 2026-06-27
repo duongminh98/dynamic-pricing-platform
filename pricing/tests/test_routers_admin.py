@@ -88,8 +88,9 @@ async def test_list_models_admin_only(app):
 
 @pytest.mark.asyncio
 async def test_list_models_returns_all(app, db_session):
-    _insert_model(db_session, line="health", gini=0.70)
-    _insert_model(db_session, line="car", gini=0.65)
+    mv1 = _insert_model(db_session, line="health", gini=0.70)
+    mv2 = _insert_model(db_session, line="car", gini=0.65)
+    _insert_champion(db_session, "health", mv1.model_version_id)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -97,6 +98,31 @@ async def test_list_models_returns_all(app, db_session):
     assert resp.status_code == 200
     body = resp.json()
     assert len(body) == 2
+    for m in body:
+        assert "is_champion" in m
+        assert "model_version_id" in m
+        assert "line" in m
+        assert "algorithm" in m
+        assert "gini" in m
+        assert "monotonic_applied" in m
+    health_model = next(m for m in body if m["line"] == "health")
+    assert health_model["is_champion"] is True
+    car_model = next(m for m in body if m["line"] == "car")
+    assert car_model["is_champion"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_models_filter_by_line(app, db_session):
+    _insert_model(db_session, line="health", gini=0.70)
+    _insert_model(db_session, line="car", gini=0.65)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/pricing/models?line=car", headers=auth_header(["Administrator"]))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["line"] == "car"
 
 
 @pytest.mark.asyncio
@@ -135,6 +161,7 @@ async def test_promote_champion_gini_not_improved(app, db_session):
     assert resp.status_code == 200
     body = resp.json()
     assert body["promoted"] is False
+    assert body["reason"] == "GINI_NOT_IMPROVED"
 
 
 @pytest.mark.asyncio
@@ -153,6 +180,7 @@ async def test_promote_champion_monotonic_not_applied(app, db_session):
     assert resp.status_code == 200
     body = resp.json()
     assert body["promoted"] is False
+    assert body["reason"] == "MONOTONIC_NOT_APPLIED"
 
 
 @pytest.mark.asyncio

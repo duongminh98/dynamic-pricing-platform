@@ -143,3 +143,88 @@ class TestDriftFlagging:
         psi_drift = population_stability_index(baseline, drifted)
         assert psi_same < 0.1
         assert psi_drift > 0.25  # "significant drift" band
+
+
+# ───────────────────────── Drift-driven retrain (T12-T14) ───────────────────
+class TestDriftDrivenRetrain:
+
+    def test_t12_lines_with_drift_reads_needs_recalibration(self, monkeypatch):
+        """T12: lines_with_drift reads model_drift_flag needs_recalibration=true."""
+        config = {"drift_trigger_enabled": True}
+
+        class FakeCursor:
+            def __init__(self):
+                self._data = {
+                    "health": (True,),
+                    "car": (False,),
+                    "motorbike": (True,),
+                    "home": (False,),
+                    "accident": (False,),
+                    "travel": (False,),
+                }
+                self._current = None
+
+            def execute(self, sql, params):
+                self._current = params[0] if params else None
+
+            def fetchone(self):
+                if self._current and self._current in self._data:
+                    return self._data[self._current]
+                return None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        class FakeConn:
+            def cursor(self):
+                return FakeCursor()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(rt, "_get_db_connection", lambda: FakeConn())
+        result = rt.lines_with_drift(config)
+        assert "health" in result
+        assert "motorbike" in result
+        assert "car" not in result
+        assert "home" not in result
+
+    def test_t13_drift_trigger_registers_candidate_not_promote(self, monkeypatch):
+        """T13: Drift trigger chain registers candidate, never touches champion_assignment."""
+        calls = []
+        monkeypatch.setattr(rt, "run_training",
+                            lambda line: (calls.append("train"), (True, ""))[1])
+        monkeypatch.setattr(rt, "run_validation",
+                            lambda line: (calls.append("validate"), (True, ""))[1])
+        monkeypatch.setattr(rt, "run_monotonic_gate",
+                            lambda line: (calls.append("gate"), (True, "ok"))[1])
+
+        registered = []
+
+        def _fake_register(line):
+            registered.append(line)
+            calls.append("register")
+            return {"candidate_model_version": "cand-drift-001", "line": line, "promoted": False}
+
+        monkeypatch.setattr(rt, "register_candidate", _fake_register)
+
+        result = rt.trigger_retrain("health")
+        assert result["status"] == "candidate_registered"
+        assert result["promoted"] is False
+        assert "register" in calls
+        assert registered == ["health"]
+
+    def test_t14_drift_trigger_disabled_returns_empty(self, monkeypatch):
+        """T14: drift_trigger_enabled=false → lines_with_drift returns []."""
+        config = {"drift_trigger_enabled": False}
+
+        # Even if _get_db_connection would return data, it should never be called.
+        def _should_not_be_called():
+            raise AssertionError("_get_db_connection should not be called when disabled")
+
+        monkeypatch.setattr(rt, "_get_db_connection", _should_not_be_called)
+        result = rt.lines_with_drift(config)
+        assert result == []

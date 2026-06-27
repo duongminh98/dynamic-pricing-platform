@@ -17,17 +17,45 @@ class PromoteRequest(BaseModel):
 class RollbackRequest(BaseModel):
     line: str
 
+def _model_to_dict(mv: ModelVersion, is_champion: bool) -> dict:
+    return {
+        "model_version_id": mv.model_version_id,
+        "line": mv.line,
+        "algorithm": mv.algorithm,
+        "gini": mv.gini,
+        "rmse": mv.rmse,
+        "mae": mv.mae,
+        "deviance": mv.deviance,
+        "trained_at": mv.trained_at.isoformat() if mv.trained_at else None,
+        "dataset_desc": mv.dataset_desc,
+        "monotonic_applied": mv.monotonic_applied,
+        "is_champion": is_champion,
+    }
+
 @models_router.get("/models")
-async def list_models(db: Session = Depends(get_db), _claims=Depends(require_administrator)):
-    return db.query(ModelVersion).all()
+async def list_models(line: str | None = None, db: Session = Depends(get_db), _claims=Depends(require_administrator)):
+    query = db.query(ModelVersion)
+    if line:
+        query = query.filter(ModelVersion.line == line)
+    models = query.all()
+    champion_ids = {
+        a.model_version_id for a in db.query(ChampionAssignment).filter(
+            ChampionAssignment.is_current.is_(True)
+        ).all()
+    }
+    return [_model_to_dict(mv, mv.model_version_id in champion_ids) for mv in models]
 
 @router.post("/champion/promote")
-async def promote_champion(request: PromoteRequest, db: Session = Depends(get_db), _claims=Depends(require_administrator)):
+async def promote_champion(request: PromoteRequest, db: Session = Depends(get_db), claims=Depends(require_administrator)):
     from ..pricing_engine import governance
     from common.errors import ServiceException
+    actor = claims.get("sub", "admin")
     try:
-        result = governance.promote_champion(db, request.line, request.model_version_id)
-        return {"status": "success", "promoted": result["promoted"], "champion": result.get("champion")}
+        result = governance.promote_champion(db, request.line, request.model_version_id, actor=actor)
+        resp = {"status": "success", "promoted": result["promoted"], "champion": result.get("champion")}
+        if not result["promoted"]:
+            resp["reason"] = result.get("reason")
+        return resp
     except ServiceException:
         db.rollback()
         raise
@@ -36,11 +64,12 @@ async def promote_champion(request: PromoteRequest, db: Session = Depends(get_db
         raise HTTPException(status_code=500, detail={"error_code": "INTERNAL_ERROR", "message": str(e)})
 
 @router.post("/champion/rollback")
-async def rollback_champion(request: RollbackRequest, db: Session = Depends(get_db), _claims=Depends(require_administrator)):
+async def rollback_champion(request: RollbackRequest, db: Session = Depends(get_db), claims=Depends(require_administrator)):
     from ..pricing_engine import governance
     from common.errors import ServiceException
+    actor = claims.get("sub", "admin")
     try:
-        result = governance.rollback_champion(db, request.line)
+        result = governance.rollback_champion(db, request.line, actor=actor)
         return {"status": "success", "rolled_back": result["rolled_back"], "champion": result.get("champion")}
     except ServiceException:
         db.rollback()

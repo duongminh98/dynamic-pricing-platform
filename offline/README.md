@@ -54,12 +54,16 @@ while **tree / LightGBM** candidates always require `monotonic_applied = true`
 
 ## Retrain trigger (task 23.1, R37.2 / BR-24)
 
-`retrain_trigger.py` supports two independent trigger conditions configured in
+`retrain_trigger.py` supports three independent trigger conditions configured in
 `retrain_config.json`:
 
 1. **Scheduled** — quarterly (`quarterly_months`, default Jan/Apr/Jul/Oct).
 2. **Data threshold** — when new claims/exposure for a line exceeds
    `line_thresholds[line]`.
+3. **Drift-driven** — when the latest `model_drift_flag` for a line has
+   `needs_recalibration=true` (gated by `drift_trigger_enabled`). This reads
+   the same `model_drift_flag` table that `GET /pricing/drift` exposes to
+   admins, so the trigger source of truth matches what administrators see.
 
 When triggered for a line it chains, stopping at the first failure:
 
@@ -78,10 +82,15 @@ explicit, governed Administrator action (BR-23) via the promote endpoint in
 The script itself does not daemonize; it just decides whether a trigger
 condition is met *today*. Drive it from an external scheduler.
 
+**Important:** `drift_monitor.py` must run **before** `retrain_trigger.py` so
+that `model_drift_flag` rows are fresh when the trigger reads them. For example,
+run drift_monitor at 01:50 and retrain_trigger at 02:00.
+
 **cron** (run daily at 02:00; the script no-ops unless a condition is met):
 
 ```cron
-0 2 * * *  cd /opt/dpp && .venv/bin/python offline/retrain_trigger.py >> /var/log/dpp/retrain.log 2>&1
+50 1 * * *  cd /opt/dpp && .venv/bin/python offline/drift_monitor.py >> /var/log/dpp/drift.log 2>&1
+0 2 * * *   cd /opt/dpp && .venv/bin/python offline/retrain_trigger.py >> /var/log/dpp/retrain.log 2>&1
 ```
 
 **GitHub Actions** (`.github/workflows/retrain.yml`):

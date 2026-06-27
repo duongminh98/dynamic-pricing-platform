@@ -114,6 +114,40 @@ def lines_exceeding_threshold(config: dict) -> list[str]:
     return result
 
 
+def lines_with_drift(config: dict) -> list[str]:
+    """Return lines whose latest model_drift_flag has needs_recalibration=true.
+
+    Reads the same model_drift_flag table that GET /pricing/drift exposes to
+    admins, so the trigger source of truth matches what administrators see.
+    Disabled entirely when drift_trigger_enabled is false in retrain_config.json.
+    """
+    if not config.get("drift_trigger_enabled", False):
+        return []
+    result = []
+    try:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                for line in LINES:
+                    cur.execute(
+                        """
+                        SELECT needs_recalibration FROM model_drift_flag
+                        WHERE line = %s
+                        ORDER BY computed_at DESC
+                        LIMIT 1
+                        """,
+                        (line,),
+                    )
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        result.append(line)
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return result
+
+
 # ── Pipeline steps (each is independently monkeypatchable in tests) ─────────
 def _run_script(script_rel: str) -> tuple[bool, str]:
     """Run an offline script as a subprocess. Returns (ok, error_message)."""
@@ -291,15 +325,31 @@ def main():
     if args.line:
         lines_to_check = [args.line]
     else:
+        # Merge trigger sources: schedule (all lines), data threshold, drift.
+        # Dedupe while preserving order.
         lines_to_check = []
+        seen = set()
+
         if is_scheduled(config):
             print("Scheduled trigger: quarterly retrain for all lines.")
-            lines_to_check = list(LINES)
-        else:
-            threshold_lines = lines_exceeding_threshold(config)
-            if threshold_lines:
-                print(f"Data threshold trigger: {threshold_lines}")
-                lines_to_check = threshold_lines
+            for line in LINES:
+                if line not in seen:
+                    lines_to_check.append(line)
+                    seen.add(line)
+
+        threshold_lines = lines_exceeding_threshold(config)
+        for line in threshold_lines:
+            if line not in seen:
+                print(f"Data threshold trigger: {line}")
+                lines_to_check.append(line)
+                seen.add(line)
+
+        drift_lines = lines_with_drift(config)
+        for line in drift_lines:
+            if line not in seen:
+                print(f"Drift trigger: {line}")
+                lines_to_check.append(line)
+                seen.add(line)
 
     if not lines_to_check:
         print("No trigger conditions met. Nothing to retrain.")

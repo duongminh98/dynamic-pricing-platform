@@ -11,5 +11,6 @@
     "travel": 200
   },
   "drift_threshold_psi": 0.2,
-  "drift_threshold_calibration": 0.15
+  "drift_threshold_calibration": 0.15,
+  "drift_trigger_enabled": true
 }
