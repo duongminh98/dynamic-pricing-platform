@@ -18,7 +18,13 @@ import pathlib
 import pytest
 
 import offline.retrain_trigger as rt
-from offline.drift_monitor import population_stability_index, evaluate_line
+from offline.drift_monitor import (
+    population_stability_index,
+    evaluate_line,
+    compute_feature_drift,
+    compute_prediction_drift,
+    compute_calibration_drift,
+)
 
 
 # ───────────────────────── Retrain trigger ─────────────────────────────────
@@ -116,22 +122,83 @@ class TestMonotonicGateExemption:
 class TestDriftFlagging:
 
     def test_injected_feature_drift_sets_flag(self):
-        config = {"drift_threshold_psi": 0.2, "drift_threshold_calibration": 0.15}
-        # Inject a large PSI (well above threshold).
-        result = evaluate_line("health", config, psi_value=0.9, cal_value=0.0)
-        assert result["psi"]["needs_recalibration"] is True
+        config = {
+            "drift_threshold_psi": 0.2,
+            "drift_threshold_prediction_psi": 0.2,
+            "drift_threshold_calibration": 0.15,
+            "calibration_min_total_outcomes": 100,
+            "calibration_min_samples_per_bin": 20,
+        }
+        baseline = {
+            "feature_bins": {
+                "age": {"edges": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+                         "proportions": [0.1]*10},
+            },
+            "prediction_bins": {"edges": [0]*11, "proportions": [1.0] + [0.0]*9},
+            "calibration_reference": [],
+        }
+        current = [{"age": 95.0} for _ in range(100)]
+        result = evaluate_line("health", config, baseline=baseline, current_quotes=current, outcomes=[])
+        assert result["feature_psi"]["needs_recalibration"] is True
         assert result["needs_recalibration"] is True
 
     def test_injected_calibration_drift_sets_flag(self):
-        config = {"drift_threshold_psi": 0.2, "drift_threshold_calibration": 0.15}
-        result = evaluate_line("car", config, psi_value=0.0, cal_value=0.5)
+        config = {
+            "drift_threshold_psi": 0.2,
+            "drift_threshold_prediction_psi": 0.2,
+            "drift_threshold_calibration": 0.15,
+            "calibration_min_total_outcomes": 100,
+            "calibration_min_samples_per_bin": 20,
+        }
+        baseline = {
+            "feature_bins": {},
+            "prediction_bins": {"edges": [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+                                 "proportions": [0.1]*10},
+            "calibration_reference": [
+                {"bin_index": i, "count": 25, "actual_rate": 1000.0}
+                for i in range(10)
+            ],
+        }
+        outcomes = []
+        for i in range(200):
+            outcomes.append({
+                "pure_premium_vnd": float((i % 10) * 100 + 50),
+                "actual_loss_vnd": 50000.0,
+            })
+        result = evaluate_line("car", config, baseline=baseline, current_quotes=[], outcomes=outcomes)
         assert result["calibration"]["needs_recalibration"] is True
         assert result["needs_recalibration"] is True
 
     def test_no_drift_when_metrics_below_threshold(self):
-        config = {"drift_threshold_psi": 0.2, "drift_threshold_calibration": 0.15}
-        result = evaluate_line("home", config, psi_value=0.01, cal_value=0.01)
-        assert result["psi"]["needs_recalibration"] is False
+        config = {
+            "drift_threshold_psi": 0.2,
+            "drift_threshold_prediction_psi": 0.2,
+            "drift_threshold_calibration": 0.15,
+            "calibration_min_total_outcomes": 100,
+            "calibration_min_samples_per_bin": 20,
+        }
+        baseline = {
+            "feature_bins": {
+                "age": {"edges": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+                         "proportions": [0.1]*10},
+            },
+            "prediction_bins": {"edges": [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+                                 "proportions": [0.1]*10},
+            "calibration_reference": [
+                {"bin_index": i, "count": 25, "actual_rate": 1000.0}
+                for i in range(10)
+            ],
+        }
+        current = [{"age": float(i % 100), "pure_premium_vnd": float((i % 10) * 100 + 50)}
+                   for i in range(200)]
+        outcomes = []
+        for i in range(200):
+            outcomes.append({
+                "pure_premium_vnd": float((i % 10) * 100 + 50),
+                "actual_loss_vnd": 1000.0,
+            })
+        result = evaluate_line("home", config, baseline=baseline, current_quotes=current, outcomes=outcomes)
+        assert result["feature_psi"]["needs_recalibration"] is False
         assert result["calibration"]["needs_recalibration"] is False
         assert result["needs_recalibration"] is False
 

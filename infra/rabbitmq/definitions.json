@@ -209,6 +209,27 @@
       "arguments": {
         "x-queue-type": "quorum"
       }
+    },
+    {
+      "name": "claim.settled.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-dead-letter-exchange": "platform.events.dlx",
+        "x-dead-letter-routing-key": "ClaimSettled",
+        "x-delivery-limit": 3
+      }
+    },
+    {
+      "name": "claim.settled.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
     }
   ],
   "bindings": [
@@ -338,6 +359,22 @@
       "destination": "champion.rolledback.dlq",
       "destination_type": "queue",
       "routing_key": "ChampionRolledBack",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "claim.settled.queue",
+      "destination_type": "queue",
+      "routing_key": "ClaimSettled",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "claim.settled.dlq",
+      "destination_type": "queue",
+      "routing_key": "ClaimSettled",
       "arguments": {}
     }
   ]

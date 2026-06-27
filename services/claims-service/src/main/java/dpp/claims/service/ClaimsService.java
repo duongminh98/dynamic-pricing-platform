@@ -144,11 +144,18 @@ public class ClaimsService {
         claim.setIncurredAmount(incurred);
         claim.setPaidAmount(paid);
         claim.setClaimStatus(ClaimStatus.approved);
+        claim.setPaymentReference(request.getPaymentReference());
+        if (request.getPaidAt() != null) {
+            claim.setPaidAt(request.getPaidAt());
+        } else {
+            claim.setPaidAt(OffsetDateTime.now());
+        }
         if (request.getAdminNote() != null) {
             claim.setAdminNote(request.getAdminNote());
         }
         claim = claimRepository.save(claim);
         enqueueClaimChanged(claim);
+        enqueueClaimSettled(claim);
         return toResponse(claim);
     }
 
@@ -212,6 +219,9 @@ public class ClaimsService {
         }
         claim = claimRepository.save(claim);
         enqueueClaimChanged(claim);
+        if (claim.getClaimStatus() == ClaimStatus.approved) {
+            enqueueClaimSettled(claim);
+        }
         return toResponse(claim);
     }
 
@@ -293,6 +303,31 @@ public class ClaimsService {
         }
     }
 
+    private void enqueueClaimSettled(Claim claim) {
+        String quoteId = null;
+        String line = null;
+        try {
+            Map<String, Object> orderInfo = orderClient.getQuoteIdByPolicy(claim.getPolicyId());
+            if (orderInfo != null) {
+                quoteId = String.valueOf(orderInfo.get("quote_id"));
+                line = orderInfo.get("line") != null ? String.valueOf(orderInfo.get("line")) : null;
+            }
+        } catch (Exception ignored) {
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("claim_id", claim.getClaimId().toString());
+        payload.put("policy_id", claim.getPolicyId().toString());
+        payload.put("quote_id", quoteId);
+        payload.put("line", line);
+        payload.put("paid_amount_vnd", claim.getPaidAmount());
+        payload.put("settled_at", claim.getPaidAt() != null ? claim.getPaidAt().toString() : OffsetDateTime.now().toString());
+        try {
+            outboxPublisher.enqueue("ClaimSettled", objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to enqueue ClaimSettled", e);
+        }
+    }
+
     private ClaimResponse toResponse(Claim claim) {
         ClaimResponse resp = new ClaimResponse();
         resp.setClaimId(claim.getClaimId());
@@ -311,6 +346,8 @@ public class ClaimsService {
         resp.setAttachments(claim.getAttachments());
         resp.setCreatedAt(claim.getCreatedAt());
         resp.setAdminNote(claim.getAdminNote());
+        resp.setPaymentReference(claim.getPaymentReference());
+        resp.setPaidAt(claim.getPaidAt());
         return resp;
     }
 }

@@ -5,6 +5,7 @@ import dpp.common.api.ServiceException;
 import dpp.order.dto.ExposureSegmentResponse;
 import dpp.order.dto.OwnerResponse;
 import dpp.order.dto.PolicyResponse;
+import dpp.order.dto.QuoteIdResponse;
 import dpp.order.entity.ExposureSegment;
 import dpp.order.entity.Policy;
 import dpp.order.repository.ExposureSegmentRepository;
@@ -89,6 +90,20 @@ public class InternalOwnerController {
         }
         return exposureSegmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(id).stream()
                 .map(this::toSegmentResponse).collect(Collectors.toList());
+    }
+
+    /**
+     * Resolve the quote_id for a given policy_id. Used by claims-service during
+     * claim approval to emit ClaimSettled with the originating quote_id so
+     * pricing-service can join outcomes to predictions for calibration drift.
+     */
+    @GetMapping("/orders/by-policy/{policyId}")
+    public QuoteIdResponse getQuoteIdByPolicy(@PathVariable UUID policyId) {
+        Policy p = policyRepository.findById(policyId)
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null));
+        return orderRepository.findById(p.getOrderId())
+                .map(o -> new QuoteIdResponse(o.getOrderId(), o.getQuoteId(), p.getLine()))
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found for policy", null));
     }
 
     private ExposureSegmentResponse toSegmentResponse(ExposureSegment seg) {

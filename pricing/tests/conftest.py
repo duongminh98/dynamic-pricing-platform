@@ -82,6 +82,7 @@ _ARTIFACT_FREE_TESTS = frozenset({
     "test_governance_hardening.py",
     "test_routers_reports.py",
     "test_routers_admin.py",
+    "test_claim_settled_consumer.py",
 })
 
 

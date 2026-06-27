@@ -68,24 +68,25 @@ class TestDriftMonitor:
     def test_evaluate_line_returns_expected_structure(self):
         config = {
             "drift_threshold_psi": 0.2,
+            "drift_threshold_prediction_psi": 0.2,
             "drift_threshold_calibration": 0.15,
         }
         result = evaluate_line("health", config)
         assert result["line"] == "health"
-        assert "psi" in result
+        assert "feature_psi" in result
+        assert "prediction_psi" in result
         assert "calibration" in result
         assert "needs_recalibration" in result
-        assert "value" in result["psi"]
-        assert "threshold" in result["psi"]
-        assert "needs_recalibration" in result["psi"]
+        assert "value" in result["feature_psi"]
+        assert "threshold" in result["feature_psi"]
+        assert "needs_recalibration" in result["feature_psi"]
 
     def test_evaluate_line_drift_detected(self):
-        """When thresholds are set very low, drift should be detected."""
+        """When no baseline exists, structure is still valid."""
         config = {
             "drift_threshold_psi": 0.0,
+            "drift_threshold_prediction_psi": 0.0,
             "drift_threshold_calibration": 0.0,
         }
         result = evaluate_line("health", config)
-        # With threshold 0, any nonzero value triggers drift
-        # (PSI may be 0 for identical halves, so check the structure)
         assert isinstance(result["needs_recalibration"], bool)

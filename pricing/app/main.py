@@ -10,7 +10,10 @@ from .pricing_engine.loader import load_artifacts
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_artifacts()
+    from .consumers.claim_settled_consumer import start_consumer, stop_consumer
+    start_consumer()
     yield
+    stop_consumer()
 
 
 app = FastAPI(title="Pricing Service", lifespan=lifespan)

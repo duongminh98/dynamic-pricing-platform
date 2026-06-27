@@ -11,6 +11,10 @@
     "travel": 200
   },
   "drift_threshold_psi": 0.2,
+  "drift_threshold_prediction_psi": 0.2,
   "drift_threshold_calibration": 0.15,
+  "drift_window_days": 30,
+  "calibration_min_samples_per_bin": 20,
+  "calibration_min_total_outcomes": 100,
   "drift_trigger_enabled": true
 }

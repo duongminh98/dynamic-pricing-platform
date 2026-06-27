@@ -51,4 +51,19 @@ public class OrderClient {
             throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Exposure segments not found", null);
         }
     }
+
+    /**
+     * Resolve the originating quote_id for a policy. Used during claim approval
+     * to emit ClaimSettled with quote_id so pricing-service can join outcomes
+     * to predictions for calibration drift monitoring.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getQuoteIdByPolicy(UUID policyId) {
+        try {
+            return restTemplate.getForObject(
+                    baseUrl + "/internal/orders/by-policy/" + policyId, Map.class);
+        } catch (Exception e) {
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found for policy", null);
+        }
+    }
 }

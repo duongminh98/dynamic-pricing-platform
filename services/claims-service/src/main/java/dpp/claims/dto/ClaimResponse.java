@@ -28,4 +28,6 @@ public class ClaimResponse {
     private List<String> attachments;
     private OffsetDateTime createdAt;
     private String adminNote;
+    private String paymentReference;
+    private OffsetDateTime paidAt;
 }

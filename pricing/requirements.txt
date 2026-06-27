@@ -23,3 +23,6 @@ psycopg2-binary>=2.9.0
 # DB migrations (run at container startup)
 alembic>=1.13.0
 PyYAML>=6.0
+
+# RabbitMQ consumer for ClaimSettled events (calibration drift read-model)
+pika>=1.3.0

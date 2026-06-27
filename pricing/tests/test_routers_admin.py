@@ -240,7 +240,10 @@ async def test_get_drift_status_empty(app, db_session):
     assert len(body) == 6
     for entry in body:
         assert entry["needs_recalibration"] is False
-        assert entry["metrics"] == []
+        assert "feature_psi" in entry["metrics"]
+        assert "prediction_psi" in entry["metrics"]
+        assert "calibration" in entry["metrics"]
+        assert entry["metrics"]["calibration"]["status"] == "no_data"
 
 
 @pytest.mark.asyncio
@@ -249,7 +252,7 @@ async def test_get_drift_status_with_flags(app, db_session):
     db_session.add(ModelDriftFlag(
         flag_id=str(uuid.uuid4()),
         line="health",
-        metric="psi",
+        metric="feature_psi",
         value=0.15,
         threshold=0.1,
         needs_recalibration=True,
@@ -264,8 +267,8 @@ async def test_get_drift_status_with_flags(app, db_session):
     body = resp.json()
     health_entry = next(e for e in body if e["line"] == "health")
     assert health_entry["needs_recalibration"] is True
-    assert "psi" in health_entry["metrics"]
-    assert health_entry["metrics"]["psi"]["value"] == 0.15
+    assert "feature_psi" in health_entry["metrics"]
+    assert health_entry["metrics"]["feature_psi"]["value"] == 0.15
 
 
 @pytest.mark.asyncio

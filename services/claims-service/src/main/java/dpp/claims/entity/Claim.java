@@ -66,4 +66,10 @@ public class Claim {
 
     @Column(name = "admin_note", length = 2000)
     private String adminNote;
+
+    @Column(name = "payment_reference", length = 100)
+    private String paymentReference;
+
+    @Column(name = "paid_at")
+    private OffsetDateTime paidAt;
 }

@@ -66,6 +66,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data" / "synthetic_real"
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
 METADATA_PATH = DATA_DIR / "pricing_modeling_metadata.json"
+BASELINES_DIR = ROOT / "reports" / "modeling" / "baselines"
 
 LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
 
@@ -382,6 +383,108 @@ def run_cv(lines: list[str] | None = None, families: list[str] | None = None) ->
     return results
 
 
+def dump_baseline_artifact(line: str, df_freq: pd.DataFrame, df_sev: pd.DataFrame) -> None:
+    """Dump baseline drift artifact for a line.
+
+    Produces a JSON file at reports/modeling/baselines/{line}_baseline.json with:
+    - feature_bins: histogram edges + counts for key numeric features
+    - prediction_bins: histogram edges + counts for model pure_premium predictions
+    - calibration_reference: actual claim rate per prediction bin
+    """
+    BASELINES_DIR.mkdir(parents=True, exist_ok=True)
+
+    existing_path = MODELS_DIR / f"{line}__lgb_tw.joblib"
+    if not existing_path.exists():
+        print(f"  SKIP baseline for {line}: no tw model artifact")
+        return
+
+    model = joblib.load(existing_path)
+    existing_features = list(model.feature_name_)
+
+    feat_df = prepare_features(df_freq, existing_features)
+    predictions = model.predict(feat_df)
+
+    # Feature bins: use key numeric features present in the dataset
+    feature_cols = ["age", "coverage_amount_vnd", "monthly_income_vnd"]
+    feature_bins = {}
+    for col in feature_cols:
+        if col not in df_freq.columns:
+            continue
+        vals = df_freq[col].dropna().astype(float).values
+        if len(vals) < 2:
+            continue
+        lo, hi = float(vals.min()), float(vals.max())
+        if lo == hi:
+            continue
+        edges = [lo + i * (hi - lo) / 10 for i in range(11)]
+        counts = [0] * 10
+        for v in vals:
+            idx = min(int((v - lo) / (hi - lo) * 10), 9)
+            counts[idx] += 1
+        total = sum(counts)
+        feature_bins[col] = {
+            "edges": edges,
+            "counts": counts,
+            "proportions": [c / total if total > 0 else 0.0 for c in counts],
+        }
+
+    # Prediction bins: histogram of pure_premium predictions
+    pred_lo, pred_hi = float(predictions.min()), float(predictions.max())
+    if pred_lo == pred_hi:
+        pred_edges = [pred_lo] * 11
+        pred_counts = [len(predictions)] + [0] * 9
+    else:
+        pred_edges = [pred_lo + i * (pred_hi - pred_lo) / 10 for i in range(11)]
+        pred_counts = [0] * 10
+        for v in predictions:
+            idx = min(int((v - pred_lo) / (pred_hi - pred_lo) * 10), 9)
+            pred_counts[idx] += 1
+    pred_total = sum(pred_counts)
+    prediction_bins = {
+        "edges": pred_edges,
+        "counts": pred_counts,
+        "proportions": [c / pred_total if pred_total > 0 else 0.0 for c in pred_counts],
+    }
+
+    # Calibration reference: actual claim rate per prediction bin
+    if "claim_count" in df_freq.columns and "earned_exposure_years" in df_freq.columns:
+        exposure = df_freq["earned_exposure_years"].clip(lower=MIN_EXPOSURE).to_numpy()
+        claim_count = df_freq["claim_count"].to_numpy()
+        calibration_bins = []
+        for i in range(10):
+            if pred_lo == pred_hi:
+                mask = np.ones(len(predictions), dtype=bool)
+            else:
+                lo_b = pred_edges[i]
+                hi_b = pred_edges[i + 1] if i < 9 else pred_hi + 1
+                mask = (predictions >= lo_b) & (predictions < hi_b)
+            n = int(mask.sum())
+            if n > 0:
+                actual_rate = float(claim_count[mask].sum() / max(exposure[mask].sum(), MIN_EXPOSURE))
+            else:
+                actual_rate = 0.0
+            calibration_bins.append({
+                "bin_index": i,
+                "count": n,
+                "actual_rate": actual_rate,
+            })
+    else:
+        calibration_bins = []
+
+    baseline = {
+        "line": line,
+        "feature_bins": feature_bins,
+        "prediction_bins": prediction_bins,
+        "calibration_reference": calibration_bins,
+        "trained_at": pd.Timestamp.now().isoformat(),
+    }
+
+    out_path = BASELINES_DIR / f"{line}_baseline.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(baseline, f, indent=2)
+    print(f"    Baseline artifact saved: {out_path.name}")
+
+
 def main():
     """Re-fit all 18 LightGBM champion models with monotone_constraints.
 
@@ -459,6 +562,13 @@ def main():
             except Exception as e:
                 print(f"    ERROR: {e}")
                 results.append(f"{model_name}: ERROR {e}")
+
+        # Dump baseline drift artifact for this line
+        try:
+            dump_baseline_artifact(line, df_freq, df_sev)
+        except Exception as e:
+            print(f"    Baseline dump ERROR: {e}")
+            results.append(f"{line}_baseline: ERROR {e}")
 
     print(f"\n{'='*60}")
     print("Summary:")

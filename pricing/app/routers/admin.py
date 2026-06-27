@@ -80,10 +80,14 @@ async def rollback_champion(request: RollbackRequest, db: Session = Depends(get_
 
 @models_router.get("/drift")
 async def get_drift_status(db: Session = Depends(get_db), _claims=Depends(require_administrator)):
-    """Return the latest drift flags per line (task 23.2, R37.7).
+    """Return the latest drift flags per line with 3 metrics.
 
-    Returns a list of per-line drift status with PSI and calibration metrics,
-    thresholds, and the needs_recalibration flag. Administrator-only.
+    Returns a list of per-line drift status with:
+    - feature_psi: feature distribution PSI
+    - prediction_psi: prediction distribution PSI
+    - calibration: calibration drift with status and bins_evaluated
+    Each metric has value, threshold, needs_recalibration, computed_at.
+    Administrator-only.
     """
     lines = ["health", "motorbike", "car", "home", "accident", "travel"]
     result = []
@@ -95,21 +99,42 @@ async def get_drift_status(db: Session = Depends(get_db), _claims=Depends(requir
             result.append({
                 "line": line,
                 "needs_recalibration": False,
-                "metrics": [],
+                "metrics": {
+                    "feature_psi": {"value": 0.0, "threshold": 0.2, "needs_recalibration": False},
+                    "prediction_psi": {"value": 0.0, "threshold": 0.2, "needs_recalibration": False},
+                    "calibration": {"value": 0.0, "threshold": 0.15, "needs_recalibration": False, "status": "no_data", "bins_evaluated": 0},
+                },
             })
         else:
-            metrics = {}
+            latest_per_metric = {}
             for f in flags:
-                if f.metric not in metrics:
-                    metrics[f.metric] = {
+                if f.metric not in latest_per_metric:
+                    entry = {
                         "value": f.value,
                         "threshold": f.threshold,
                         "needs_recalibration": f.needs_recalibration,
                         "computed_at": f.computed_at.isoformat() if f.computed_at else None,
                     }
+                    if f.metric == "calibration":
+                        entry["status"] = "sufficient_data" if f.value > 0 else "insufficient_data"
+                        entry["bins_evaluated"] = 0
+                    latest_per_metric[f.metric] = entry
+
+            for required in ("feature_psi", "prediction_psi", "calibration"):
+                if required not in latest_per_metric:
+                    if required == "calibration":
+                        latest_per_metric[required] = {
+                            "value": 0.0, "threshold": 0.15, "needs_recalibration": False,
+                            "status": "no_data", "bins_evaluated": 0,
+                        }
+                    else:
+                        latest_per_metric[required] = {
+                            "value": 0.0, "threshold": 0.2, "needs_recalibration": False,
+                        }
+
             result.append({
                 "line": line,
-                "needs_recalibration": any(m["needs_recalibration"] for m in metrics.values()),
-                "metrics": metrics,
+                "needs_recalibration": any(m["needs_recalibration"] for m in latest_per_metric.values()),
+                "metrics": latest_per_metric,
             })
     return result

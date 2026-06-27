@@ -95,3 +95,15 @@ class ModelDriftFlag(Base):
     threshold = Column(Float, nullable=False)
     needs_recalibration = Column(Boolean, nullable=False, default=False)
     computed_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class ClaimOutcome(Base):
+    __tablename__ = 'claim_outcome'
+
+    claim_id = Column(String, primary_key=True)
+    quote_id = Column(String, nullable=True)
+    policy_id = Column(String, nullable=True)
+    line = Column(String, nullable=True)
+    actual_loss_vnd = Column(BigInteger, nullable=True)
+    settled_at = Column(DateTime(timezone=True), nullable=True)
+    recorded_at = Column(DateTime(timezone=True), nullable=False)
