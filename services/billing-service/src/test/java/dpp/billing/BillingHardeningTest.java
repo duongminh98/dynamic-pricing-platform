@@ -8,6 +8,7 @@ import dpp.billing.entity.*;
 import dpp.billing.repository.*;
 import dpp.billing.service.BillingService;
 import dpp.billing.service.CreditService;
+import dpp.billing.service.RefundService;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
@@ -30,7 +31,7 @@ class BillingHardeningTest {
 
     private BillingService serviceWith(InvoiceRepository invRepo, OutboxPublisher outbox, OrderClient orderClient) {
         return new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox,
-                mock(CreditService.class));
+                mock(CreditService.class), mock(RefundService.class));
     }
 
     private Invoice unpaidInvoice(UUID invoiceId, UUID orderId) {

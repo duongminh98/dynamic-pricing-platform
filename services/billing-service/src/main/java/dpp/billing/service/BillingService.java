@@ -7,6 +7,7 @@ import dpp.billing.dto.CreditResponse;
 import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.dto.PageResponse;
 import dpp.billing.dto.PolicyBillingResponse;
+import dpp.billing.dto.RefundResponse;
 import dpp.billing.entity.*;
 import dpp.billing.repository.*;
 import dpp.common.api.ErrorCode;
@@ -32,14 +33,17 @@ public class BillingService {
     private final OutboxPublisher outboxPublisher;
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
+    private final RefundService refundService;
 
     public BillingService(InvoiceRepository invoiceRepository, AdjustmentRepository adjustmentRepository,
-                          OrderClient orderClient, OutboxPublisher outboxPublisher, CreditService creditService) {
+                          OrderClient orderClient, OutboxPublisher outboxPublisher, CreditService creditService,
+                          RefundService refundService) {
         this.invoiceRepository = invoiceRepository;
         this.adjustmentRepository = adjustmentRepository;
         this.orderClient = orderClient;
         this.outboxPublisher = outboxPublisher;
         this.creditService = creditService;
+        this.refundService = refundService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -221,9 +225,11 @@ public class BillingService {
                 .filter(c -> c.getStatus() == CreditStatus.open || c.getStatus() == CreditStatus.partially_applied)
                 .mapToLong(PremiumCredit::getRemainingAmountVnd)
                 .sum();
+        List<RefundResponse> refunds = refundService.listByPolicy(policyId);
         resp.setInvoices(invoices);
         resp.setAdjustments(adjustments);
         resp.setCredits(credits.stream().map(this::toCreditResponse).toList());
+        resp.setRefunds(refunds);
         resp.setBalanceVnd(unpaidNet - creditRemaining);
         return resp;
     }

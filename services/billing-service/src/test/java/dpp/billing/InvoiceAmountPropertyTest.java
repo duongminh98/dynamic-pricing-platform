@@ -9,6 +9,7 @@ import dpp.billing.repository.AdjustmentRepository;
 import dpp.billing.repository.InvoiceRepository;
 import dpp.billing.service.BillingService;
 import dpp.billing.service.CreditService;
+import dpp.billing.service.RefundService;
 import dpp.common.outbox.OutboxPublisher;
 import net.jqwik.api.*;
 import net.jqwik.api.constraints.LongRange;
@@ -30,7 +31,7 @@ class InvoiceAmountPropertyTest {
             @ForAll @LongRange(min = 1, max = 100_000_000) long premium) {
         InvoiceRepository repo = mock(InvoiceRepository.class);
         when(repo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
-        BillingService svc = new BillingService(repo, mock(AdjustmentRepository.class), mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class));
+        BillingService svc = new BillingService(repo, mock(AdjustmentRepository.class), mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
 
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(UUID.randomUUID());
@@ -52,7 +53,7 @@ class InvoiceAmountPropertyTest {
         InvoiceRepository repo = mock(InvoiceRepository.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         when(outbox.enqueue(anyString(), anyString())).thenReturn(null);
-        BillingService svc = new BillingService(repo, mock(AdjustmentRepository.class), mock(OrderClient.class), outbox, mock(CreditService.class));
+        BillingService svc = new BillingService(repo, mock(AdjustmentRepository.class), mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
 
         UUID invoiceId = UUID.randomUUID();
         Invoice invoice = new Invoice();
@@ -73,7 +74,7 @@ class InvoiceAmountPropertyTest {
     void property15_sanity() {
         InvoiceRepository repo = mock(InvoiceRepository.class);
         when(repo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
-        BillingService svc = new BillingService(repo, mock(AdjustmentRepository.class), mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class));
+        BillingService svc = new BillingService(repo, mock(AdjustmentRepository.class), mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
 
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(UUID.randomUUID());

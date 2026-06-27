@@ -107,6 +107,11 @@ public class NotificationEventListeners {
         handle(msg, eventId, "RefundCompleted", this::buildRefundCompletedMessage);
     }
 
+    @RabbitListener(queues = "refund.rejected.queue")
+    public void onRefundRejected(@Payload String msg, @Header(name = "X-Event-Id", required = false) String eventId) {
+        handle(msg, eventId, "RefundRejected", this::buildRefundRejectedMessage);
+    }
+
     @RabbitListener(queues = "invoice.voided.queue")
     public void onInvoiceVoided(@Payload String msg, @Header(name = "X-Event-Id", required = false) String eventId) {
         handle(msg, eventId, "InvoiceVoided", this::buildInvoiceVoidedMessage);
@@ -431,6 +436,21 @@ public class NotificationEventListeners {
         if (refundId != null) sb.append(" Refund ID: ").append(refundId).append(".");
         if (amount != null) sb.append(" Refund amount: ").append(formatVnd(amount)).append(" VND.");
         if (paymentRef != null) sb.append(" Payment reference: ").append(paymentRef).append(".");
+        return sb.toString();
+    }
+
+    private String buildRefundRejectedMessage(JsonNode n) {
+        String policyId = text(n, "policy_id");
+        String refundId = text(n, "refund_id");
+        String amount = text(n, "amount_vnd");
+        String note = text(n, "note");
+        StringBuilder sb = new StringBuilder();
+        sb.append("Your refund request has been rejected.");
+        if (policyId != null) sb.append(" Policy ID: ").append(policyId).append(".");
+        if (refundId != null) sb.append(" Refund ID: ").append(refundId).append(".");
+        if (amount != null) sb.append(" Refund amount: ").append(formatVnd(amount)).append(" VND.");
+        if (note != null && !note.isEmpty()) sb.append(" Reason: ").append(note).append(".");
+        sb.append(" Your premium credit has been restored.");
         return sb.toString();
     }
 

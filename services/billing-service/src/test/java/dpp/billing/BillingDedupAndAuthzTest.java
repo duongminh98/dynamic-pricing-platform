@@ -11,6 +11,7 @@ import dpp.billing.repository.ProcessedEventRepository;
 import dpp.billing.service.AdjustmentService;
 import dpp.billing.service.BillingService;
 import dpp.billing.service.CreditService;
+import dpp.billing.service.RefundService;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
@@ -104,7 +105,7 @@ class BillingDedupAndAuthzTest {
         when(invRepo.findByOrderId(orderId)).thenReturn(Optional.of(existing));
 
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class));
+                mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(orderId);
         req.setAmountVnd(2_500_000L);
@@ -123,7 +124,7 @@ class BillingDedupAndAuthzTest {
         when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
 
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class));
+                mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(orderId);
         req.setAmountVnd(2_500_000L);
@@ -155,7 +156,7 @@ class BillingDedupAndAuthzTest {
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(invoice));
         when(orderClient.getOrderOwner(orderId)).thenReturn(owner);
 
-        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox, mock(CreditService.class));
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox, mock(CreditService.class), mock(RefundService.class));
 
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.payInvoiceAsCustomer(invoiceId, attacker));
@@ -182,7 +183,7 @@ class BillingDedupAndAuthzTest {
         when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
         when(orderClient.getOrderOwner(orderId)).thenReturn(owner);
 
-        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox, mock(CreditService.class));
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox, mock(CreditService.class), mock(RefundService.class));
 
         InvoiceResponse resp = svc.payInvoiceAsCustomer(invoiceId, owner);
 
@@ -209,7 +210,7 @@ class BillingDedupAndAuthzTest {
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(invoice));
         when(orderClient.getPolicyOwner(policyId)).thenReturn(owner);
 
-        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox, mock(CreditService.class));
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox, mock(CreditService.class), mock(RefundService.class));
 
         assertThrows(ServiceException.class, () -> svc.payInvoiceAsCustomer(invoiceId, attacker));
         verify(orderClient, times(1)).getPolicyOwner(policyId);

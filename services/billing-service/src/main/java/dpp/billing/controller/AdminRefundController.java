@@ -1,9 +1,8 @@
 package dpp.billing.controller;
 
-import dpp.billing.dto.CreateRefundRequest;
 import dpp.billing.dto.CompleteRefundRequest;
 import dpp.billing.dto.RejectRefundRequest;
-import dpp.billing.entity.RefundRequest;
+import dpp.billing.dto.RefundResponse;
 import dpp.billing.entity.RefundStatus;
 import dpp.billing.service.RefundService;
 import dpp.common.dto.PageResponse;
@@ -17,9 +16,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
-/**
- * Administrator refund management endpoints (design §8).
- */
 @RestController
 @RequestMapping("/admin/refunds")
 public class AdminRefundController {
@@ -32,39 +28,29 @@ public class AdminRefundController {
 
     @GetMapping
     @PreAuthorize("hasRole('Administrator')")
-    public PageResponse<RefundRequest> listRefunds(
+    public PageResponse<RefundResponse> listRefunds(
             @RequestParam(required = false) RefundStatus status,
             @RequestParam(required = false) UUID customerId,
             @RequestParam(required = false) UUID policyId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         size = Math.min(size, 100);
-        return PageResponse.from(refundService.listFiltered(status, customerId, policyId,
-                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "requestedAt"))));
-    }
-
-    @PostMapping
-    @PreAuthorize("hasRole('Administrator')")
-    public RefundRequest createRefund(@Valid @RequestBody CreateRefundRequest request) {
-        return refundService.createRefund(request.getPolicyId(), request.getCustomerId(),
-                request.getCreditId(), request.getAmountVnd(), request.getNote());
+        return refundService.listFiltered(status, customerId, policyId,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "requestedAt")));
     }
 
     @PostMapping("/{id}/complete")
     @PreAuthorize("hasRole('Administrator')")
-    public RefundRequest completeRefund(@PathVariable UUID id,
+    public RefundResponse completeRefund(@PathVariable UUID id,
                                         @Valid @RequestBody CompleteRefundRequest request,
                                         @AuthenticationPrincipal Jwt jwt) {
-        RefundRequest refund = refundService.completeRefund(id, request.getPaymentReference(), jwt.getSubject());
-        if (request.getNote() != null && refund.getNote() == null) {
-            refund.setNote(request.getNote());
-        }
-        return refund;
+        return refundService.completeRefund(id, request.getPaymentReference(),
+                jwt.getSubject(), request.getNote());
     }
 
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasRole('Administrator')")
-    public RefundRequest rejectRefund(@PathVariable UUID id,
+    public RefundResponse rejectRefund(@PathVariable UUID id,
                                       @Valid @RequestBody RejectRefundRequest request) {
         return refundService.rejectRefund(id, request.getReason());
     }

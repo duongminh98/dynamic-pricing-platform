@@ -67,6 +67,9 @@ public class RabbitConfig {
     @Bean public Queue refundCompletedQueue() { return quorumQueue("refund.completed.queue","RefundCompleted"); }
     @Bean public Binding refundCompletedBinding() { return BindingBuilder.bind(refundCompletedQueue()).to(eventsExchange()).with("RefundCompleted"); }
 
+    @Bean public Queue refundRejectedQueue() { return quorumQueue("refund.rejected.queue","RefundRejected"); }
+    @Bean public Binding refundRejectedBinding() { return BindingBuilder.bind(refundRejectedQueue()).to(eventsExchange()).with("RefundRejected"); }
+
     @Bean public Queue invoiceVoidedQueue() { return quorumQueue("invoice.voided.queue","InvoiceVoided"); }
     @Bean public Binding invoiceVoidedBinding() { return BindingBuilder.bind(invoiceVoidedQueue()).to(eventsExchange()).with("InvoiceVoided"); }
 }

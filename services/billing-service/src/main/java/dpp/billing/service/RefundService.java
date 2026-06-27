@@ -1,9 +1,11 @@
 package dpp.billing.service;
 
+import dpp.billing.dto.RefundResponse;
 import dpp.billing.entity.*;
 import dpp.billing.repository.*;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
+import dpp.common.dto.PageResponse;
 import dpp.common.outbox.OutboxPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -14,12 +16,6 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Manual refund management (design §8).
- *
- * <p>RefundRequest represents a pending payout of premium credit to the customer
- * when there is nothing left to net-off (e.g. policy cancelled, no renewal).</p>
- */
 @Service
 public class RefundService {
 
@@ -38,35 +34,11 @@ public class RefundService {
     }
 
     @Transactional
-    public RefundRequest createRefund(UUID policyId, UUID customerId, UUID creditId, long amountVnd, String note) {
-        RefundRequest refund = new RefundRequest();
-        refund.setRefundId(UUID.randomUUID());
-        refund.setPolicyId(policyId);
-        refund.setCustomerId(customerId);
-        refund.setCreditId(creditId);
-        refund.setAmountVnd(amountVnd);
-        refund.setStatus(RefundStatus.pending);
-        refund.setNote(note);
-        refund.setRequestedAt(OffsetDateTime.now());
-
-        if (creditId != null) {
-            PremiumCredit credit = creditRepository.findById(creditId)
-                    .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Credit not found", null));
-            credit.setStatus(CreditStatus.refunded);
-            creditRepository.save(credit);
-        }
-
-        refundRepository.save(refund);
-        enqueueRefundEvent("RefundRequested", refund);
-        return refund;
-    }
-
-    @Transactional
-    public RefundRequest completeRefund(UUID refundId, String paymentReference, String completedBy) {
+    public RefundResponse completeRefund(UUID refundId, String paymentReference, String completedBy, String note) {
         RefundRequest refund = refundRepository.findById(refundId)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Refund not found", null));
         if (refund.getStatus() == RefundStatus.completed) {
-            return refund;
+            return toResponse(refund);
         }
         if (refund.getStatus() != RefundStatus.pending) {
             throw new ServiceException(ErrorCode.BAD_REQUEST, "Only pending refunds can be completed", null);
@@ -78,17 +50,23 @@ public class RefundService {
         refund.setPaymentReference(paymentReference);
         refund.setCompletedBy(completedBy);
         refund.setCompletedAt(OffsetDateTime.now());
+        if (note != null && !note.isBlank()) {
+            refund.setNote(note);
+        }
         refundRepository.save(refund);
         enqueueRefundEvent("RefundCompleted", refund);
-        return refund;
+        return toResponse(refund);
     }
 
     @Transactional
-    public RefundRequest rejectRefund(UUID refundId, String reason) {
+    public RefundResponse rejectRefund(UUID refundId, String reason) {
         RefundRequest refund = refundRepository.findById(refundId)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Refund not found", null));
         if (refund.getStatus() != RefundStatus.pending) {
             throw new ServiceException(ErrorCode.BAD_REQUEST, "Only pending refunds can be rejected", null);
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new ServiceException(ErrorCode.BAD_REQUEST, "Reject reason is required", null);
         }
         refund.setStatus(RefundStatus.rejected);
         refund.setNote(reason);
@@ -107,27 +85,20 @@ public class RefundService {
                 creditRepository.save(credit);
             }
         }
-        return refund;
+        enqueueRefundEvent("RefundRejected", refund);
+        return toResponse(refund);
     }
 
     @Transactional(readOnly = true)
-    public List<RefundRequest> listByStatus(RefundStatus status) {
-        return refundRepository.findByStatusOrderByRequestedAtAsc(status);
+    public PageResponse<RefundResponse> listFiltered(RefundStatus status, UUID customerId, UUID policyId, Pageable pageable) {
+        Page<RefundRequest> page = refundRepository.findFiltered(status, customerId, policyId, pageable);
+        return PageResponse.from(page.map(this::toResponse));
     }
 
     @Transactional(readOnly = true)
-    public List<RefundRequest> listAll() {
-        return refundRepository.findAll();
-    }
-
-    @Transactional(readOnly = true)
-    public Page<RefundRequest> listFiltered(RefundStatus status, UUID customerId, UUID policyId, Pageable pageable) {
-        return refundRepository.findFiltered(status, customerId, policyId, pageable);
-    }
-
-    @Transactional(readOnly = true)
-    public List<RefundRequest> listByPolicy(UUID policyId) {
-        return refundRepository.findByPolicyIdOrderByRequestedAtDesc(policyId);
+    public List<RefundResponse> listByPolicy(UUID policyId) {
+        return refundRepository.findByPolicyIdOrderByRequestedAtDesc(policyId)
+                .stream().map(this::toResponse).toList();
     }
 
     @Transactional
@@ -162,9 +133,28 @@ public class RefundService {
             if (refund.getPaymentReference() != null) {
                 payload.put("payment_reference", refund.getPaymentReference());
             }
+            if (refund.getNote() != null) {
+                payload.put("note", refund.getNote());
+            }
             outboxPublisher.enqueue(type, objectMapper.writeValueAsString(payload));
         } catch (Exception e) {
             throw new RuntimeException("Failed to enqueue " + type, e);
         }
+    }
+
+    private RefundResponse toResponse(RefundRequest refund) {
+        RefundResponse resp = new RefundResponse();
+        resp.setRefundId(refund.getRefundId());
+        resp.setPolicyId(refund.getPolicyId());
+        resp.setCustomerId(refund.getCustomerId());
+        resp.setCreditId(refund.getCreditId());
+        resp.setAmountVnd(refund.getAmountVnd());
+        resp.setStatus(refund.getStatus());
+        resp.setPaymentReference(refund.getPaymentReference());
+        resp.setNote(refund.getNote());
+        resp.setRequestedAt(refund.getRequestedAt());
+        resp.setCompletedBy(refund.getCompletedBy());
+        resp.setCompletedAt(refund.getCompletedAt());
+        return resp;
     }
 }
