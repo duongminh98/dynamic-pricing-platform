@@ -3,7 +3,7 @@ package dpp.order;
 import dpp.order.client.BillingClient;
 import dpp.order.client.PricingClient;
 import dpp.common.outbox.OutboxPublisher;
-import dpp.order.dto.PolicyResponse;
+import dpp.order.dto.RenewalResponse;
 import dpp.order.entity.Policy;
 import dpp.order.entity.PolicyStatus;
 import dpp.order.repository.EndorsementRequestRepository;
@@ -65,11 +65,9 @@ class RenewalChainPropertyTest {
         when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PolicyLifecycleService svc = newService(repo, mock(ExposureSegmentRepository.class));
-        PolicyResponse resp = svc.renew(policyId, subject);
+        RenewalResponse resp = svc.renew(policyId, subject);
 
         assertEquals(oldRenewalNumber + 1, resp.getRenewalNumber());
-        assertTrue(resp.isRenewal());
-        assertEquals(customerId, resp.getCustomerId());
 
         ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
         verify(repo, times(1)).save(captor.capture());
@@ -90,11 +88,9 @@ class RenewalChainPropertyTest {
         when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PolicyLifecycleService svc = newService(repo, mock(ExposureSegmentRepository.class));
-        PolicyResponse resp = svc.renew(policyId, subject);
+        RenewalResponse resp = svc.renew(policyId, subject);
 
         assertEquals(1, resp.getRenewalNumber());
-        assertTrue(resp.isRenewal());
-        assertEquals(customerId, resp.getCustomerId());
     }
 
     @Test
@@ -108,8 +104,7 @@ class RenewalChainPropertyTest {
         when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PolicyLifecycleService svc = newService(repo, mock(ExposureSegmentRepository.class));
-        PolicyResponse resp = svc.renew(policyId, subject);
+        RenewalResponse resp = svc.renew(policyId, subject);
         assertEquals(4, resp.getRenewalNumber());
-        assertTrue(resp.isRenewal());
     }
 }

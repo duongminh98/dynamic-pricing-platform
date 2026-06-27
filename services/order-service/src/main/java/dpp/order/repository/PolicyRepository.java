@@ -18,6 +18,7 @@ public interface PolicyRepository extends JpaRepository<Policy, UUID> {
     List<Policy> findByCustomerIdAndStatus(UUID customerId, PolicyStatus status);
     List<Policy> findByStatusOrderByCreatedAtDesc(PolicyStatus status);
     List<Policy> findAllByOrderByCreatedAtDesc();
+    List<Policy> findByOrderIdAndStatusIn(UUID orderId, List<PolicyStatus> statuses);
 
     @Query("SELECT COUNT(p) > 0 FROM Policy p WHERE p.customerId = :customerId AND p.assetKey = :assetKey AND p.status = dpp.order.entity.PolicyStatus.active")
     boolean existsActivePolicy(@Param("customerId") UUID customerId, @Param("assetKey") String assetKey);

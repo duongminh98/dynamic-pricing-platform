@@ -11,4 +11,6 @@ public interface PremiumCreditRepository extends JpaRepository<PremiumCredit, UU
     List<PremiumCredit> findByPolicyIdAndStatusInOrderByCreatedAtAsc(UUID policyId, List<CreditStatus> statuses);
     List<PremiumCredit> findByPolicyIdOrderByCreatedAtAsc(UUID policyId);
     List<PremiumCredit> findByPolicyIdAndRemainingAmountVndGreaterThan(UUID policyId, long minRemaining);
+    List<PremiumCredit> findByCustomerIdAndStatusInOrderByCreatedAtAsc(UUID customerId, List<CreditStatus> statuses);
+    List<PremiumCredit> findByCustomerIdOrderByCreatedAtAsc(UUID customerId);
 }

@@ -10,6 +10,7 @@ import dpp.order.dto.EndorsementRequest;
 import dpp.order.dto.EndorsementRequestResponse;
 import dpp.order.dto.EndorsementResult;
 import dpp.order.dto.PolicyResponse;
+import dpp.order.dto.RenewalResponse;
 import dpp.order.entity.EndorsementRequestEntity;
 import dpp.order.entity.EndorsementStatus;
 import dpp.order.entity.ExposureSegment;
@@ -90,11 +91,10 @@ class RenewalAndCancellationTest {
                 mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class),
                 pricing, mock(BillingClient.class), mock(OutboxPublisher.class));
 
-        PolicyResponse resp = svc.renew(old.getPolicyId(), SUBJECT);
+        RenewalResponse resp = svc.renew(old.getPolicyId(), SUBJECT);
 
-        assertEquals(1_750_000L, resp.getFinalPremiumVnd(), "renewal premium must come from re-rating, not cloned");
-        assertTrue(resp.isRenewal(), "renewed policy must be flagged as renewal");
-        assertEquals(1, resp.getRenewalNumber(), "renewal_number must increment");
+        assertEquals(1_750_000L, resp.getRenewedPremiumVnd(), "renewal premium must come from re-rating, not cloned");
+        assertTrue(resp.getRenewalNumber() == 1, "renewal_number must increment");
         verify(pricing, times(1)).rerate(eq("MOTOR_BASIC"), anyMap());
 
         // Verify re-rate was called with full profile (age + vehicle_value from old segment + renewal context)
@@ -236,15 +236,19 @@ class RenewalAndCancellationTest {
         when(pricing.rerate(eq("MOTOR_BASIC"), anyMap()))
                 .thenReturn(Map.of("final_premium_vnd", 1_750_000L));
 
-        PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, mock(BillingClient.class), outbox);
+        // BillingClient: credit covers full premium so renewal activates immediately
+        BillingClient renewBilling = mock(BillingClient.class);
+        when(renewBilling.applyCreditAndQuote(any(), anyLong()))
+                .thenReturn(Map.of("credit_applied_vnd", 1_750_000L, "net_due_vnd", 0L));
+
+        PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, renewBilling, outbox);
 
         // --- Step 1: Customer renews ---
-        PolicyResponse renewResp = svc.renew(old.getPolicyId(), SUBJECT);
+        RenewalResponse renewResp = svc.renew(old.getPolicyId(), SUBJECT);
 
-        assertEquals(1_750_000L, renewResp.getFinalPremiumVnd(),
+        assertEquals(1_750_000L, renewResp.getRenewedPremiumVnd(),
                 "renewal premium must come from re-rate with full profile");
-        assertTrue(renewResp.isRenewal(), "renewed policy must be flagged as renewal");
-        assertEquals(1, renewResp.getRenewalNumber(), "renewal_number must be 1");
+        assertTrue(renewResp.getRenewalNumber() == 1, "renewal_number must be 1");
 
         // Verify re-rate was called with full profile from old segment
         @SuppressWarnings("unchecked")
@@ -272,7 +276,7 @@ class RenewalAndCancellationTest {
         ArgumentCaptor<String> renewPayloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(outbox, times(1)).enqueue(eq("PolicyRenewed"), renewPayloadCaptor.capture());
         String renewPayload = renewPayloadCaptor.getValue();
-        assertTrue(renewPayload.contains("\"final_premium_vnd\":1750000"),
+        assertTrue(renewPayload.contains("\"renewed_premium_vnd\":1750000"),
                 "event must carry renewal premium 1.75M");
         assertTrue(renewPayload.contains("\"order_id\""),
                 "event must carry order_id for billing to create invoice");
@@ -297,6 +301,8 @@ class RenewalAndCancellationTest {
         when(billing.applyCreditAndQuote(any(), anyLong()))
                 .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 438_356L));
         when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
+                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
+        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any()))
                 .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
         // Replace svc with one that has the billing mock
         svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
@@ -408,6 +414,8 @@ class RenewalAndCancellationTest {
                 .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 5_950_685L));
         when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
                 .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
+        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any()))
+                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
 
         PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 
@@ -473,10 +481,10 @@ class RenewalAndCancellationTest {
         when(pricing.rerate(eq("HEALTH_BASIC"), anyMap()))
                 .thenReturn(Map.of("final_premium_vnd", 19_000_000L));
 
-        PolicyResponse renewResp = svc.renew(policy.getPolicyId(), SUBJECT);
+        RenewalResponse renewResp = svc.renew(policy.getPolicyId(), SUBJECT);
 
-        assertTrue(renewResp.isRenewal(), "renewed policy must be flagged as renewal");
-        assertEquals(19_000_000L, renewResp.getFinalPremiumVnd(),
+        assertTrue(renewResp.getRenewalNumber() == 1, "renewed policy must have renewal_number=1");
+        assertEquals(19_000_000L, renewResp.getRenewedPremiumVnd(),
                 "renewal premium must reflect updated risk (smoker=true) from latest segment");
 
         // Verify renewal re-rate used the LATEST segment (smoker=true), not the base (smoker=false)

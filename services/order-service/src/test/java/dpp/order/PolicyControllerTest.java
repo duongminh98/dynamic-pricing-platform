@@ -5,11 +5,13 @@ import dpp.common.api.ServiceException;
 import dpp.common.security.CustomerId;
 import dpp.order.controller.PolicyController;
 import dpp.order.dto.CancelRequest;
+import dpp.order.dto.CancelResponse;
 import dpp.order.dto.EndorsementRequest;
 import dpp.order.dto.EndorsementResult;
 import dpp.order.dto.ExposureSegmentResponse;
 import dpp.order.dto.PolicyDocumentResponse;
 import dpp.order.dto.PolicyResponse;
+import dpp.order.dto.RenewalResponse;
 import dpp.order.entity.ExposureSegment;
 import dpp.order.entity.Policy;
 import dpp.order.entity.PolicyDocument;
@@ -209,13 +211,13 @@ class PolicyControllerTest {
     void renewDelegatesToLifecycleService() {
         PolicyLifecycleService lifecycleService = mock(PolicyLifecycleService.class);
         UUID policyId = UUID.randomUUID();
-        PolicyResponse mockResp = new PolicyResponse();
+        RenewalResponse mockResp = new RenewalResponse();
         mockResp.setPolicyId(policyId);
         when(lifecycleService.renew(eq(policyId), anyString())).thenReturn(mockResp);
 
         PolicyController controller = new PolicyController(lifecycleService, mock(PolicyRepository.class),
                 mock(PolicyDocumentRepository.class), mock(ExposureSegmentRepository.class));
-        PolicyResponse result = controller.renew(jwtFor("subject"), policyId);
+        RenewalResponse result = controller.renew(jwtFor("subject"), policyId);
 
         assertEquals(policyId, result.getPolicyId());
     }
@@ -227,13 +229,13 @@ class PolicyControllerTest {
         CancelRequest req = new CancelRequest();
         req.setCancelDate(OffsetDateTime.now());
 
-        PolicyResponse mockResp = new PolicyResponse();
+        CancelResponse mockResp = new CancelResponse();
         mockResp.setPolicyId(policyId);
         when(lifecycleService.cancel(eq(policyId), eq(req), anyString())).thenReturn(mockResp);
 
         PolicyController controller = new PolicyController(lifecycleService, mock(PolicyRepository.class),
                 mock(PolicyDocumentRepository.class), mock(ExposureSegmentRepository.class));
-        PolicyResponse result = controller.cancel(jwtFor("subject"), policyId, req);
+        CancelResponse result = controller.cancel(jwtFor("subject"), policyId, req);
 
         assertEquals(policyId, result.getPolicyId());
     }

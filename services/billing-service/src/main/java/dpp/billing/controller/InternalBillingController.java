@@ -41,9 +41,9 @@ public class InternalBillingController {
     }
 
     @PostMapping("/credits/apply-and-quote")
-    public Map<String, Object> applyCreditAndQuote(@RequestParam("policy_id") UUID policyId,
+    public Map<String, Object> applyCreditAndQuote(@RequestParam("customer_id") UUID customerId,
                                                     @RequestParam("amount_vnd") long amountVnd) {
-        long netDue = creditService.applyCreditsToQuote(policyId, amountVnd);
+        long netDue = creditService.applyCreditsToQuote(customerId, amountVnd);
         long creditApplied = amountVnd - netDue;
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("credit_applied_vnd", creditApplied);

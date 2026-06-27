@@ -97,13 +97,18 @@ public class PolicyController {
         return lifecycleService.cancelEndorsement(id, endorsementId, jwt.getSubject(), reason);
     }
 
+    @PostMapping("/{id}/renew/preview")
+    public RenewalPreviewResponse previewRenewal(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return lifecycleService.previewRenewal(id, jwt.getSubject());
+    }
+
     @PostMapping("/{id}/renew")
-    public PolicyResponse renew(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+    public RenewalResponse renew(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         return lifecycleService.renew(id, jwt.getSubject());
     }
 
     @PostMapping("/{id}/cancel")
-    public PolicyResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+    public CancelResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                  @Valid @RequestBody CancelRequest request) {
         return lifecycleService.cancel(id, request, jwt.getSubject());
     }

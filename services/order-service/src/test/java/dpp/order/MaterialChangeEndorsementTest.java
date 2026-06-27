@@ -347,6 +347,8 @@ class MaterialChangeEndorsementTest {
                 .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 5_950_685L));
         when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
                 .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
+        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any()))
+                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
 
         PolicyLifecycleService s = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 
@@ -521,6 +523,8 @@ class MaterialChangeEndorsementTest {
                 .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 1_197_260L));
         when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
                 .thenReturn(Map.of("invoice_id", invoiceId.toString()));
+        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any()))
+                .thenReturn(Map.of("invoice_id", invoiceId.toString()));
 
         PolicyLifecycleService s = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 
@@ -564,9 +568,9 @@ class MaterialChangeEndorsementTest {
                 "event must carry invoice_id");
 
         // Verify billing was called for net-off quote
-        verify(billing).applyCreditAndQuote(eq(policy.getPolicyId()), anyLong());
+        verify(billing).applyCreditAndQuote(eq(policy.getCustomerId()), anyLong());
         verify(billing).createEndorsementInvoice(eq(policy.getOrderId()), eq(policy.getPolicyId()),
-                anyLong(), eq(pending.getEndorsementRequestId()), any());
+                anyLong(), eq(pending.getEndorsementRequestId()), any(), eq(policy.getCustomerId()));
 
         // Verify rerate called once (submit only, not at approve — price lock)
         verify(pricing, times(1)).rerate(eq("MOTOR_BASIC"), anyMap());

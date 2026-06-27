@@ -210,13 +210,42 @@ public class NotificationEventListeners {
 
     private String buildPolicyRenewedMessage(JsonNode n) {
         String policyId = text(n, "policy_id");
+        String previousPolicyId = text(n, "previous_policy_id");
         String renewalNumber = text(n, "renewal_number");
-        String premiumVnd = text(n, "final_premium_vnd");
+        String premiumVnd = text(n, "renewed_premium_vnd");
+        String creditAppliedVnd = text(n, "credit_applied_vnd");
+        String netDueVnd = text(n, "net_due_vnd");
+        String newEff = text(n, "new_effective_date");
+        String newExp = text(n, "new_expiration_date");
+        String paymentRequired = text(n, "payment_required");
+        String invoiceId = text(n, "invoice_id");
+
+        boolean needsPayment = "true".equalsIgnoreCase(paymentRequired);
         StringBuilder sb = new StringBuilder();
-        sb.append("Your insurance policy has been renewed.");
-        if (policyId != null) sb.append(" Policy ID: ").append(policyId).append(".");
-        if (renewalNumber != null) sb.append(" Renewal #: ").append(renewalNumber).append(".");
-        if (premiumVnd != null) sb.append(" Premium: ").append(formatVnd(premiumVnd)).append(" VND.");
+        if (needsPayment) {
+            // D1: RENEWAL_SUBMITTED (needs payment)
+            sb.append("Your policy ").append(previousPolicyId != null ? previousPolicyId : policyId)
+              .append(" renewal is ready.");
+            if (premiumVnd != null) sb.append(" New premium: ").append(formatVnd(premiumVnd)).append(" VND.");
+            if (creditAppliedVnd != null && Long.parseLong(creditAppliedVnd) > 0) {
+                sb.append(" Credit applied: ").append(formatVnd(creditAppliedVnd)).append(" VND.");
+            }
+            if (netDueVnd != null) {
+                sb.append(" Please pay ").append(formatVnd(netDueVnd)).append(" VND");
+            }
+            if (newExp != null) sb.append(" by ").append(newExp);
+            if (newEff != null && newExp != null) {
+                sb.append(" to activate coverage for ").append(newEff).append(" to ").append(newExp);
+            }
+            sb.append(".");
+        } else {
+            // D2: RENEWAL_ACTIVATED (paid or credit covers full)
+            sb.append("Your policy has been renewed. New policy ").append(policyId).append(".");
+            if (newEff != null && newExp != null) {
+                sb.append(" Coverage ").append(newEff).append(" to ").append(newExp).append(".");
+            }
+            if (premiumVnd != null) sb.append(" Premium: ").append(formatVnd(premiumVnd)).append(" VND.");
+        }
         return sb.toString();
     }
 
@@ -225,13 +254,17 @@ public class NotificationEventListeners {
         String cancelDate = text(n, "cancel_date");
         String remainingDays = text(n, "remaining_days");
         String termDays = text(n, "term_days");
+        String refundableCreditVnd = text(n, "refundable_credit_vnd");
         StringBuilder sb = new StringBuilder();
-        sb.append("Your insurance policy has been cancelled.");
-        if (policyId != null) sb.append(" Policy ID: ").append(policyId).append(".");
-        if (cancelDate != null) sb.append(" Cancel date: ").append(cancelDate).append(".");
+        sb.append("Your policy ").append(policyId).append(" was cancelled effective ").append(cancelDate).append(".");
         if (remainingDays != null && termDays != null) {
             sb.append(" Unused term: ").append(remainingDays).append("/").append(termDays).append(" days.");
         }
+        if (refundableCreditVnd != null && Long.parseLong(refundableCreditVnd) > 0) {
+            sb.append(" Refundable credit: ").append(formatVnd(refundableCreditVnd))
+              .append(" VND will be processed.");
+        }
+        sb.append(" Unearned premium is settled manually by our team.");
         return sb.toString();
     }
 

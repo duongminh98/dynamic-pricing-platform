@@ -67,10 +67,17 @@ public class BillingService {
             invoice.setDueDate(request.getDueDate());
             invoice.setCreatedAt(OffsetDateTime.now());
             invoice = invoiceRepository.save(invoice);
-            // Net-off: apply available credits FIFO against this invoice.
-            if (request.getPolicyId() != null) {
+            // Net-off: apply available customer-scoped credits FIFO against this invoice.
+            UUID customerIdForCredit = request.getCustomerId();
+            if (customerIdForCredit == null) {
+                try {
+                    customerIdForCredit = resolveInvoiceOwner(invoice);
+                } catch (Exception ignored) {
+                }
+            }
+            if (customerIdForCredit != null) {
                 long netDue = creditService.applyCreditsToInvoice(invoice.getInvoiceId(),
-                        invoice.getPolicyId(), invoice.getAmountVnd());
+                        customerIdForCredit, invoice.getAmountVnd());
                 if (netDue <= 0) {
                     // Credit covers full amount — mark paid immediately.
                     invoice.setStatus(InvoiceStatus.paid);
@@ -95,7 +102,26 @@ public class BillingService {
                         invoice.setAmountVnd(request.getAmountVnd());
                         invoice.setStatus(InvoiceStatus.unpaid);
                         invoice.setCreatedAt(OffsetDateTime.now());
-                        return toResponse(invoiceRepository.save(invoice));
+                        invoice = invoiceRepository.save(invoice);
+                        // Net-off: apply available customer-scoped credits for renewal invoices.
+                        UUID customerIdForCredit = request.getCustomerId();
+                        if (customerIdForCredit == null) {
+                            try {
+                                customerIdForCredit = resolveInvoiceOwner(invoice);
+                            } catch (Exception ignored) {
+                            }
+                        }
+                        if (customerIdForCredit != null) {
+                            long netDue = creditService.applyCreditsToInvoice(invoice.getInvoiceId(),
+                                    customerIdForCredit, invoice.getAmountVnd());
+                            if (netDue <= 0) {
+                                invoice.setStatus(InvoiceStatus.paid);
+                                invoice.setPaidAt(OffsetDateTime.now());
+                                invoice = invoiceRepository.save(invoice);
+                                enqueueInvoicePaid(invoice);
+                            }
+                        }
+                        return toResponse(invoice);
                     });
         }
         return invoiceRepository.findByOrderId(request.getOrderId())

@@ -26,16 +26,27 @@ public class BillingClient {
     }
 
     public Map<String, Object> createInvoice(UUID orderId, UUID policyId, long amountVnd) {
-        return createInvoice(orderId, policyId, amountVnd, null, null);
+        return createInvoice(orderId, policyId, amountVnd, null, null, null);
     }
 
     public Map<String, Object> createEndorsementInvoice(UUID orderId, UUID policyId, long amountVnd,
                                                          UUID endorsementRequestId, java.time.OffsetDateTime dueDate) {
-        return createInvoice(orderId, policyId, amountVnd, endorsementRequestId, dueDate);
+        return createInvoice(orderId, policyId, amountVnd, endorsementRequestId, dueDate, null);
+    }
+
+    public Map<String, Object> createEndorsementInvoice(UUID orderId, UUID policyId, long amountVnd,
+                                                         UUID endorsementRequestId, java.time.OffsetDateTime dueDate,
+                                                         UUID customerId) {
+        return createInvoice(orderId, policyId, amountVnd, endorsementRequestId, dueDate, customerId);
+    }
+
+    public Map<String, Object> createRenewalInvoice(UUID orderId, UUID policyId, long amountVnd, UUID customerId) {
+        return createInvoice(orderId, policyId, amountVnd, null, null, customerId);
     }
 
     private Map<String, Object> createInvoice(UUID orderId, UUID policyId, long amountVnd,
-                                               UUID endorsementRequestId, java.time.OffsetDateTime dueDate) {
+                                               UUID endorsementRequestId, java.time.OffsetDateTime dueDate,
+                                               UUID customerId) {
         String url = baseUrl + "/internal/invoices";
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("order_id", orderId.toString());
@@ -43,6 +54,7 @@ public class BillingClient {
         body.put("amount_vnd", amountVnd);
         if (endorsementRequestId != null) body.put("endorsement_request_id", endorsementRequestId.toString());
         if (dueDate != null) body.put("due_date", dueDate.toString());
+        if (customerId != null) body.put("customer_id", customerId.toString());
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
@@ -62,8 +74,8 @@ public class BillingClient {
         }
     }
 
-    public Map<String, Object> applyCreditAndQuote(UUID policyId, long amountVnd) {
-        String url = baseUrl + "/internal/credits/apply-and-quote?policy_id=" + policyId + "&amount_vnd=" + amountVnd;
+    public Map<String, Object> applyCreditAndQuote(UUID customerId, long amountVnd) {
+        String url = baseUrl + "/internal/credits/apply-and-quote?customer_id=" + customerId + "&amount_vnd=" + amountVnd;
         try {
             return restTemplate.postForObject(url, null, Map.class);
         } catch (Exception e) {

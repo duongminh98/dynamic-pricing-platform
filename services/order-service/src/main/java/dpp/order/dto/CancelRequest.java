@@ -11,4 +11,5 @@ import java.time.OffsetDateTime;
 public class CancelRequest {
     @NotNull
     private OffsetDateTime cancelDate;
+    private String reason;
 }

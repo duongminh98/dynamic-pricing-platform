@@ -47,6 +47,7 @@ public enum ErrorCode {
     ENDORSEMENT_IN_PROGRESS(409, "An endorsement is already in progress for this policy"),
     ENDORSEMENT_NOT_CANCELLABLE(409, "Endorsement request cannot be cancelled in its current state"),
     DUPLICATE_ACTIVE_POLICY(409, "An active policy already exists for this asset"),
+    RENEWAL_IN_PROGRESS(409, "A renewal already exists for the next term"),
 
     // ── Claims (R27, R28) ──
     INVALID_CLAIM_TRANSITION(409, "Invalid claim status transition"),

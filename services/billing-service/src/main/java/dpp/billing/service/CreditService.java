@@ -71,9 +71,9 @@ public class CreditService {
      * Called by order-service before creating an AP invoice to determine the net amount.
      */
     @Transactional
-    public long applyCreditsToQuote(UUID policyId, long amountVnd) {
+    public long applyCreditsToQuote(UUID customerId, long amountVnd) {
         List<PremiumCredit> availableCredits = creditRepository
-                .findByPolicyIdAndStatusInOrderByCreatedAtAsc(policyId,
+                .findByCustomerIdAndStatusInOrderByCreatedAtAsc(customerId,
                         List.of(CreditStatus.open, CreditStatus.partially_applied));
 
         long remaining = amountVnd;
@@ -91,9 +91,9 @@ public class CreditService {
      * Must be called within the same transaction as invoice creation.
      */
     @Transactional
-    public long applyCreditsToInvoice(UUID invoiceId, UUID policyId, long amountVnd) {
+    public long applyCreditsToInvoice(UUID invoiceId, UUID customerId, long amountVnd) {
         List<PremiumCredit> availableCredits = creditRepository
-                .findByPolicyIdAndStatusInOrderByCreatedAtAsc(policyId,
+                .findByCustomerIdAndStatusInOrderByCreatedAtAsc(customerId,
                         List.of(CreditStatus.open, CreditStatus.partially_applied));
 
         long remaining = amountVnd;

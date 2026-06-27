@@ -329,16 +329,19 @@ public class PolicyLifecycleService {
     }
 
     @Transactional
-    public PolicyResponse adminCancelPolicy(UUID policyId, OffsetDateTime cancelDate) {
+    public CancelResponse adminCancelPolicy(UUID policyId, OffsetDateTime cancelDate) {
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null));
         if (policy.getStatus() != PolicyStatus.active) {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
+        OffsetDateTime now = OffsetDateTime.now();
         if (cancelDate == null) {
-            cancelDate = OffsetDateTime.now();
+            cancelDate = now;
         }
-        if (cancelDate.isAfter(policy.getPolicyExpirationDate()) || cancelDate.isBefore(policy.getPolicyEffectiveDate())) {
+        // E1: Block backdate — cancel_date must be >= now and within [effective, expiration].
+        if (cancelDate.isBefore(now) || cancelDate.isAfter(policy.getPolicyExpirationDate())
+                || cancelDate.isBefore(policy.getPolicyEffectiveDate())) {
             throw new ServiceException(ErrorCode.CANCEL_DATE_OUT_OF_RANGE);
         }
         policy.setStatus(PolicyStatus.cancelled);
@@ -366,8 +369,16 @@ public class PolicyLifecycleService {
                 "cancel_date", cancelDate.toString(),
                 "final_premium_vnd", policy.getFinalPremiumVnd(),
                 "remaining_days", remainingDays,
-                "term_days", termDays));
-        return toResponse(policy);
+                "term_days", termDays,
+                "refundable_credit_vnd", 0L));
+
+        CancelResponse resp = new CancelResponse();
+        resp.setPolicyId(policyId);
+        resp.setStatus(PolicyStatus.cancelled);
+        resp.setCancelDate(cancelDate);
+        resp.setRemainingDays(remainingDays);
+        resp.setTermDays(termDays);
+        return resp;
     }
 
     @Transactional(readOnly = true)
@@ -507,7 +518,7 @@ public class PolicyLifecycleService {
 
             // Net-off: apply available credits first via billing service.
             Map<String, Object> creditResp = billingClient.applyCreditAndQuote(
-                    policy.getPolicyId(), additionalCharge);
+                    policy.getCustomerId(), additionalCharge);
             long creditApplied = creditResp != null && creditResp.get("credit_applied_vnd") != null
                     ? Long.parseLong(String.valueOf(creditResp.get("credit_applied_vnd"))) : 0;
             long netDue = creditResp != null && creditResp.get("net_due_vnd") != null
@@ -518,7 +529,7 @@ public class PolicyLifecycleService {
                 OffsetDateTime dueDate = OffsetDateTime.now().plusDays(ENDORSEMENT_PAYMENT_DUE_DAYS);
                 Map<String, Object> invoiceResp = billingClient.createEndorsementInvoice(
                         policy.getOrderId(), policy.getPolicyId(), netDue,
-                        endorsementRequestId, dueDate);
+                        endorsementRequestId, dueDate, policy.getCustomerId());
                 UUID invoiceId = null;
                 if (invoiceResp != null && invoiceResp.get("invoice_id") != null) {
                     invoiceId = UUID.fromString(String.valueOf(invoiceResp.get("invoice_id")));
@@ -618,7 +629,7 @@ public class PolicyLifecycleService {
         OffsetDateTime newDueDate = OffsetDateTime.now().plusDays(extraDays);
         Map<String, Object> invoiceResp = billingClient.createEndorsementInvoice(
                 policy.getOrderId(), policy.getPolicyId(), additionalCharge,
-                endorsementRequestId, newDueDate);
+                endorsementRequestId, newDueDate, policy.getCustomerId());
         UUID newInvoiceId = null;
         if (invoiceResp != null && invoiceResp.get("invoice_id") != null) {
             newInvoiceId = UUID.fromString(String.valueOf(invoiceResp.get("invoice_id")));
@@ -675,7 +686,8 @@ public class PolicyLifecycleService {
                 "cancel_date", cancelDate.toString(),
                 "final_premium_vnd", policy.getFinalPremiumVnd(),
                 "remaining_days", remainingDays,
-                "term_days", termDays));
+                "term_days", termDays,
+                "refundable_credit_vnd", 0L));
         return toResponse(policy);
     }
 
@@ -959,15 +971,16 @@ public class PolicyLifecycleService {
         return "";
     }
 
-    @Transactional
-    public PolicyResponse renew(UUID policyId, String keycloakSubject) {
+    @Transactional(readOnly = true)
+    public RenewalPreviewResponse previewRenewal(UUID policyId, String keycloakSubject) {
         Policy old = findOwnedPolicy(policyId, keycloakSubject);
+        if (old.getStatus() != PolicyStatus.active) {
+            throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
+        }
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime newEff = old.getPolicyExpirationDate().isBefore(now) ? now : old.getPolicyExpirationDate();
         OffsetDateTime newExp = newEff.plus(365, ChronoUnit.DAYS);
 
-        // Retrieve the full risk profile from the old policy's latest exposure segment
-        // so the renewal re-rate uses the complete feature set, not just renewal context.
         List<ExposureSegment> oldSegments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
         ExposureSegment oldLatest = oldSegments.isEmpty() ? null : oldSegments.get(oldSegments.size() - 1);
         Map<String, Object> profile = oldLatest != null ? readRiskSnapshot(oldLatest) : new LinkedHashMap<>();
@@ -976,20 +989,6 @@ public class PolicyLifecycleService {
         profile.put("years_since_first_policy", old.getYearsSinceFirstPolicy() + 1);
         profile.put("policy_count_prior", old.getPolicyCountPrior() + 1);
 
-        Policy renewed = new Policy();
-        renewed.setPolicyId(UUID.randomUUID());
-        renewed.setOrderId(old.getOrderId());
-        renewed.setCustomerId(old.getCustomerId());
-        renewed.setProductId(old.getProductId());
-        renewed.setStatus(PolicyStatus.active);
-        renewed.setPolicyEffectiveDate(newEff);
-        renewed.setPolicyExpirationDate(newExp);
-        renewed.setRenewalNumber(old.getRenewalNumber() + 1);
-        renewed.setRenewal(true);
-        renewed.setYearsSinceFirstPolicy(old.getYearsSinceFirstPolicy() + 1);
-        renewed.setPolicyCountPrior(old.getPolicyCountPrior() + 1);
-
-        // R24.2: re-rate the renewal with the full risk profile + renewal context.
         long renewedPremium = old.getFinalPremiumVnd();
         try {
             Map<String, Object> requote = pricingClient.rerate(old.getProductId(), profile);
@@ -998,16 +997,127 @@ public class PolicyLifecycleService {
                 renewedPremium = n.longValue();
             }
         } catch (RuntimeException e) {
-            // Fail safe: if pricing is unavailable, keep prior premium rather than block renewal.
             renewedPremium = old.getFinalPremiumVnd();
         }
+
+        long creditApplied = 0;
+        long netDue = renewedPremium;
+        try {
+            Map<String, Object> creditResp = billingClient.applyCreditAndQuote(
+                    old.getCustomerId(), renewedPremium);
+            if (creditResp != null) {
+                if (creditResp.get("credit_applied_vnd") != null) {
+                    creditApplied = Long.parseLong(String.valueOf(creditResp.get("credit_applied_vnd")));
+                }
+                if (creditResp.get("net_due_vnd") != null) {
+                    netDue = Long.parseLong(String.valueOf(creditResp.get("net_due_vnd")));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        long coverage = oldLatest != null ? oldLatest.getCoverageAmountVnd() : 0L;
+        long deductible = oldLatest != null ? oldLatest.getDeductibleVnd() : 0L;
+
+        RenewalPreviewResponse resp = new RenewalPreviewResponse();
+        resp.setPolicyId(policyId);
+        resp.setRenewalNumber(old.getRenewalNumber() + 1);
+        resp.setNewEffectiveDate(newEff);
+        resp.setNewExpirationDate(newExp);
+        resp.setCurrentPremiumVnd(old.getFinalPremiumVnd());
+        resp.setRenewedPremiumVnd(renewedPremium);
+        resp.setCreditAppliedVnd(creditApplied);
+        resp.setNetDueVnd(netDue);
+        resp.setCoverageAmountVnd(coverage);
+        resp.setDeductibleVnd(deductible);
+        resp.setPaymentRequired(netDue >= MIN_SETTLE_AMOUNT);
+        return resp;
+    }
+
+    @Transactional
+    public RenewalResponse renew(UUID policyId, String keycloakSubject) {
+        Policy old = findOwnedPolicy(policyId, keycloakSubject);
+        // B1: Status guard — only active policies can be renewed.
+        if (old.getStatus() != PolicyStatus.active) {
+            throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
+        }
+        // B2: Duplicate guard — block if a renewal already exists for the next term.
+        int nextRenewalNumber = old.getRenewalNumber() + 1;
+        List<Policy> existingRenewals = policyRepository.findByOrderIdAndStatusIn(
+                old.getOrderId(),
+                List.of(PolicyStatus.active, PolicyStatus.pending_payment));
+        for (Policy p : existingRenewals) {
+            if (p.getRenewalNumber() == nextRenewalNumber && !p.getPolicyId().equals(old.getPolicyId())) {
+                throw new ServiceException(ErrorCode.RENEWAL_IN_PROGRESS,
+                        "A renewal already exists for the next term",
+                        Map.of("existing_policy_id", p.getPolicyId().toString()));
+            }
+        }
+
+        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime newEff = old.getPolicyExpirationDate().isBefore(now) ? now : old.getPolicyExpirationDate();
+        OffsetDateTime newExp = newEff.plus(365, ChronoUnit.DAYS);
+
+        // B3: Re-rate with full risk profile + renewal context.
+        List<ExposureSegment> oldSegments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
+        ExposureSegment oldLatest = oldSegments.isEmpty() ? null : oldSegments.get(oldSegments.size() - 1);
+        Map<String, Object> profile = oldLatest != null ? readRiskSnapshot(oldLatest) : new LinkedHashMap<>();
+        profile.put("is_renewal", true);
+        profile.put("renewal_number", old.getRenewalNumber() + 1);
+        profile.put("years_since_first_policy", old.getYearsSinceFirstPolicy() + 1);
+        profile.put("policy_count_prior", old.getPolicyCountPrior() + 1);
+
+        long renewedPremium = old.getFinalPremiumVnd();
+        try {
+            Map<String, Object> requote = pricingClient.rerate(old.getProductId(), profile);
+            Object premium = requote != null ? requote.get("final_premium_vnd") : null;
+            if (premium instanceof Number n) {
+                renewedPremium = n.longValue();
+            }
+        } catch (RuntimeException e) {
+            renewedPremium = old.getFinalPremiumVnd();
+        }
+
+        // B4: Net-off customer-scoped credit.
+        long creditApplied = 0;
+        long netDue = renewedPremium;
+        try {
+            Map<String, Object> creditResp = billingClient.applyCreditAndQuote(
+                    old.getCustomerId(), renewedPremium);
+            if (creditResp != null) {
+                if (creditResp.get("credit_applied_vnd") != null) {
+                    creditApplied = Long.parseLong(String.valueOf(creditResp.get("credit_applied_vnd")));
+                }
+                if (creditResp.get("net_due_vnd") != null) {
+                    netDue = Long.parseLong(String.valueOf(creditResp.get("net_due_vnd")));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        // B5: Gate-by-payment.
+        boolean paymentRequired = netDue >= MIN_SETTLE_AMOUNT;
+
+        Policy renewed = new Policy();
+        renewed.setPolicyId(UUID.randomUUID());
+        renewed.setOrderId(old.getOrderId());
+        renewed.setCustomerId(old.getCustomerId());
+        renewed.setProductId(old.getProductId());
+        renewed.setStatus(paymentRequired ? PolicyStatus.pending_payment : PolicyStatus.active);
+        renewed.setPolicyEffectiveDate(newEff);
+        renewed.setPolicyExpirationDate(newExp);
+        renewed.setRenewalNumber(nextRenewalNumber);
+        renewed.setRenewal(true);
+        renewed.setYearsSinceFirstPolicy(old.getYearsSinceFirstPolicy() + 1);
+        renewed.setPolicyCountPrior(old.getPolicyCountPrior() + 1);
         renewed.setFinalPremiumVnd(renewedPremium);
         renewed.setAssetKey(old.getAssetKey());
         renewed.setCreatedAt(now);
         policyRepository.save(renewed);
 
-        // Stamp exposure segment 0 for the renewed policy with the full risk profile
-        // so subsequent endorsements can merge against it.
+        // B6: Stamp segment 0 with inherited coverage/deductible.
+        long newCoverage = oldLatest != null ? oldLatest.getCoverageAmountVnd() : 0L;
+        long newDeductible = oldLatest != null ? oldLatest.getDeductibleVnd() : 0L;
         ExposureSegment seg = new ExposureSegment();
         seg.setSegmentId(UUID.randomUUID());
         seg.setPolicyId(renewed.getPolicyId());
@@ -1016,8 +1126,8 @@ public class PolicyLifecycleService {
         seg.setSegmentEnd(newExp);
         long days = ChronoUnit.DAYS.between(newEff, newExp);
         seg.setEarnedExposureYears(days / 365.25);
-        seg.setCoverageAmountVnd(oldLatest != null ? oldLatest.getCoverageAmountVnd() : 0L);
-        seg.setDeductibleVnd(oldLatest != null ? oldLatest.getDeductibleVnd() : 0L);
+        seg.setCoverageAmountVnd(newCoverage);
+        seg.setDeductibleVnd(newDeductible);
         try {
             seg.setRiskSnapshot(objectMapper.writeValueAsString(profile));
         } catch (Exception e) {
@@ -1025,29 +1135,80 @@ public class PolicyLifecycleService {
         }
         segmentRepository.save(seg);
 
-        enqueueEvent("PolicyRenewed", renewed.getPolicyId(), Map.of(
-                "customer_id", renewed.getCustomerId().toString(),
-                "order_id", renewed.getOrderId().toString(),
-                "renewal_number", renewed.getRenewalNumber(),
-                "final_premium_vnd", renewedPremium));
-        return toResponse(renewed);
+        RenewalResponse resp = new RenewalResponse();
+        resp.setPolicyId(renewed.getPolicyId());
+        resp.setPreviousPolicyId(policyId);
+        resp.setRenewalNumber(nextRenewalNumber);
+        resp.setRenewedPremiumVnd(renewedPremium);
+        resp.setCreditAppliedVnd(creditApplied);
+        resp.setNetDueVnd(netDue);
+        resp.setPaymentRequired(paymentRequired);
+        resp.setNewEffectiveDate(newEff);
+        resp.setNewExpirationDate(newExp);
+
+        if (paymentRequired) {
+            // Create invoice for net_due; billing will net-off credits and return invoice_id.
+            UUID invoiceId = null;
+            try {
+                Map<String, Object> invoiceResp = billingClient.createRenewalInvoice(
+                        renewed.getOrderId(), renewed.getPolicyId(), netDue, renewed.getCustomerId());
+                if (invoiceResp != null && invoiceResp.get("invoice_id") != null) {
+                    invoiceId = UUID.fromString(String.valueOf(invoiceResp.get("invoice_id")));
+                }
+            } catch (Exception ignored) {
+            }
+            resp.setInvoiceId(invoiceId);
+            resp.setStatus(PolicyStatus.pending_payment);
+            Map<String, Object> renewalPayload = new LinkedHashMap<>();
+            renewalPayload.put("customer_id", renewed.getCustomerId().toString());
+            renewalPayload.put("order_id", renewed.getOrderId().toString());
+            renewalPayload.put("previous_policy_id", policyId.toString());
+            renewalPayload.put("renewal_number", nextRenewalNumber);
+            renewalPayload.put("renewed_premium_vnd", renewedPremium);
+            renewalPayload.put("credit_applied_vnd", creditApplied);
+            renewalPayload.put("net_due_vnd", netDue);
+            renewalPayload.put("invoice_id", invoiceId != null ? invoiceId.toString() : "");
+            renewalPayload.put("new_effective_date", newEff.toString());
+            renewalPayload.put("new_expiration_date", newExp.toString());
+            renewalPayload.put("payment_required", true);
+            enqueueEvent("PolicyRenewed", renewed.getPolicyId(), renewalPayload);
+        } else {
+            // Credit covers full amount — activate immediately.
+            resp.setStatus(PolicyStatus.active);
+            Map<String, Object> renewalPayload = new LinkedHashMap<>();
+            renewalPayload.put("customer_id", renewed.getCustomerId().toString());
+            renewalPayload.put("order_id", renewed.getOrderId().toString());
+            renewalPayload.put("previous_policy_id", policyId.toString());
+            renewalPayload.put("renewal_number", nextRenewalNumber);
+            renewalPayload.put("renewed_premium_vnd", renewedPremium);
+            renewalPayload.put("credit_applied_vnd", creditApplied);
+            renewalPayload.put("net_due_vnd", netDue);
+            renewalPayload.put("new_effective_date", newEff.toString());
+            renewalPayload.put("new_expiration_date", newExp.toString());
+            renewalPayload.put("payment_required", false);
+            enqueueEvent("PolicyRenewed", renewed.getPolicyId(), renewalPayload);
+        }
+        return resp;
     }
 
     @Transactional
-    public PolicyResponse cancel(UUID policyId, CancelRequest request, String keycloakSubject) {
+    public CancelResponse cancel(UUID policyId, CancelRequest request, String keycloakSubject) {
         Policy policy = findOwnedPolicy(policyId, keycloakSubject);
         if (policy.getStatus() != PolicyStatus.active) {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
         OffsetDateTime cancelDate = request.getCancelDate();
-        if (cancelDate.isAfter(policy.getPolicyExpirationDate()) || cancelDate.isBefore(policy.getPolicyEffectiveDate())) {
+        // E1: Block backdate — cancel_date must be >= now and within [effective, expiration].
+        OffsetDateTime now = OffsetDateTime.now();
+        if (cancelDate.isBefore(now) || cancelDate.isAfter(policy.getPolicyExpirationDate())
+                || cancelDate.isBefore(policy.getPolicyEffectiveDate())) {
             throw new ServiceException(ErrorCode.CANCEL_DATE_OUT_OF_RANGE);
         }
         policy.setStatus(PolicyStatus.cancelled);
         policy.setCancelDate(cancelDate);
         policyRepository.save(policy);
 
-        // R25.3: cut the exposure segment covering cancel_date and recompute earned exposure.
+        // E2: Cut the exposure segment covering cancel_date and recompute earned exposure.
         List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
         for (ExposureSegment seg : segments) {
             if (!cancelDate.isBefore(seg.getSegmentStart()) && cancelDate.isBefore(seg.getSegmentEnd())) {
@@ -1056,8 +1217,7 @@ public class PolicyLifecycleService {
                 seg.setEarnedExposureYears(Math.max(0, segDays) / 365.25);
                 segmentRepository.save(seg);
             } else if (seg.getSegmentStart().isAfter(cancelDate)) {
-                // Segments entirely after cancellation earn no exposure.
-                seg.setSegmentEnd(cancelDate.isAfter(seg.getSegmentStart()) ? seg.getSegmentEnd() : seg.getSegmentStart());
+                seg.setSegmentEnd(seg.getSegmentStart());
                 seg.setEarnedExposureYears(0.0);
                 segmentRepository.save(seg);
             }
@@ -1065,8 +1225,26 @@ public class PolicyLifecycleService {
 
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(cancelDate, policy.getPolicyExpirationDate());
-        enqueueEvent("PolicyCancelled", policyId, Map.of("customer_id", policy.getCustomerId().toString(), "cancel_date", cancelDate.toString(), "final_premium_vnd", policy.getFinalPremiumVnd(), "remaining_days", remainingDays, "term_days", termDays));
-        return toResponse(policy);
+
+        // E4: Include refundable_credit_vnd in the event (billing is the source of truth).
+        long refundableCreditVnd = 0L;
+        // The credit amount is resolved by billing when processing the event;
+        // order-service passes 0 as a placeholder — billing enriches at event processing time.
+        enqueueEvent("PolicyCancelled", policyId, Map.of(
+                "customer_id", policy.getCustomerId().toString(),
+                "cancel_date", cancelDate.toString(),
+                "final_premium_vnd", policy.getFinalPremiumVnd(),
+                "remaining_days", remainingDays,
+                "term_days", termDays,
+                "refundable_credit_vnd", refundableCreditVnd));
+
+        CancelResponse resp = new CancelResponse();
+        resp.setPolicyId(policyId);
+        resp.setStatus(PolicyStatus.cancelled);
+        resp.setCancelDate(cancelDate);
+        resp.setRemainingDays(remainingDays);
+        resp.setTermDays(termDays);
+        return resp;
     }
 
     private Policy findOwnedPolicy(UUID policyId, String keycloakSubject) {

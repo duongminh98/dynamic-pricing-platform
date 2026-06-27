@@ -1,6 +1,7 @@
 package dpp.order.controller;
 
 import dpp.order.dto.CancelRequest;
+import dpp.order.dto.CancelResponse;
 import dpp.order.dto.PageResponse;
 import dpp.order.dto.PolicyDetailResponse;
 import dpp.order.dto.PolicyResponse;
@@ -51,7 +52,7 @@ public class AdminPolicyController {
 
     @PostMapping("/{id}/cancel")
     @PreAuthorize("hasRole('Administrator')")
-    public PolicyResponse cancelPolicy(@PathVariable UUID id,
+    public CancelResponse cancelPolicy(@PathVariable UUID id,
                                        @RequestBody(required = false) CancelRequest request) {
         OffsetDateTime cancelDate = request != null ? request.getCancelDate() : null;
         return lifecycleService.adminCancelPolicy(id, cancelDate);
