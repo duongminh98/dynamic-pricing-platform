@@ -89,3 +89,7 @@ h.txt
 wsl.txt
 cbuild.txt
 logs/
+
+# Local test payloads
+test_register.json
+*.local.json
