@@ -1,6 +1,7 @@
 package dpp.order.controller;
 
 import dpp.order.dto.*;
+import dpp.order.entity.OrderStatus;
 import dpp.order.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -8,7 +9,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -23,8 +23,22 @@ public class AdminOrderController {
 
     @GetMapping("/review-queue")
     @PreAuthorize("hasRole('Administrator')")
-    public List<ReviewQueueItem> reviewQueue() {
-        return orderService.reviewQueue();
+    public PageResponse<ReviewQueueItem> reviewQueue(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String line) {
+        return PageResponse.from(orderService.reviewQueue(page, size, line));
+    }
+
+    @GetMapping
+    @PreAuthorize("hasRole('Administrator')")
+    public PageResponse<OrderResponse> listAll(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) UUID customerId,
+            @RequestParam(required = false) String line) {
+        return PageResponse.from(orderService.adminListOrders(status, customerId, line, page, size));
     }
 
     @GetMapping("/{id}")

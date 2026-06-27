@@ -77,8 +77,8 @@ services:
     host: customer-service-upstream
     port: 80
     connect_timeout: 5000
-    read_timeout: 5000
-    write_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
     retries: 0
     routes:
       - name: customer-routes
@@ -92,8 +92,8 @@ services:
     host: product-service-upstream
     port: 80
     connect_timeout: 5000
-    read_timeout: 5000
-    write_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
     retries: 0
     routes:
       - name: product-routes
@@ -110,8 +110,8 @@ services:
     host: order-service-upstream
     port: 80
     connect_timeout: 5000
-    read_timeout: 5000
-    write_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
     retries: 0
     plugins:
       - name: jwt
@@ -135,8 +135,8 @@ services:
     host: claims-service-upstream
     port: 80
     connect_timeout: 5000
-    read_timeout: 5000
-    write_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
     retries: 0
     plugins:
       - name: jwt
@@ -157,8 +157,8 @@ services:
     host: billing-service-upstream
     port: 80
     connect_timeout: 5000
-    read_timeout: 5000
-    write_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
     retries: 0
     routes:
       - name: billing-routes
@@ -172,8 +172,8 @@ services:
     host: notification-service-upstream
     port: 80
     connect_timeout: 5000
-    read_timeout: 5000
-    write_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
     retries: 0
     plugins:
       - name: jwt
@@ -194,8 +194,8 @@ services:
     host: pricing-service-upstream
     port: 80
     connect_timeout: 5000
-    read_timeout: 5000
-    write_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
     retries: 0
     plugins:
       - name: jwt

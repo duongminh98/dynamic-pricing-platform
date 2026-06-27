@@ -9,8 +9,10 @@ import dpp.billing.service.BillingService;
 import dpp.billing.dto.CreateInvoiceRequest;
 import dpp.billing.dto.InvoiceResponse;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -39,6 +41,9 @@ class BillingPersistenceTest {
 
     @Autowired
     private InvoiceRepository invoiceRepository;
+
+    @MockBean
+    private RabbitTemplate rabbitTemplate;
 
     // OutboxPublisher is a real bean; OrderClient is autowired. We do not hit the
     // network here because these tests do not call getPolicyBilling.

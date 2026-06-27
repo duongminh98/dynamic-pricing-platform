@@ -2,6 +2,7 @@ package dpp.order;
 
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
+import dpp.common.outbox.OutboxPublisher;
 import dpp.order.client.BillingClient;
 import dpp.order.client.PricingClient;
 import dpp.order.dto.CreateOrderRequest;
@@ -9,7 +10,9 @@ import dpp.order.dto.OrderResponse;
 import dpp.order.entity.OrderEntity;
 import dpp.order.entity.OrderStatus;
 import dpp.order.repository.OrderRepository;
+import dpp.order.repository.PolicyRepository;
 import dpp.order.service.OrderService;
+import dpp.order.service.OrderApprovalTransactionService;
 import net.jqwik.api.*;
 import net.jqwik.api.constraints.LongRange;
 import org.junit.jupiter.api.Tag;
@@ -28,7 +31,11 @@ import static org.mockito.Mockito.*;
 class OrderCreationPropertyTest {
 
     private OrderService newService(OrderRepository repo, PricingClient pricing, BillingClient billing) {
-        return new OrderService(repo, pricing, billing);
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        PolicyRepository policyRepo = mock(PolicyRepository.class);
+        when(policyRepo.existsActivePolicy(any(), any())).thenReturn(false);
+        OrderApprovalTransactionService approvalTx = new OrderApprovalTransactionService(repo, outbox);
+        return new OrderService(repo, pricing, billing, outbox, policyRepo, approvalTx);
     }
 
     private Map<String, Object> validQuote(long premium) {

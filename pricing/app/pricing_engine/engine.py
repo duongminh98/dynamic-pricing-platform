@@ -15,30 +15,13 @@ import uuid
 from common.errors import ErrorCode, ServiceException
 from .loader import (
     ensure_loaded, get_line_for_product, get_product, required_columns, LINES,
+    get_loading_factor, get_current_rate_version_id,
 )
 from .features import build_features, feature_set_for_audit
 from .selection import select_model
 from .explain import explain
 
 QUOTE_VALIDITY_DAYS = 7
-
-def _coverage_of(profile: dict) -> int:
-    """Read coverage_amount_vnd from the profile (top-level or line_attributes)."""
-    attrs = profile.get("line_attributes", {}) or {}
-    val = profile.get("coverage_amount_vnd", attrs.get("coverage_amount_vnd", 0))
-    try:
-        return int(val or 0)
-    except (TypeError, ValueError):
-        return 0
-
-def _deductible_of(profile: dict) -> int:
-    """Read deductible_vnd from the profile (top-level or line_attributes)."""
-    attrs = profile.get("line_attributes", {}) or {}
-    val = profile.get("deductible_vnd", attrs.get("deductible_vnd", 0))
-    try:
-        return int(val or 0)
-    except (TypeError, ValueError):
-        return 0
 
 def _quote_audit_enabled() -> bool:
     """Read the bonus flag dynamically so tests/deployments can toggle it at runtime."""
@@ -120,13 +103,20 @@ def _predict_pure_premium(selection: dict, feature_df) -> float:
 
 
 def quote(db, product_id: str, profile: dict,
-          loading_factor: float = 1.0) -> dict:
+          loading_factor: float | None = None) -> dict:
     """Compute a quote. ``db`` is an optional SQLAlchemy session for audit."""
     ensure_loaded()
     validate_profile(profile)
     line = get_line_for_product(product_id)
     if line not in LINES:
         raise ServiceException(ErrorCode.UNSUPPORTED_LINE, details={"line": line})
+
+    prod = get_product(product_id)
+    if not prod:
+        raise ServiceException(ErrorCode.RESOURCE_NOT_FOUND,
+                               details={"product_id": product_id, "reason": "product not found"})
+    coverage = int(prod.get("coverage_amount_vnd", 0) or 0)
+    deductible = int(prod.get("deductible_vnd", 0) or 0)
 
     selection = select_model(line)
     feature_names = required_columns(line)
@@ -141,7 +131,9 @@ def quote(db, product_id: str, profile: dict,
 
     pure_premium = _predict_pure_premium(selection, feature_df)
 
-    prod = get_product(product_id)
+    if loading_factor is None:
+        loading_factor = get_loading_factor(line)
+
     admin_fee = prod.get("admin_fee_vnd", 0)
     pure_int, final_int = compute_final_premium(pure_premium, loading_factor, admin_fee)
 
@@ -164,8 +156,8 @@ def quote(db, product_id: str, profile: dict,
         "line": line,
         "product_id": product_id,
         "trip_duration_days": profile.get("trip_duration_days") if line == "travel" else None,
-        "coverage_amount_vnd": _coverage_of(profile),
-        "deductible_vnd": _deductible_of(profile),
+        "coverage_amount_vnd": coverage,
+        "deductible_vnd": deductible,
         "frequency": None,
         "severity": None,
         "pure_premium_vnd": pure_int,
@@ -176,13 +168,14 @@ def quote(db, product_id: str, profile: dict,
         "explanation": explanation,
         "model_version": selection["model_version"],
         "rate_version": rate_version_id,
+        "product_rate_version_id": get_current_rate_version_id(),
         "loading_factor": float(loading_factor),
         "admin_fee_vnd": int(admin_fee),
     }
 
 
 def quote_freq_sev(db, product_id: str, profile: dict,
-                   loading_factor: float = 1.0) -> dict:
+                   loading_factor: float | None = None) -> dict:
     """Quote using the frequency x severity branch (Property 1, freq x sev).
 
     Uses the champion frequency and severity models of the line.
@@ -192,6 +185,14 @@ def quote_freq_sev(db, product_id: str, profile: dict,
     line = get_line_for_product(product_id)
     if line not in LINES:
         raise ServiceException(ErrorCode.UNSUPPORTED_LINE, details={"line": line})
+
+    prod = get_product(product_id)
+    if not prod:
+        raise ServiceException(ErrorCode.RESOURCE_NOT_FOUND,
+                               details={"product_id": product_id, "reason": "product not found"})
+    coverage = int(prod.get("coverage_amount_vnd", 0) or 0)
+    deductible = int(prod.get("deductible_vnd", 0) or 0)
+
     freq_model = artifacts.get(line, {}).get("freq")
     sev_model = artifacts.get(line, {}).get("sev")
     if freq_model is None or sev_model is None:
@@ -203,7 +204,9 @@ def quote_freq_sev(db, product_id: str, profile: dict,
     severity = float(sev_model.predict(feature_df)[0])
     pure_premium = max(0.0, frequency * severity)
 
-    prod = get_product(product_id)
+    if loading_factor is None:
+        loading_factor = get_loading_factor(line)
+
     admin_fee = prod.get("admin_fee_vnd", 0)
     pure_int, final_int = compute_final_premium(pure_premium, loading_factor, admin_fee)
 
@@ -221,8 +224,8 @@ def quote_freq_sev(db, product_id: str, profile: dict,
         "quote_id": quote_id,
         "line": line,
         "product_id": product_id,
-        "coverage_amount_vnd": _coverage_of(profile),
-        "deductible_vnd": _deductible_of(profile),
+        "coverage_amount_vnd": coverage,
+        "deductible_vnd": deductible,
         "frequency": frequency,
         "severity": severity,
         "pure_premium_vnd": pure_int,
@@ -233,6 +236,7 @@ def quote_freq_sev(db, product_id: str, profile: dict,
         "explanation": explanation,
         "model_version": "freq_sev",
         "rate_version": rate_version_id,
+        "product_rate_version_id": get_current_rate_version_id(),
         "loading_factor": float(loading_factor),
         "admin_fee_vnd": int(admin_fee),
     }

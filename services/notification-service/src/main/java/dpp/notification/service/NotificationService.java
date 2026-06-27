@@ -1,5 +1,7 @@
 package dpp.notification.service;
 
+import dpp.common.api.ErrorCode;
+import dpp.common.api.ServiceException;
 import dpp.notification.dto.NotificationResponse;
 import dpp.notification.entity.*;
 import dpp.notification.repository.NotificationRepository;
@@ -24,7 +26,11 @@ public class NotificationService {
 
     /** Event types that should also be delivered via email (R7.2, design 2.2). */
     static final Set<String> EMAIL_EVENT_TYPES = Set.of(
-            "PolicyIssued", "PolicyCancelled", "ClaimStatusChanged");
+            "PolicyIssued", "PolicyCancelled", "ClaimStatusChanged",
+            "EndorsementApplied", "EndorsementRejected", "PolicyRenewed",
+            "OrderApproved", "OrderRejected",
+            "EndorsementPendingPayment", "EndorsementOverdue",
+            "EndorsementCreditIssued", "RefundRequested", "RefundCompleted");
 
     private final NotificationRepository notificationRepository;
     private final EmailSender emailSender;
@@ -126,16 +132,48 @@ public class NotificationService {
             case "ClaimStatusChanged" -> "Your claim status has changed";
             case "PolicyRenewed" -> "Your insurance policy has been renewed";
             case "EndorsementApplied" -> "Your policy endorsement has been applied";
+            case "EndorsementRejected" -> "Your endorsement request has been rejected";
+            case "EndorsementPendingPayment" -> "Payment required for your endorsement";
+            case "EndorsementOverdue" -> "Your endorsement request has expired";
+            case "OrderApproved" -> "Your order has been approved";
+            case "OrderRejected" -> "Your order has been rejected";
+            case "OrderSubmitted" -> "Your order has been submitted";
+            case "EndorsementCreditIssued" -> "Premium credit issued for your endorsement";
+            case "RefundRequested" -> "Refund request created for your policy";
+            case "RefundCompleted" -> "Your refund has been completed";
             default -> "Insurance notification";
         };
     }
 
     @Transactional(readOnly = true)
-    public List<NotificationResponse> listForCustomer(UUID customerId, NotificationStatus status) {
-        List<Notification> rows = (status != null)
-                ? notificationRepository.findByCustomerIdAndStatusOrderByCreatedAtDesc(customerId, status)
-                : notificationRepository.findByCustomerIdOrderByCreatedAtDesc(customerId);
+    public List<NotificationResponse> listForCustomer(UUID customerId, boolean unreadOnly) {
+        List<Notification> rows = unreadOnly
+                ? notificationRepository.findByCustomerIdAndChannelAndReadAtIsNullOrderByCreatedAtDesc(customerId, NotificationChannel.in_app)
+                : notificationRepository.findByCustomerIdAndChannelOrderByCreatedAtDesc(customerId, NotificationChannel.in_app);
         return rows.stream().map(NotificationService::toResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public long countUnread(UUID customerId) {
+        return notificationRepository.countByCustomerIdAndChannelAndReadAtIsNull(customerId, NotificationChannel.in_app);
+    }
+
+    @Transactional
+    public NotificationResponse markRead(UUID customerId, UUID notificationId) {
+        Notification n = notificationRepository.findById(notificationId).orElse(null);
+        if (n == null || !n.getCustomerId().equals(customerId)) {
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Notification not found", null);
+        }
+        if (n.getReadAt() == null) {
+            n.setReadAt(OffsetDateTime.now());
+            notificationRepository.save(n);
+        }
+        return toResponse(n);
+    }
+
+    @Transactional
+    public int markAllRead(UUID customerId) {
+        return notificationRepository.markAllRead(customerId, OffsetDateTime.now());
     }
 
     static NotificationResponse toResponse(Notification n) {
@@ -149,6 +187,8 @@ public class NotificationService {
                 .status(n.getStatus())
                 .retryCount(n.getRetryCount())
                 .createdAt(n.getCreatedAt())
+                .readAt(n.getReadAt())
+                .read(n.getReadAt() != null)
                 .build();
     }
 }

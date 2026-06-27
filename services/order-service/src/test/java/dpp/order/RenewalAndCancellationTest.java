@@ -3,6 +3,7 @@ package dpp.order;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
+import dpp.order.client.BillingClient;
 import dpp.order.client.PricingClient;
 import dpp.order.dto.CancelRequest;
 import dpp.order.dto.EndorsementRequest;
@@ -87,7 +88,7 @@ class RenewalAndCancellationTest {
 
         PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo,
                 mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class),
-                pricing, mock(OutboxPublisher.class));
+                pricing, mock(BillingClient.class), mock(OutboxPublisher.class));
 
         PolicyResponse resp = svc.renew(old.getPolicyId(), SUBJECT);
 
@@ -148,7 +149,7 @@ class RenewalAndCancellationTest {
 
         PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo,
                 mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class),
-                mock(PricingClient.class), mock(OutboxPublisher.class));
+                mock(PricingClient.class), mock(BillingClient.class), mock(OutboxPublisher.class));
 
         CancelRequest req = new CancelRequest();
         req.setCancelDate(cancelDate);
@@ -170,7 +171,7 @@ class RenewalAndCancellationTest {
 
         PolicyLifecycleService svc = new PolicyLifecycleService(repo, mock(ExposureSegmentRepository.class),
                 mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class),
-                mock(PricingClient.class), mock(OutboxPublisher.class));
+                mock(PricingClient.class), mock(BillingClient.class), mock(OutboxPublisher.class));
 
         CancelRequest req = new CancelRequest();
         req.setCancelDate(policy.getPolicyExpirationDate().plusDays(5));
@@ -229,12 +230,13 @@ class RenewalAndCancellationTest {
         when(docRepo.findByPolicyIdOrderByVersionDesc(any())).thenReturn(List.of());
         when(docRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(endRepo.save(any(EndorsementRequestEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(endRepo.findByPolicyIdOrderByCreatedAtDesc(any())).thenReturn(List.of());
 
         // Renewal re-rate returns 1.75M
         when(pricing.rerate(eq("MOTOR_BASIC"), anyMap()))
                 .thenReturn(Map.of("final_premium_vnd", 1_750_000L));
 
-        PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, outbox);
+        PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, mock(BillingClient.class), outbox);
 
         // --- Step 1: Customer renews ---
         PolicyResponse renewResp = svc.renew(old.getPolicyId(), SUBJECT);
@@ -290,6 +292,15 @@ class RenewalAndCancellationTest {
         when(pricing.rerate(eq("MOTOR_BASIC"), anyMap()))
                 .thenReturn(Map.of("final_premium_vnd", 2_200_000L));
 
+        // Billing net-off quote: no credits, full amount due
+        BillingClient billing = mock(BillingClient.class);
+        when(billing.applyCreditAndQuote(any(), anyLong()))
+                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 438_356L));
+        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
+                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
+        // Replace svc with one that has the billing mock
+        svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
+
         UUID renewedPolicyId = renewedPolicy.getPolicyId();
         EndorsementRequest endorseReq = new EndorsementRequest();
         Map<String, Object> change = new HashMap<>();
@@ -315,23 +326,18 @@ class RenewalAndCancellationTest {
         when(endRepo.findById(endorsePending.getEndorsementRequestId())).thenReturn(Optional.of(endorsePending));
 
         EndorsementRequestResponse approveResp = svc.approveEndorsement(endorsePending.getEndorsementRequestId(), "admin-subject");
-        assertEquals(EndorsementStatus.APPROVED, approveResp.getStatus());
+        assertEquals(EndorsementStatus.APPROVED_PENDING_PAYMENT, approveResp.getStatus(),
+                "premium increase endorsement must wait for payment");
 
-        // Verify endorsement re-rate used merged profile from segment 0 of renewed policy
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<Map<String, Object>> endorseProfileCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(pricing, times(3)).rerate(eq("MOTOR_BASIC"), endorseProfileCaptor.capture());
-        Map<String, Object> endorseProfile = endorseProfileCaptor.getValue();
-        assertEquals(30, ((Number) endorseProfile.get("age")).intValue(),
-                "endorsement must preserve age from renewed segment 0");
-        assertEquals(500_000_000L, ((Number) endorseProfile.get("vehicle_value_vnd")).longValue(),
-                "endorsement must override vehicle_value to 500M");
-        assertEquals(true, endorseProfile.get("is_renewal"),
-                "endorsement must preserve is_renewal from renewed segment 0");
+        // Simulate invoice payment → endorsement is applied
+        svc.applyPendingEndorsement(endorsePending.getEndorsementRequestId());
 
-        // Verify premium changed after admin approval
+        // Verify endorsement used price lock (rerate called 2 times: renewal + submit, not at apply)
+        verify(pricing, times(2)).rerate(eq("MOTOR_BASIC"), anyMap());
+
+        // Verify premium changed after payment triggers apply (using locked quoted premium)
         assertEquals(2_200_000L, renewedPolicy.getFinalPremiumVnd(),
-                "endorsement on renewed policy must update premium after admin approval");
+                "endorsement on renewed policy must update premium after payment");
 
         // Verify EndorsementApplied event has correct premiums
         ArgumentCaptor<String> endorsePayloadCaptor = ArgumentCaptor.forClass(String.class);
@@ -393,12 +399,19 @@ class RenewalAndCancellationTest {
         when(docRepo.findByPolicyIdOrderByVersionDesc(policy.getPolicyId())).thenReturn(List.of());
         when(docRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(endRepo.save(any(EndorsementRequestEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(endRepo.findByPolicyIdOrderByCreatedAtDesc(any())).thenReturn(List.of());
 
         // Endorsement re-rate returns 18M (smoker = higher risk)
         when(pricing.rerate(eq("HEALTH_BASIC"), anyMap()))
                 .thenReturn(Map.of("final_premium_vnd", 18_000_000L));
 
-        PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, outbox);
+        BillingClient billing = mock(BillingClient.class);
+        when(billing.applyCreditAndQuote(any(), anyLong()))
+                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 5_950_685L));
+        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
+                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
+
+        PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 
         // --- Step 1: Customer endorses (smoker=true) on day 360 ---
         OffsetDateTime endorseDate = eff.plusDays(360);
@@ -425,12 +438,21 @@ class RenewalAndCancellationTest {
         EndorsementRequestEntity pending = endCaptor.getValue();
         when(endRepo.findById(pending.getEndorsementRequestId())).thenReturn(Optional.of(pending));
 
-        // --- Step 2: Admin approves → re-rate → new segment with smoker=true ---
+        // --- Step 2: Admin approves → pending payment (premium increase) ---
         EndorsementRequestResponse approveResp = svc.approveEndorsement(pending.getEndorsementRequestId(), "admin-subject");
 
-        assertEquals(EndorsementStatus.APPROVED, approveResp.getStatus());
+        assertEquals(EndorsementStatus.APPROVED_PENDING_PAYMENT, approveResp.getStatus(),
+                "premium increase endorsement must wait for payment");
+        assertEquals(12_000_000L, policy.getFinalPremiumVnd(),
+                "premium must not change until payment is received");
+
+        // Simulate payment → endorsement applied
+        svc.applyPendingEndorsement(pending.getEndorsementRequestId());
+
+        assertEquals(EndorsementStatus.APPLIED, endRepo.findById(pending.getEndorsementRequestId()).get().getStatus(),
+                "endorsement must be APPLIED after payment");
         assertEquals(18_000_000L, policy.getFinalPremiumVnd(),
-                "premium must reflect re-rate after admin approval");
+                "premium must reflect locked quoted premium after payment triggers apply");
 
         // Capture the new segment created by endorsement
         ArgumentCaptor<ExposureSegment> endSegCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
@@ -463,8 +485,8 @@ class RenewalAndCancellationTest {
         // Verify renewal re-rate used the LATEST segment (smoker=true), not the base (smoker=false)
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> renewProfileCaptor = ArgumentCaptor.forClass(Map.class);
-        // pricing.rerate called 3 times: 1 provisional + 1 apply (endorsement) + 1 renewal
-        verify(pricing, times(3)).rerate(eq("HEALTH_BASIC"), renewProfileCaptor.capture());
+        // pricing.rerate called 2 times: 1 provisional (endorsement submit) + 1 renewal (no apply rerate with price lock)
+        verify(pricing, times(2)).rerate(eq("HEALTH_BASIC"), renewProfileCaptor.capture());
         Map<String, Object> renewProfile = renewProfileCaptor.getValue();
         assertEquals(true, renewProfile.get("smoker"),
                 "renewal must read smoker=true from the latest segment (after endorsement)");

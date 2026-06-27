@@ -32,6 +32,18 @@ public class Invoice {
     @Column(name = "paid_at")
     private OffsetDateTime paidAt;
 
+    @Column(name = "endorsement_request_id")
+    private UUID endorsementRequestId;
+
+    @Column(name = "due_date")
+    private OffsetDateTime dueDate;
+
+    @Column(name = "credit_applied_vnd", nullable = false)
+    private long creditAppliedVnd = 0;
+
+    @Column(name = "net_amount_vnd", nullable = false)
+    private long netAmountVnd = 0;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 }

@@ -10,6 +10,7 @@ import dpp.billing.entity.InvoiceStatus;
 import dpp.billing.repository.AdjustmentRepository;
 import dpp.billing.repository.InvoiceRepository;
 import dpp.billing.service.BillingService;
+import dpp.billing.service.CreditService;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
@@ -53,7 +54,7 @@ class BillingServiceCoverageTest {
         adj.setCreatedAt(OffsetDateTime.now());
         when(adjRepo.findByPolicyIdOrderByCreatedAtAsc(policyId)).thenReturn(List.of(adj));
 
-        BillingService svc = new BillingService(invRepo, adjRepo, orderClient, mock(OutboxPublisher.class));
+        BillingService svc = new BillingService(invRepo, adjRepo, orderClient, mock(OutboxPublisher.class), mock(CreditService.class));
         PolicyBillingResponse resp = svc.getPolicyBilling(policyId, owner);
 
         assertEquals(1, resp.getInvoices().size());
@@ -72,7 +73,7 @@ class BillingServiceCoverageTest {
 
         when(orderClient.getPolicyOwner(policyId)).thenReturn(owner);
 
-        BillingService svc = new BillingService(invRepo, adjRepo, orderClient, mock(OutboxPublisher.class));
+        BillingService svc = new BillingService(invRepo, adjRepo, orderClient, mock(OutboxPublisher.class), mock(CreditService.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.getPolicyBilling(policyId, attacker));
         assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
@@ -87,7 +88,7 @@ class BillingServiceCoverageTest {
 
         when(orderClient.getPolicyOwner(policyId)).thenReturn(null);
 
-        BillingService svc = new BillingService(invRepo, adjRepo, orderClient, mock(OutboxPublisher.class));
+        BillingService svc = new BillingService(invRepo, adjRepo, orderClient, mock(OutboxPublisher.class), mock(CreditService.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.getPolicyBilling(policyId, UUID.randomUUID()));
         assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
@@ -100,7 +101,7 @@ class BillingServiceCoverageTest {
         when(invRepo.findById(invoiceId)).thenReturn(Optional.empty());
 
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), mock(OutboxPublisher.class));
+                mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.payInvoice(invoiceId));
         assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
@@ -113,7 +114,7 @@ class BillingServiceCoverageTest {
         when(invRepo.findById(invoiceId)).thenReturn(Optional.empty());
 
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), mock(OutboxPublisher.class));
+                mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.payInvoiceAsCustomer(invoiceId, UUID.randomUUID()));
         assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
@@ -134,7 +135,7 @@ class BillingServiceCoverageTest {
         when(orderClient.getOrderOwner(orderId)).thenReturn(null);
 
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                orderClient, mock(OutboxPublisher.class));
+                orderClient, mock(OutboxPublisher.class), mock(CreditService.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.payInvoiceAsCustomer(invoiceId, UUID.randomUUID()));
         assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());

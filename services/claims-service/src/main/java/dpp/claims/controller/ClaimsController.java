@@ -1,6 +1,7 @@
 package dpp.claims.controller;
 
 import dpp.claims.dto.*;
+import dpp.claims.entity.ClaimStatus;
 import dpp.claims.service.ClaimsService;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -33,6 +34,15 @@ public class ClaimsController {
     @GetMapping
     public List<ClaimResponse> myClaims(@AuthenticationPrincipal Jwt jwt) {
         return claimsService.myClaims(jwt.getSubject());
+    }
+
+    @GetMapping("/admin/all")
+    @PreAuthorize("hasRole('Administrator')")
+    public List<ClaimResponse> adminListAllClaims(@RequestParam(required = false) ClaimStatus status) {
+        if (status != null) {
+            return claimsService.adminListClaimsByStatus(status);
+        }
+        return claimsService.adminListAllClaims();
     }
 
     @GetMapping("/{id}")

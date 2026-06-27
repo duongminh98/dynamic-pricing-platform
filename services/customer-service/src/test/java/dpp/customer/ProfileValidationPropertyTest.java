@@ -2,7 +2,7 @@ package dpp.customer;
 
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
-import dpp.customer.dto.ProfileRequest;
+import dpp.customer.dto.BaseProfileRequest;
 import dpp.customer.validator.ProfileValidator;
 import net.jqwik.api.*;
 import net.jqwik.api.constraints.IntRange;
@@ -40,19 +40,14 @@ class ProfileValidationPropertyTest {
         return a;
     }
 
-    private ProfileRequest request(String line, Map<String, Object> attrs) {
-        ProfileRequest r = new ProfileRequest();
+    private BaseProfileRequest baseRequest() {
+        BaseProfileRequest r = new BaseProfileRequest();
         r.setAge(30);
         r.setGender("male");
         r.setProvince("Ha Noi");
-        r.setRegion("Red River Delta");
-        r.setUrbanTier("tier1");
         r.setOccupation("engineer");
-        r.setIncomeLevel("middle");
         r.setMonthlyIncomeVnd(20_000_000L);
         r.setMaritalStatus("single");
-        r.setLine(line);
-        r.setLineAttributes(attrs);
         return r;
     }
 
@@ -60,7 +55,7 @@ class ProfileValidationPropertyTest {
     void validHealthProfileIsAccepted(@ForAll @IntRange(min = 51, max = 249) int heightCm) {
         Map<String, Object> attrs = validHealthAttrs();
         attrs.put("height_cm", heightCm);
-        assertDoesNotThrow(() -> validator.validate(request("health", attrs)));
+        assertDoesNotThrow(() -> validator.validateLine("health", attrs));
     }
 
     @Property(tries = 100)
@@ -69,7 +64,7 @@ class ProfileValidationPropertyTest {
         Map<String, Object> attrs = validHealthAttrs();
         attrs.put("height_cm", heightCm);
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("health", attrs)));
+                () -> validator.validateLine("health", attrs));
         assertEquals(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, ex.getErrorCode());
     }
 
@@ -78,7 +73,7 @@ class ProfileValidationPropertyTest {
         String[] invalid = {"life", "pet", "cyber", "boat", "", "HEALTH"};
         String line = invalid[Math.floorMod(seed, invalid.length)];
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request(line, validHealthAttrs())));
+                () -> validator.validateLine(line, validHealthAttrs()));
         assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
     }
 
@@ -91,31 +86,32 @@ class ProfileValidationPropertyTest {
         Map<String, Object> attrs = validHealthAttrs();
         attrs.remove(drop);
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("health", attrs)));
+                () -> validator.validateLine("health", attrs));
         assertEquals(ErrorCode.MISSING_REQUIRED_FIELDS, ex.getErrorCode());
     }
 
     @Property(tries = 100)
     void ageOutOfRangeRejectedWithRangeError(
             @ForAll @IntRange(min = 101, max = 200) int age) {
-        ProfileRequest r = request("health", validHealthAttrs());
+        BaseProfileRequest r = baseRequest();
         r.setAge(age);
-        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validate(r));
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
         assertEquals(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, ex.getErrorCode());
     }
 
     @Property(tries = 100)
     void invalidGenderRejectedWithCategoricalError(@ForAll int seed) {
         String[] bad = {"M", "", "FEMALE", "nam", "unknown"};
-        ProfileRequest r = request("health", validHealthAttrs());
+        BaseProfileRequest r = baseRequest();
         r.setGender(bad[Math.floorMod(seed, bad.length)]);
-        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validate(r));
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
         assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
     }
 
     @Property(tries = 100)
     void invalidMotorbikeCategoricalRejected(@ForAll int seed) {
         java.util.Map<String, Object> attrs = new java.util.HashMap<>();
+        attrs.put("vehicle_plate", "29A-12345");
         attrs.put("vehicle_brand", "Honda");
         attrs.put("vehicle_model", "commuter");
         attrs.put("vehicle_segment", "standard");
@@ -129,14 +125,32 @@ class ProfileValidationPropertyTest {
         attrs.put("anti_theft_device", true);
         attrs.put("primary_use", "personal");
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("motorbike", attrs)));
+                () -> validator.validateLine("motorbike", attrs));
         assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
     }
 
     @Test
     void nullLineAttributesRejected() {
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("health", null)));
+                () -> validator.validateLine("health", null));
         assertEquals(ErrorCode.MISSING_REQUIRED_FIELDS, ex.getErrorCode());
+    }
+
+    @Property(tries = 100)
+    void invalidProvinceRejectedWithCategoricalError(@ForAll int seed) {
+        String[] bad = {"Hanoi", "hanoi", "HA NOI", "Saigon", "Ho Chi Minh", "New York", ""};
+        BaseProfileRequest r = baseRequest();
+        r.setProvince(bad[Math.floorMod(seed, bad.length)]);
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
+        assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
+    }
+
+    @Property(tries = 100)
+    void invalidOccupationRejectedWithCategoricalError(@ForAll int seed) {
+        String[] bad = {"Engineer", "ENGINEER", "doctor", "pilot", "salesman", ""};
+        BaseProfileRequest r = baseRequest();
+        r.setOccupation(bad[Math.floorMod(seed, bad.length)]);
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
+        assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
     }
 }

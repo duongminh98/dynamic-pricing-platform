@@ -69,4 +69,12 @@ public class EndorsementRequestEntity {
     /** Provisional premium (VND) quoted at submission time for the customer's information; applied only on admin approval. */
     @Column(name = "quoted_premium_vnd")
     private Long quotedPremiumVnd;
+
+    /** Invoice ID for the additional charge when status = APPROVED_PENDING_PAYMENT. */
+    @Column(name = "invoice_id")
+    private UUID invoiceId;
+
+    /** Due date for payment when status = APPROVED_PENDING_PAYMENT. */
+    @Column(name = "due_date")
+    private OffsetDateTime dueDate;
 }

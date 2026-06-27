@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -26,12 +28,16 @@ public class CustomerController {
     public Map<String, Object> getMe(@AuthenticationPrincipal Jwt jwt) {
         Account account = accountRepository.findByKeycloakSubject(jwt.getSubject())
                 .orElseThrow(() -> new ServiceException(ErrorCode.UNAUTHENTICATED, "Account not found for subject", null));
-        
-        return Map.of(
-            "accountId", account.getAccountId(),
-            "email", account.getEmail(),
-            "keycloakSubject", account.getKeycloakSubject()
-        );
+
+        Map<String, Object> realmAccess = jwt.getClaim("realm_access");
+        List<String> roles = realmAccess != null ? (List<String>) realmAccess.get("roles") : List.of();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("accountId", account.getAccountId());
+        result.put("email", account.getEmail());
+        result.put("keycloakSubject", account.getKeycloakSubject());
+        result.put("roles", roles);
+        return result;
     }
 }
 

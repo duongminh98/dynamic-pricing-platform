@@ -56,3 +56,6 @@ vnpay:
 dpp:
   order:
     base-url: ${ORDER_BASE_URL:http://localhost:8083}
+  billing:
+    direct-pay:
+      enabled: ${BILLING_DIRECT_PAY_ENABLED:false}

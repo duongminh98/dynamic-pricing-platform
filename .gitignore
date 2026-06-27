@@ -16,6 +16,7 @@ desktop.ini
 
 # Datasets and generated reports — kept out of version control by request
 data/
+!data/synthetic/geo_risk.csv
 reports/
 
 # Offline modelling work — kept out of version control by request

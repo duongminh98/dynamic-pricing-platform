@@ -2,6 +2,7 @@ package dpp.product.service;
 
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
+import dpp.product.dto.LoadingFactorResponse;
 import dpp.product.dto.RateVersionResponse;
 import dpp.product.entity.LoadingFactor;
 import dpp.product.entity.RateVersion;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -86,6 +88,43 @@ public class RateVersionService {
 
     // Eligibility rules have been removed from the product scope (R26 automatic
     // rules dropped). Rate_Version now covers loading factors + product config only.
+
+    @Transactional(readOnly = true)
+    public List<LoadingFactorResponse> getCurrentLoadingFactors() {
+        return rateVersionRepository.findByIsCurrentTrue()
+                .map(rv -> buildLoadingFactorResponses(rv.getRateVersionId()))
+                .orElseGet(() -> buildDefaultLoadingFactorResponses(null));
+    }
+
+    private List<LoadingFactorResponse> buildLoadingFactorResponses(java.util.UUID rateVersionId) {
+        List<LoadingFactor> factors = loadingFactorRepository.findByRateVersionId(rateVersionId);
+        Map<String, Double> factorMap = new java.util.HashMap<>();
+        for (LoadingFactor lf : factors) {
+            factorMap.put(lf.getLine(), lf.getLoadingValue());
+        }
+        List<LoadingFactorResponse> responses = new ArrayList<>();
+        for (String line : VALID_LINES) {
+            Double value = factorMap.getOrDefault(line, 1.0);
+            responses.add(LoadingFactorResponse.builder()
+                    .rateVersionId(rateVersionId)
+                    .line(line)
+                    .loadingValue(value)
+                    .build());
+        }
+        return responses;
+    }
+
+    private List<LoadingFactorResponse> buildDefaultLoadingFactorResponses(java.util.UUID rateVersionId) {
+        List<LoadingFactorResponse> responses = new ArrayList<>();
+        for (String line : VALID_LINES) {
+            responses.add(LoadingFactorResponse.builder()
+                    .rateVersionId(rateVersionId)
+                    .line(line)
+                    .loadingValue(1.0)
+                    .build());
+        }
+        return responses;
+    }
 }
 
 

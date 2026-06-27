@@ -1,7 +1,7 @@
 """Tests for app.pricing_engine.engine — functions that don't need model artifacts.
 
-Covers validate_profile, compute_final_premium, _coverage_of, _deductible_of,
-_rate_version_for, and quote() with mocked loader/selection.
+Covers validate_profile, compute_final_premium, _rate_version_for,
+and quote() with mocked loader/selection.
 """
 from __future__ import annotations
 
@@ -16,50 +16,12 @@ from app.pricing_engine import engine
 from app.pricing_engine.engine import (
     validate_profile,
     compute_final_premium,
-    _coverage_of,
-    _deductible_of,
     _rate_version_for,
     _quote_audit_enabled,
     PROFILE_RANGES,
     REQUIRED_PROFILE_FIELDS,
 )
 from common.errors import ErrorCode, ServiceException
-
-
-# ── _coverage_of / _deductible_of ──
-
-def test_coverage_of_from_top_level():
-    assert _coverage_of({"coverage_amount_vnd": 100_000_000}) == 100_000_000
-
-
-def test_coverage_of_from_line_attributes():
-    assert _coverage_of({"line_attributes": {"coverage_amount_vnd": 50_000_000}}) == 50_000_000
-
-
-def test_coverage_of_defaults_to_zero():
-    assert _coverage_of({}) == 0
-    assert _coverage_of({"line_attributes": {}}) == 0
-
-
-def test_coverage_of_handles_invalid_value():
-    assert _coverage_of({"coverage_amount_vnd": "abc"}) == 0
-    assert _coverage_of({"coverage_amount_vnd": None}) == 0
-
-
-def test_deductible_of_from_top_level():
-    assert _deductible_of({"deductible_vnd": 5_000_000}) == 5_000_000
-
-
-def test_deductible_of_from_line_attributes():
-    assert _deductible_of({"line_attributes": {"deductible_vnd": 2_000_000}}) == 2_000_000
-
-
-def test_deductible_of_defaults_to_zero():
-    assert _deductible_of({}) == 0
-
-
-def test_deductible_of_handles_invalid_value():
-    assert _deductible_of({"deductible_vnd": "xyz"}) == 0
 
 
 # ── _rate_version_for ──
@@ -213,7 +175,7 @@ def test_quote_with_mocked_loader():
          patch("app.pricing_engine.engine.select_model", return_value=mock_selection), \
          patch("app.pricing_engine.engine.required_columns", return_value=["age", "coverage_amount_vnd", "deductible_vnd"]), \
          patch("app.pricing_engine.engine.build_features", return_value=mock_feature_df), \
-         patch("app.pricing_engine.engine.get_product", return_value={"admin_fee_vnd": 10_000}), \
+         patch("app.pricing_engine.engine.get_product", return_value={"admin_fee_vnd": 10_000, "coverage_amount_vnd": 100_000_000, "deductible_vnd": 0}), \
          patch("app.pricing_engine.engine.explain", return_value={"available": True, "items": []}), \
          patch("app.pricing_engine.engine.feature_set_for_audit", return_value={"age": 30}), \
          patch("app.pricing_engine.engine._quote_audit_enabled", return_value=False):
@@ -222,6 +184,8 @@ def test_quote_with_mocked_loader():
     assert result["currency"] == "VND"
     assert result["line"] == "health"
     assert result["product_id"] == "HEALTH_BASIC"
+    assert result["coverage_amount_vnd"] == 100_000_000
+    assert result["deductible_vnd"] == 0
     assert result["pure_premium_vnd"] >= 0
     assert result["final_premium_vnd"] >= 0
     assert result["model_version"] == "v1.0"
@@ -252,6 +216,7 @@ def test_quote_rejects_missing_core_features():
          patch("app.pricing_engine.engine.validate_profile"), \
          patch("app.pricing_engine.engine.get_line_for_product", return_value="health"), \
          patch("app.pricing_engine.engine.LINES", ["health"]), \
+         patch("app.pricing_engine.engine.get_product", return_value={"admin_fee_vnd": 10_000, "coverage_amount_vnd": 100_000_000, "deductible_vnd": 0}), \
          patch("app.pricing_engine.engine.select_model", return_value=mock_selection), \
          patch("app.pricing_engine.engine.required_columns", return_value=["age"]):
         with pytest.raises(ServiceException) as exc_info:
@@ -273,7 +238,7 @@ def test_quote_freq_sev_with_mocked_loader():
          patch("app.pricing_engine.loader.artifacts", {"health": {"freq": mock_freq, "sev": mock_sev}}), \
          patch("app.pricing_engine.engine.required_columns", return_value=["age"]), \
          patch("app.pricing_engine.engine.build_features", return_value=mock_feature_df), \
-         patch("app.pricing_engine.engine.get_product", return_value={"admin_fee_vnd": 10_000}), \
+         patch("app.pricing_engine.engine.get_product", return_value={"admin_fee_vnd": 10_000, "coverage_amount_vnd": 100_000_000, "deductible_vnd": 0}), \
          patch("app.pricing_engine.engine.explain", return_value={"available": False, "items": []}), \
          patch("app.pricing_engine.engine.feature_set_for_audit", return_value={"age": 30}), \
          patch("app.pricing_engine.engine._quote_audit_enabled", return_value=False):
@@ -282,6 +247,8 @@ def test_quote_freq_sev_with_mocked_loader():
     assert result["currency"] == "VND"
     assert result["frequency"] == 0.1
     assert result["severity"] == 5_000_000.0
+    assert result["coverage_amount_vnd"] == 100_000_000
+    assert result["deductible_vnd"] == 0
     assert result["pure_premium_vnd"] >= 0
 
 
@@ -289,6 +256,7 @@ def test_quote_freq_sev_missing_models():
     with patch("app.pricing_engine.engine.ensure_loaded"), \
          patch("app.pricing_engine.engine.get_line_for_product", return_value="health"), \
          patch("app.pricing_engine.engine.LINES", ["health"]), \
+         patch("app.pricing_engine.engine.get_product", return_value={"admin_fee_vnd": 10_000, "coverage_amount_vnd": 100_000_000, "deductible_vnd": 0}), \
          patch("app.pricing_engine.loader.artifacts", {}):
         with pytest.raises(ServiceException) as exc_info:
             engine.quote_freq_sev(None, "HEALTH_BASIC", _valid_profile())
@@ -302,3 +270,24 @@ def test_quote_freq_sev_unsupported_line():
         with pytest.raises(ServiceException) as exc_info:
             engine.quote_freq_sev(None, "UNKNOWN", _valid_profile())
         assert exc_info.value.error_code == ErrorCode.UNSUPPORTED_LINE
+
+
+def test_quote_rejects_product_not_found():
+    with patch("app.pricing_engine.engine.ensure_loaded"), \
+         patch("app.pricing_engine.engine.validate_profile"), \
+         patch("app.pricing_engine.engine.get_line_for_product", return_value="health"), \
+         patch("app.pricing_engine.engine.LINES", ["health"]), \
+         patch("app.pricing_engine.engine.get_product", return_value={}):
+        with pytest.raises(ServiceException) as exc_info:
+            engine.quote(None, "NONEXISTENT", _valid_profile())
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_NOT_FOUND
+
+
+def test_quote_freq_sev_rejects_product_not_found():
+    with patch("app.pricing_engine.engine.ensure_loaded"), \
+         patch("app.pricing_engine.engine.get_line_for_product", return_value="health"), \
+         patch("app.pricing_engine.engine.LINES", ["health"]), \
+         patch("app.pricing_engine.engine.get_product", return_value={}):
+        with pytest.raises(ServiceException) as exc_info:
+            engine.quote_freq_sev(None, "NONEXISTENT", _valid_profile())
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_NOT_FOUND

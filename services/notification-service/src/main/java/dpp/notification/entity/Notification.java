@@ -8,7 +8,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "notification", uniqueConstraints = @UniqueConstraint(columnNames = {"policy_id", "type"}))
+@Table(name = "notification")
 @Getter
 @Setter
 public class Notification {
@@ -44,4 +44,7 @@ public class Notification {
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
+
+    @Column(name = "read_at")
+    private OffsetDateTime readAt;
 }

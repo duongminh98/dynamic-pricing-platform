@@ -49,6 +49,19 @@ public class ProductService {
         return toDetail(product);
     }
 
+    public List<ProductResponse> listAllProducts() {
+        return productRepository.findAll().stream()
+                .map(ProductService::toProductResponse)
+                .toList();
+    }
+
+    public ProductResponse getProductRaw(String productId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND,
+                        Map.of("product_id", productId, "reason", "not found")));
+        return toProductResponse(product);
+    }
+
     public List<CoverageOptionResponse> getCoverageOptions(String line) {
         validateLine(line);
         List<Product> products = productRepository.findByCategoryAndActiveTrue(line);

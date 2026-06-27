@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @Tag("Feature: dynamic-pricing-platform, Property 13")
@@ -55,15 +56,15 @@ class NotificationOwnershipPropertyTest {
         Notification own = notificationFor(customerId, "PolicyIssued");
 
         NotificationRepository repo = mock(NotificationRepository.class);
-        when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(List.of(own));
+        when(repo.findByCustomerIdAndChannelOrderByCreatedAtDesc(customerId, NotificationChannel.in_app)).thenReturn(List.of(own));
 
         NotificationController controller = controllerWith(repo);
-        List<NotificationResponse> result = controller.myNotifications(jwtFor(subject), null);
+        List<NotificationResponse> result = controller.myNotifications(jwtFor(subject), false);
 
         assertEquals(1, result.size());
         assertEquals(customerId, result.get(0).getCustomerId());
-        verify(repo, times(1)).findByCustomerIdOrderByCreatedAtDesc(customerId);
-        verify(repo, never()).findByCustomerIdOrderByCreatedAtDesc(otherId);
+        verify(repo, times(1)).findByCustomerIdAndChannelOrderByCreatedAtDesc(customerId, NotificationChannel.in_app);
+        verify(repo, never()).findByCustomerIdAndChannelOrderByCreatedAtDesc(otherId, NotificationChannel.in_app);
     }
 
     @Property(tries = 100)
@@ -72,30 +73,30 @@ class NotificationOwnershipPropertyTest {
         UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
 
         NotificationRepository repo = mock(NotificationRepository.class);
-        when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(List.of());
+        when(repo.findByCustomerIdAndChannelOrderByCreatedAtDesc(customerId, NotificationChannel.in_app)).thenReturn(List.of());
 
         NotificationController controller = controllerWith(repo);
-        controller.myNotifications(jwtFor(subject), null);
+        controller.myNotifications(jwtFor(subject), false);
 
         org.mockito.ArgumentCaptor<UUID> captor = org.mockito.ArgumentCaptor.forClass(UUID.class);
-        verify(repo, times(1)).findByCustomerIdOrderByCreatedAtDesc(captor.capture());
+        verify(repo, times(1)).findByCustomerIdAndChannelOrderByCreatedAtDesc(captor.capture(), eq(NotificationChannel.in_app));
         assertEquals(customerId, captor.getValue());
     }
 
     @Property(tries = 100)
-    void statusFilterDelegatesToStatusQuery(@ForAll int seed) {
+    void unreadOnlyFilterDelegatesToUnreadQuery(@ForAll int seed) {
         String subject = "customer-subject";
         UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
 
         NotificationRepository repo = mock(NotificationRepository.class);
-        when(repo.findByCustomerIdAndStatusOrderByCreatedAtDesc(customerId, NotificationStatus.failed))
+        when(repo.findByCustomerIdAndChannelAndReadAtIsNullOrderByCreatedAtDesc(customerId, NotificationChannel.in_app))
                 .thenReturn(List.of());
 
         NotificationController controller = controllerWith(repo);
-        controller.myNotifications(jwtFor(subject), NotificationStatus.failed);
+        controller.myNotifications(jwtFor(subject), true);
 
-        verify(repo, times(1)).findByCustomerIdAndStatusOrderByCreatedAtDesc(customerId, NotificationStatus.failed);
-        verify(repo, never()).findByCustomerIdOrderByCreatedAtDesc(customerId);
+        verify(repo, times(1)).findByCustomerIdAndChannelAndReadAtIsNullOrderByCreatedAtDesc(customerId, NotificationChannel.in_app);
+        verify(repo, never()).findByCustomerIdAndChannelOrderByCreatedAtDesc(customerId, NotificationChannel.in_app);
     }
 
     @Test
@@ -104,10 +105,10 @@ class NotificationOwnershipPropertyTest {
         UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
 
         NotificationRepository repo = mock(NotificationRepository.class);
-        when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(List.of());
+        when(repo.findByCustomerIdAndChannelOrderByCreatedAtDesc(customerId, NotificationChannel.in_app)).thenReturn(List.of());
 
         NotificationController controller = controllerWith(repo);
-        List<NotificationResponse> result = controller.myNotifications(jwtFor(subject), null);
+        List<NotificationResponse> result = controller.myNotifications(jwtFor(subject), false);
         assertTrue(result.isEmpty());
     }
 }

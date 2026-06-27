@@ -3,8 +3,11 @@ package dpp.claims.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -34,10 +37,6 @@ public class Claim {
     @Column(name = "loss_type", nullable = false, length = 50)
     private String lossType;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "severity_level", nullable = false, length = 10)
-    private SeverityLevel severityLevel;
-
     @Column(name = "incurred_amount", nullable = false)
     private long incurredAmount;
 
@@ -51,6 +50,16 @@ public class Claim {
     @Enumerated(EnumType.STRING)
     @Column(name = "misrepresentation_sanction", length = 20)
     private MisrepresentationSanction misrepresentationSanction;
+
+    @Column(name = "description", length = 2000)
+    private String description;
+
+    @Column(name = "estimated_cost")
+    private Long estimatedCost;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "attachments", columnDefinition = "jsonb")
+    private List<String> attachments;
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;

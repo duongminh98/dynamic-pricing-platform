@@ -2,7 +2,7 @@ package dpp.customer;
 
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
-import dpp.customer.dto.ProfileRequest;
+import dpp.customer.dto.BaseProfileRequest;
 import dpp.customer.validator.ProfileValidator;
 import org.junit.jupiter.api.Test;
 
@@ -15,24 +15,20 @@ class ProfileValidatorLineTest {
 
     private final ProfileValidator validator = new ProfileValidator();
 
-    private ProfileRequest request(String line, Map<String, Object> attrs) {
-        ProfileRequest r = new ProfileRequest();
+    private BaseProfileRequest baseRequest() {
+        BaseProfileRequest r = new BaseProfileRequest();
         r.setAge(30);
         r.setGender("male");
         r.setProvince("Ha Noi");
-        r.setRegion("Red River Delta");
-        r.setUrbanTier("tier1");
         r.setOccupation("engineer");
-        r.setIncomeLevel("middle");
         r.setMonthlyIncomeVnd(20_000_000L);
         r.setMaritalStatus("single");
-        r.setLine(line);
-        r.setLineAttributes(attrs);
         return r;
     }
 
     private Map<String, Object> validMotorbikeAttrs() {
         Map<String, Object> a = new HashMap<>();
+        a.put("vehicle_plate", "29A-12345");
         a.put("vehicle_brand", "Honda");
         a.put("vehicle_model", "Wave");
         a.put("vehicle_segment", "standard");
@@ -50,6 +46,7 @@ class ProfileValidatorLineTest {
 
     private Map<String, Object> validHomeAttrs() {
         Map<String, Object> a = new HashMap<>();
+        a.put("property_address", "123 Nguyen Trai, Hanoi");
         a.put("property_type", "apartment");
         a.put("floor_area_m2", 80);
         a.put("number_of_floors", 1);
@@ -79,6 +76,8 @@ class ProfileValidatorLineTest {
 
     private Map<String, Object> validTravelAttrs() {
         Map<String, Object> a = new HashMap<>();
+        a.put("trip_start_date", "2025-01-01");
+        a.put("trip_end_date", "2025-01-10");
         a.put("domestic_or_international", "domestic");
         a.put("destination_region", "North");
         a.put("destination_country", "Vietnam");
@@ -93,7 +92,7 @@ class ProfileValidatorLineTest {
 
     @Test
     void validMotorbikeProfileIsAccepted() {
-        assertDoesNotThrow(() -> validator.validate(request("motorbike", validMotorbikeAttrs())));
+        assertDoesNotThrow(() -> validator.validateLine("motorbike", validMotorbikeAttrs()));
     }
 
     @Test
@@ -102,22 +101,22 @@ class ProfileValidatorLineTest {
         attrs.put("driver_count", 1);
         attrs.put("garage_repair_option", "authorized");
         attrs.put("loan_or_leasing_flag", false);
-        assertDoesNotThrow(() -> validator.validate(request("car", attrs)));
+        assertDoesNotThrow(() -> validator.validateLine("car", attrs));
     }
 
     @Test
     void validHomeProfileIsAccepted() {
-        assertDoesNotThrow(() -> validator.validate(request("home", validHomeAttrs())));
+        assertDoesNotThrow(() -> validator.validateLine("home", validHomeAttrs()));
     }
 
     @Test
     void validAccidentProfileIsAccepted() {
-        assertDoesNotThrow(() -> validator.validate(request("accident", validAccidentAttrs())));
+        assertDoesNotThrow(() -> validator.validateLine("accident", validAccidentAttrs()));
     }
 
     @Test
     void validTravelProfileIsAccepted() {
-        assertDoesNotThrow(() -> validator.validate(request("travel", validTravelAttrs())));
+        assertDoesNotThrow(() -> validator.validateLine("travel", validTravelAttrs()));
     }
 
     @Test
@@ -125,7 +124,7 @@ class ProfileValidatorLineTest {
         Map<String, Object> attrs = validHomeAttrs();
         attrs.put("property_type", "mansion");
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("home", attrs)));
+                () -> validator.validateLine("home", attrs));
         assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
     }
 
@@ -134,7 +133,7 @@ class ProfileValidatorLineTest {
         Map<String, Object> attrs = validAccidentAttrs();
         attrs.put("occupation_class", "extreme");
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("accident", attrs)));
+                () -> validator.validateLine("accident", attrs));
         assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
     }
 
@@ -143,7 +142,7 @@ class ProfileValidatorLineTest {
         Map<String, Object> attrs = validTravelAttrs();
         attrs.remove("destination_country");
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("travel", attrs)));
+                () -> validator.validateLine("travel", attrs));
         assertEquals(ErrorCode.MISSING_REQUIRED_FIELDS, ex.getErrorCode());
     }
 
@@ -152,7 +151,7 @@ class ProfileValidatorLineTest {
         Map<String, Object> attrs = validMotorbikeAttrs();
         attrs.put("vehicle_age", 999);
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("motorbike", attrs)));
+                () -> validator.validateLine("motorbike", attrs));
         assertEquals(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, ex.getErrorCode());
     }
 
@@ -162,55 +161,39 @@ class ProfileValidatorLineTest {
         attrs.put("garage_repair_option", "standard");
         attrs.put("loan_or_leasing_flag", true);
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("car", attrs)));
+                () -> validator.validateLine("car", attrs));
         assertEquals(ErrorCode.MISSING_REQUIRED_FIELDS, ex.getErrorCode());
     }
 
     @Test
-    void invalidIncomeLevelRejected() {
-        ProfileRequest r = request("health", validMotorbikeAttrs());
-        r.setLineAttributes(new HashMap<>(Map.of("height_cm", 170, "weight_kg", 65, "bmi", 22.5,
-                "smoker", false, "chronic_disease", false, "diabetes", false,
-                "blood_pressure_problem", false, "major_surgeries_count", 0,
-                "hospitalized_last_12m", false, "medical_visit_count_12m", 1)));
-        r.setIncomeLevel("ultra_rich");
-        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validate(r));
+    void invalidProvinceRejected() {
+        BaseProfileRequest r = baseRequest();
+        r.setProvince("Mars City");
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
         assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
     }
 
     @Test
     void invalidMaritalStatusRejected() {
-        ProfileRequest r = request("health", new HashMap<>(Map.of(
-                "height_cm", 170, "weight_kg", 65, "bmi", 22.5,
-                "smoker", false, "chronic_disease", false, "diabetes", false,
-                "blood_pressure_problem", false, "major_surgeries_count", 0,
-                "hospitalized_last_12m", false, "medical_visit_count_12m", 1)));
+        BaseProfileRequest r = baseRequest();
         r.setMaritalStatus("complicated");
-        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validate(r));
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
         assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
     }
 
     @Test
-    void invalidUrbanTierRejected() {
-        ProfileRequest r = request("health", new HashMap<>(Map.of(
-                "height_cm", 170, "weight_kg", 65, "bmi", 22.5,
-                "smoker", false, "chronic_disease", false, "diabetes", false,
-                "blood_pressure_problem", false, "major_surgeries_count", 0,
-                "hospitalized_last_12m", false, "medical_visit_count_12m", 1)));
-        r.setUrbanTier("metropolis");
-        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validate(r));
+    void invalidOccupationRejected() {
+        BaseProfileRequest r = baseRequest();
+        r.setOccupation("astronaut");
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
         assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
     }
 
     @Test
     void outOfRangeMonthlyIncomeRejected() {
-        ProfileRequest r = request("health", new HashMap<>(Map.of(
-                "height_cm", 170, "weight_kg", 65, "bmi", 22.5,
-                "smoker", false, "chronic_disease", false, "diabetes", false,
-                "blood_pressure_problem", false, "major_surgeries_count", 0,
-                "hospitalized_last_12m", false, "medical_visit_count_12m", 1)));
+        BaseProfileRequest r = baseRequest();
         r.setMonthlyIncomeVnd(-1L);
-        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validate(r));
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
         assertEquals(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, ex.getErrorCode());
     }
 
@@ -228,7 +211,126 @@ class ProfileValidatorLineTest {
         attrs.put("hospitalized_last_12m", false);
         attrs.put("medical_visit_count_12m", 1);
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> validator.validate(request("health", attrs)));
+                () -> validator.validateLine("health", attrs));
         assertEquals(ErrorCode.INVALID_CATEGORICAL_VALUE, ex.getErrorCode());
+    }
+
+    // --- deriveIncomeLevel boundary tests ---
+
+    @Test
+    void deriveIncomeLevelLowBoundary() {
+        assertEquals("low", validator.deriveIncomeLevel(0L));
+        assertEquals("low", validator.deriveIncomeLevel(6_999_999L));
+    }
+
+    @Test
+    void deriveIncomeLevelLowerMiddleBoundary() {
+        assertEquals("lower_middle", validator.deriveIncomeLevel(7_000_000L));
+        assertEquals("lower_middle", validator.deriveIncomeLevel(11_999_999L));
+    }
+
+    @Test
+    void deriveIncomeLevelMiddleBoundary() {
+        assertEquals("middle", validator.deriveIncomeLevel(12_000_000L));
+        assertEquals("middle", validator.deriveIncomeLevel(20_999_999L));
+    }
+
+    @Test
+    void deriveIncomeLevelUpperMiddleBoundary() {
+        assertEquals("upper_middle", validator.deriveIncomeLevel(21_000_000L));
+        assertEquals("upper_middle", validator.deriveIncomeLevel(38_999_999L));
+    }
+
+    @Test
+    void deriveIncomeLevelHighBoundary() {
+        assertEquals("high", validator.deriveIncomeLevel(39_000_000L));
+        assertEquals("high", validator.deriveIncomeLevel(100_000_000L));
+    }
+
+    @Test
+    void deriveIncomeLevelNullReturnsNull() {
+        assertNull(validator.deriveIncomeLevel(null));
+    }
+
+    // --- deriveRegion representative provinces ---
+
+    @Test
+    void deriveRegionForRedRiverDelta() {
+        assertEquals("Red River Delta", validator.deriveRegion("Ha Noi"));
+        assertEquals("Red River Delta", validator.deriveRegion("Bac Ninh"));
+        assertEquals("Red River Delta", validator.deriveRegion("Quang Ninh"));
+    }
+
+    @Test
+    void deriveRegionForSoutheast() {
+        assertEquals("Southeast", validator.deriveRegion("TP Ho Chi Minh"));
+        assertEquals("Southeast", validator.deriveRegion("Dong Nai"));
+    }
+
+    @Test
+    void deriveRegionForMekongDelta() {
+        assertEquals("Mekong Delta", validator.deriveRegion("Can Tho"));
+        assertEquals("Mekong Delta", validator.deriveRegion("Ca Mau"));
+    }
+
+    @Test
+    void deriveRegionForNorthernMidlands() {
+        assertEquals("Northern Midlands", validator.deriveRegion("Lao Cai"));
+        assertEquals("Northern Midlands", validator.deriveRegion("Son La"));
+    }
+
+    @Test
+    void deriveRegionForCentralHighlands() {
+        assertEquals("Central Highlands", validator.deriveRegion("Gia Lai"));
+        assertEquals("Central Highlands", validator.deriveRegion("Lam Dong"));
+    }
+
+    @Test
+    void deriveRegionForUnknownProvinceReturnsNull() {
+        assertNull(validator.deriveRegion("Mars City"));
+    }
+
+    // --- deriveUrbanTier representative provinces ---
+
+    @Test
+    void deriveUrbanTierForTier1() {
+        assertEquals("tier1", validator.deriveUrbanTier("Ha Noi"));
+        assertEquals("tier1", validator.deriveUrbanTier("Da Nang"));
+        assertEquals("tier1", validator.deriveUrbanTier("TP Ho Chi Minh"));
+    }
+
+    @Test
+    void deriveUrbanTierForUrban() {
+        assertEquals("urban", validator.deriveUrbanTier("Bac Ninh"));
+        assertEquals("urban", validator.deriveUrbanTier("Thanh Hoa"));
+    }
+
+    @Test
+    void deriveUrbanTierForRural() {
+        assertEquals("rural", validator.deriveUrbanTier("Lao Cai"));
+        assertEquals("rural", validator.deriveUrbanTier("Dong Thap"));
+    }
+
+    @Test
+    void deriveUrbanTierForUnknownProvinceReturnsNull() {
+        assertNull(validator.deriveUrbanTier("Mars City"));
+    }
+
+    // --- missing required field tests (wrapper null) ---
+
+    @Test
+    void missingAgeRejected() {
+        BaseProfileRequest r = baseRequest();
+        r.setAge(null);
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
+        assertEquals(ErrorCode.MISSING_REQUIRED_FIELDS, ex.getErrorCode());
+    }
+
+    @Test
+    void missingMonthlyIncomeRejected() {
+        BaseProfileRequest r = baseRequest();
+        r.setMonthlyIncomeVnd(null);
+        ServiceException ex = assertThrows(ServiceException.class, () -> validator.validateBase(r));
+        assertEquals(ErrorCode.MISSING_REQUIRED_FIELDS, ex.getErrorCode());
     }
 }

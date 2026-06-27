@@ -2,7 +2,7 @@ package dpp.customer.dto;
 
 import lombok.Data;
 import java.time.OffsetDateTime;
-import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -17,9 +17,7 @@ public class ProfileResponse {
     private String incomeLevel;
     private long monthlyIncomeVnd;
     private String maritalStatus;
-    
-    private UUID versionId;
-    private String line;
-    private Map<String, Object> lineAttributes;
-    private OffsetDateTime effectiveAt;
+    private OffsetDateTime updatedAt;
+
+    private List<LineProfileResponse> lines;
 }

@@ -1,5 +1,6 @@
 package dpp.customer.client;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dpp.customer.dto.TokenResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,12 +18,17 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 @Slf4j
 @Component
 public class KeycloakClient {
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final RestTemplate restTemplate;
     private final String authServerUrl;
@@ -201,12 +207,46 @@ public class KeycloakClient {
             if (accessToken == null) {
                 return null;
             }
-            return new TokenResponse(accessToken, expiresIn != null ? expiresIn.intValue() : 0);
+            Map<String, Object> payload = decodePayload(accessToken);
+            String subject = (String) payload.get("sub");
+            List<String> roles = extractRoles(payload);
+            TokenResponse token = new TokenResponse(
+                    accessToken,
+                    expiresIn != null ? expiresIn.intValue() : 0,
+                    "Bearer",
+                    roles
+            );
+            token.setSubject(subject);
+            return token;
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode() == HttpStatus.UNAUTHORIZED || e.getStatusCode() == HttpStatus.BAD_REQUEST) {
                 return null;
             }
             throw e;
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> decodePayload(String jwt) {
+        String[] parts = jwt.split("\\.");
+        if (parts.length < 2) {
+            throw new IllegalStateException("malformed token");
+        }
+        try {
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+            return objectMapper.readValue(payloadJson, Map.class);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to decode JWT payload", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> extractRoles(Map<String, Object> payload) {
+        Map<String, Object> realmAccess = (Map<String, Object>) payload.get("realm_access");
+        if (realmAccess == null) {
+            return Collections.emptyList();
+        }
+        List<String> roles = (List<String>) realmAccess.get("roles");
+        return roles != null ? roles : Collections.emptyList();
     }
 }

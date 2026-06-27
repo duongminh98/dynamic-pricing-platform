@@ -87,6 +87,7 @@ public class PolicyIssuanceService {
         policy.setYearsSinceFirstPolicy(0);
         policy.setPolicyCountPrior(0);
         policy.setFinalPremiumVnd(order.getFinalPremiumVnd());
+        policy.setAssetKey(extractAssetKey(order));
         policy.setCreatedAt(now);
         policyRepository.save(policy);
 
@@ -131,10 +132,56 @@ public class PolicyIssuanceService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("policy_id", policyId.toString());
         payload.put("customer_id", order.getCustomerId().toString());
+        payload.put("product_id", order.getProductId());
+        payload.put("final_premium_vnd", policy.getFinalPremiumVnd());
+        payload.put("term_days", java.time.temporal.ChronoUnit.DAYS.between(
+                policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate()));
         try {
             outboxPublisher.enqueue("PolicyIssued", objectMapper.writeValueAsString(payload));
         } catch (Exception e) {
             throw new RuntimeException("Failed to enqueue PolicyIssued", e);
         }
+    }
+
+    /**
+     * Extract asset key from order's risk profile for duplicate insurance tracking.
+     */
+    @SuppressWarnings("unchecked")
+    private String extractAssetKey(OrderEntity order) {
+        String line = order.getLine();
+        if (line == null) {
+            return null;
+        }
+        String riskProfile = order.getRiskProfile();
+        if (riskProfile == null || riskProfile.isBlank()) {
+            return null;
+        }
+        Map<String, Object> profile;
+        try {
+            profile = objectMapper.readValue(riskProfile, Map.class);
+        } catch (Exception e) {
+            return null;
+        }
+        return switch (line) {
+            case "motorbike", "car" -> {
+                Object plate = profile.get("vehicle_plate");
+                yield plate != null ? plate.toString() : null;
+            }
+            case "home" -> {
+                Object addr = profile.get("property_address");
+                yield addr != null ? addr.toString() : null;
+            }
+            case "health" -> order.getCustomerId().toString();
+            case "travel" -> {
+                Object country = profile.get("destination_country");
+                Object startDate = profile.get("trip_start_date");
+                Object endDate = profile.get("trip_end_date");
+                if (country != null && startDate != null && endDate != null) {
+                    yield country + "|" + startDate + "|" + endDate;
+                }
+                yield null;
+            }
+            default -> null;
+        };
     }
 }

@@ -1,9 +1,10 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from ..database import get_db, Quote
 from pydantic import BaseModel
 from common.errors import ServiceException
+from common.auth import optional_subject
 import datetime
 
 router = APIRouter(prefix="/pricing", tags=["pricing"])
@@ -16,9 +17,14 @@ class QuoteRequest(BaseModel):
 
 
 @router.post("/quote")
-async def create_quote(request: QuoteRequest, db: Session = Depends(get_db)):
+async def create_quote(request: QuoteRequest, http_request: Request, db: Session = Depends(get_db)):
     if quote_semaphore.locked():
         raise HTTPException(status_code=503, detail={"error_code": "SERVICE_OVERLOADED", "message": "Service overloaded"})
+
+    # Customer calls via Kong with JWT → sub identifies the owner.
+    # Internal calls (order-service re-rate) have no JWT → "internal".
+    subject = optional_subject(http_request)
+    customer_id = subject if subject else "internal"
 
     async with quote_semaphore:
         try:
@@ -27,7 +33,7 @@ async def create_quote(request: QuoteRequest, db: Session = Depends(get_db)):
 
             db_quote = Quote(
                 quote_id=result["quote_id"],
-                customer_id="anonymous",
+                customer_id=customer_id,
                 product_id=request.product_id,
                 line=result["line"],
                 trip_duration_days=result.get("trip_duration_days"),
@@ -57,10 +63,17 @@ async def create_quote(request: QuoteRequest, db: Session = Depends(get_db)):
 
 
 @router.get('/quote/{quote_id}')
-async def get_quote(quote_id: str, db: Session = Depends(get_db)):
+async def get_quote(quote_id: str, http_request: Request, db: Session = Depends(get_db)):
     db_quote = db.query(Quote).filter(Quote.quote_id == quote_id).first()
     if db_quote is None:
         raise HTTPException(status_code=404, detail={'error_code': 'QUOTE_NOT_FOUND', 'message': 'Quote not found'})
+
+    # Ownership: if caller has JWT (customer), only allow reading own quotes.
+    # Internal callers (no JWT, e.g. order-service re-rate) can read any quote.
+    subject = optional_subject(http_request)
+    if subject is not None and db_quote.customer_id != subject:
+        raise HTTPException(status_code=404, detail={'error_code': 'QUOTE_NOT_FOUND', 'message': 'Quote not found'})
+
     return {
         'quote_id': db_quote.quote_id,
         'product_id': db_quote.product_id,

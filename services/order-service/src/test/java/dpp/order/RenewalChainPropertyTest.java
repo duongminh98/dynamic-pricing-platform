@@ -1,5 +1,6 @@
 package dpp.order;
 
+import dpp.order.client.BillingClient;
 import dpp.order.client.PricingClient;
 import dpp.common.outbox.OutboxPublisher;
 import dpp.order.dto.PolicyResponse;
@@ -49,7 +50,7 @@ class RenewalChainPropertyTest {
         when(segRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         return new PolicyLifecycleService(repo, segRepo,
                 mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class),
-                mock(PricingClient.class), mock(OutboxPublisher.class));
+                mock(PricingClient.class), mock(BillingClient.class), mock(OutboxPublisher.class));
     }
 
     @Property(tries = 100)

@@ -9,6 +9,7 @@ import dpp.customer.dto.TokenResponse;
 import dpp.customer.entity.Account;
 import dpp.customer.repository.AccountRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,25 +60,46 @@ public class AuthService {
 
     @Transactional
     public TokenResponse login(LoginRequest request) {
-        Account account = accountRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new ServiceException(ErrorCode.INVALID_CREDENTIALS));
-
         OffsetDateTime now = OffsetDateTime.now();
 
-        if (account.getLockedUntil() != null && account.getLockedUntil().isAfter(now)) {
+        Account account = accountRepository.findByEmail(request.getEmail()).orElse(null);
+
+        if (account != null && account.getLockedUntil() != null && account.getLockedUntil().isAfter(now)) {
             throw new ServiceException(ErrorCode.ACCOUNT_LOCKED);
         }
 
-        TokenResponse token = keycloakClient.login(request.getEmail(), request.getPassword());
-        if (token != null) {
-            account.setFailedLoginCount(0);
-            account.setLockedUntil(null);
-            account.setFirstFailedAt(null);
-            accountRepository.save(account);
-            return token;
+        TokenResponse auth = keycloakClient.login(request.getEmail(), request.getPassword());
+
+        if (auth != null) {
+            if (account == null) {
+                account = provisionAccount(request.getEmail(), auth.getSubject(), now);
+            } else {
+                account.setFailedLoginCount(0);
+                account.setLockedUntil(null);
+                account.setFirstFailedAt(null);
+                accountRepository.save(account);
+            }
+            return new TokenResponse(auth.getAccessToken(), auth.getExpiresIn(), "Bearer", auth.getRoles());
         }
 
-        failedLoginService.recordFailure(account, now);
+        if (account != null) {
+            failedLoginService.recordFailure(account, now);
+        }
         throw new ServiceException(ErrorCode.INVALID_CREDENTIALS);
+    }
+
+    private Account provisionAccount(String email, String subject, OffsetDateTime now) {
+        Account a = new Account();
+        a.setAccountId(UUID.randomUUID());
+        a.setKeycloakSubject(subject);
+        a.setEmail(email);
+        a.setCreatedAt(now);
+        a.setFailedLoginCount(0);
+        try {
+            return accountRepository.save(a);
+        } catch (DataIntegrityViolationException e) {
+            return accountRepository.findByEmail(email)
+                    .orElseThrow(() -> new ServiceException(ErrorCode.INTERNAL_ERROR));
+        }
     }
 }

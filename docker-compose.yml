@@ -503,6 +503,9 @@ services:
     environment:
       PRICING_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-platform_user}:${POSTGRES_PASSWORD:-change-me}@postgres-pricing:5432/${PRICING_DB_NAME:-pricing_db}
+      PRODUCT_SERVICE_BASE_URL: http://product-service-1:8080
+      PRODUCT_CACHE_TTL_SECONDS: ${PRODUCT_CACHE_TTL_SECONDS:-300}
+      PRODUCT_HTTP_TIMEOUT_SECONDS: ${PRODUCT_HTTP_TIMEOUT_SECONDS:-3}
     ports:
       - "${PRICING_SERVICE_PORT:-8090}:8000"
     volumes:
@@ -513,6 +516,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      product-service-1:
+        condition: service_started
     networks:
       dpp-network:
         aliases:

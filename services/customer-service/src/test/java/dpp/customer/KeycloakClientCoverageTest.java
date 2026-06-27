@@ -15,6 +15,8 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -79,18 +81,39 @@ class KeycloakClientCoverageTest {
         assertEquals("abc-123", userId);
     }
 
+    private String fakeJwt(String subject, List<String> roles) {
+        String payload = "{\"sub\":\"" + subject + "\",\"realm_access\":{\"roles\":" + rolesAsString(roles) + "}}";
+        String encodedPayload = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+        return "header." + encodedPayload + ".signature";
+    }
+
+    private String rolesAsString(List<String> roles) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < roles.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append("\"").append(roles.get(i)).append("\"");
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
     @Test
     void loginReturnsTokenResponse() {
         RestTemplate rt = mock(RestTemplate.class);
+        String jwt = fakeJwt("test-subject", List.of("Customer"));
         when(rt.postForObject(anyString(), any(), eq(Map.class)))
-                .thenReturn(Map.of("access_token", "user-token", "expires_in", 3600));
+                .thenReturn(Map.of("access_token", jwt, "expires_in", 3600));
 
         KeycloakClient client = clientWith(rt);
         TokenResponse result = client.login("test@example.com", "password");
 
         assertNotNull(result);
-        assertEquals("user-token", result.getAccessToken());
+        assertEquals(jwt, result.getAccessToken());
         assertEquals(3600, result.getExpiresIn());
+        assertEquals("Bearer", result.getTokenType());
+        assertEquals(List.of("Customer"), result.getRoles());
+        assertEquals("test-subject", result.getSubject());
     }
 
     @Test

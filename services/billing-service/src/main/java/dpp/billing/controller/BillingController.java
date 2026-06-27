@@ -5,9 +5,12 @@ import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.dto.PolicyBillingResponse;
 import dpp.billing.service.BillingService;
 import dpp.billing.service.VnpayService;
+import dpp.common.api.ErrorCode;
+import dpp.common.api.ServiceException;
 import dpp.common.security.CustomerId;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.http.HttpStatus;
@@ -22,10 +25,13 @@ public class BillingController {
 
     private final BillingService billingService;
     private final VnpayService vnpayService;
+    private final boolean directPayEnabled;
 
-    public BillingController(BillingService billingService, VnpayService vnpayService) {
+    public BillingController(BillingService billingService, VnpayService vnpayService,
+                             @Value("${dpp.billing.direct-pay.enabled:false}") boolean directPayEnabled) {
         this.billingService = billingService;
         this.vnpayService = vnpayService;
+        this.directPayEnabled = directPayEnabled;
     }
 
     @PostMapping("/invoices")
@@ -36,15 +42,27 @@ public class BillingController {
 
     @PostMapping("/invoices/{id}/pay")
     public InvoiceResponse payInvoice(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        if (!directPayEnabled) {
+            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE,
+                    "Direct payment disabled; use VNPAY", null);
+        }
         UUID customerId = CustomerId.fromSubject(jwt.getSubject());
         return billingService.payInvoiceAsCustomer(id, customerId);
     }
 
     @GetMapping("/invoices")
-    public PolicyBillingResponse getPolicyBilling(@AuthenticationPrincipal Jwt jwt,
-                                                  @RequestParam("policy_id") UUID policyId) {
+    public Object getInvoices(@AuthenticationPrincipal Jwt jwt,
+                              @RequestParam(value = "order_id", required = false) UUID orderId,
+                              @RequestParam(value = "policy_id", required = false) UUID policyId) {
         UUID customerId = CustomerId.fromSubject(jwt.getSubject());
-        return billingService.getPolicyBilling(policyId, customerId);
+        if (orderId != null) {
+            return billingService.getInvoiceByOrder(orderId, customerId);
+        }
+        if (policyId != null) {
+            return billingService.getPolicyBilling(policyId, customerId);
+        }
+        throw new dpp.common.api.ServiceException(dpp.common.api.ErrorCode.BAD_REQUEST,
+                "Either order_id or policy_id query parameter is required", null);
     }
 
     // --- VNPAY endpoints (task 21.2-21.4, R33.2) ---

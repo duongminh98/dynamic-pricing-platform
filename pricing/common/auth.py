@@ -62,3 +62,24 @@ def require_role(required_role: str):
 
 # Convenience dependency for Administrator-only routes.
 require_administrator = require_role("Administrator")
+
+
+def optional_subject(request: Request) -> str | None:
+    """Return the JWT 'sub' if a readable bearer token is present, else None.
+
+    Used by endpoints that customers call with a token but internal services
+    call without one (e.g. order-service re-rate). A malformed or unreadable
+    token returns None rather than raising, so the caller is treated as
+    internal. Kong already rejects invalid tokens at the gateway boundary;
+    only trusted internal callers reach pricing without a token.
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return None
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        claims = _decode_payload(token)
+    except ServiceException:
+        return None
+    sub = claims.get("sub")
+    return str(sub) if sub else None

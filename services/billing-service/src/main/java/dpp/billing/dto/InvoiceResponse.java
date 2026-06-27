@@ -17,4 +17,8 @@ public class InvoiceResponse {
     private InvoiceStatus status;
     private OffsetDateTime paidAt;
     private OffsetDateTime createdAt;
+    private UUID endorsementRequestId;
+    private OffsetDateTime dueDate;
+    private long creditAppliedVnd;
+    private long netAmountVnd;
 }

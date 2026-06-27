@@ -1,0 +1,2 @@
+ALTER TABLE invoice ADD COLUMN credit_applied_vnd BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE invoice ADD COLUMN net_amount_vnd BIGINT NOT NULL DEFAULT 0;

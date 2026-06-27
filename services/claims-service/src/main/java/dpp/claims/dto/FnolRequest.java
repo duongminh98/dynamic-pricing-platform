@@ -2,10 +2,12 @@ package dpp.claims.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Getter;
 import lombok.Setter;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -17,6 +19,8 @@ public class FnolRequest {
     private OffsetDateTime occurrenceDate;
     @NotBlank
     private String lossType;
-    @NotBlank
-    private String severityLevel;
+    private String description;
+    @PositiveOrZero
+    private Long estimatedCost;
+    private List<String> attachments;
 }

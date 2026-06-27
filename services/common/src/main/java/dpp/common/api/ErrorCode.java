@@ -41,6 +41,9 @@ public enum ErrorCode {
     POLICY_NOT_MODIFIABLE(409, "Policy cannot be modified"),
     ENDORSEMENT_DATE_OUT_OF_RANGE(400, "Endorsement date out of coverage range"),
     CANCEL_DATE_OUT_OF_RANGE(400, "Cancel date out of coverage range"),
+    INVALID_ENDORSEMENT_ATTRIBUTE(400, "Invalid endorsement attribute for this policy line"),
+    ENDORSEMENT_FREQUENCY_EXCEEDED(429, "Endorsement frequency limit exceeded"),
+    DUPLICATE_ACTIVE_POLICY(409, "An active policy already exists for this asset"),
 
     // ── Claims (R27, R28) ──
     INVALID_CLAIM_TRANSITION(409, "Invalid claim status transition"),

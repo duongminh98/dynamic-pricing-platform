@@ -128,6 +128,9 @@ def _cast_value(name: str, value):
     return value
 
 
+PRODUCT_AUTHORITATIVE = {"coverage_amount_vnd", "deductible_vnd", "base_premium_vnd", "admin_fee_vnd"}
+
+
 def build_features(line: str, product_id: str, profile: dict,
                    feature_names: list[str]) -> "pd.DataFrame":
     """Build a single-row DataFrame aligned to feature_names.
@@ -135,16 +138,24 @@ def build_features(line: str, product_id: str, profile: dict,
     The profile may supply base fields and a line_attributes dict. Missing
     features are filled with safe defaults; geo/cost features are derived
     server-side. Leakage columns are never copied from the profile.
+
+    coverage_amount_vnd, deductible_vnd, base_premium_vnd, admin_fee_vnd are
+    always taken from the product catalog (server-authoritative) and cannot
+    be overridden by client input.
     """
     ensure_loaded()
     line_attrs = profile.get("line_attributes", {}) or {}
     province = profile.get("province", CATEGORICAL_DEFAULTS["province"])
     geo = geo_by_province.get(province, {})
+    prod = get_product(product_id)
 
     row: dict = {}
     for name in feature_names:
+        # 0. product-authoritative fields (always from product, never from client)
+        if name in PRODUCT_AUTHORITATIVE:
+            row[name] = prod.get(name, 0)
         # 1. explicit profile value (base or line_attributes)
-        if name in profile:
+        elif name in profile:
             row[name] = _cast_value(name, profile[name])
         elif name in line_attrs:
             row[name] = _cast_value(name, line_attrs[name])
@@ -154,17 +165,13 @@ def build_features(line: str, product_id: str, profile: dict,
         # 3. derived cost indices (reference = latest)
         elif name in cost_indices_latest:
             row[name] = cost_indices_latest[name]
-        # 4. product fields
-        elif name in ("coverage_amount_vnd", "deductible_vnd", "base_premium_vnd", "admin_fee_vnd"):
-            prod = get_product(product_id)
-            row[name] = prod.get(name, 0)
-        # 5. prior-claim history defaults (point-in-time safe)
+        # 4. prior-claim history defaults (point-in-time safe)
         elif name in PRIOR_DEFAULTS:
             row[name] = PRIOR_DEFAULTS[name]
-        # 6. numeric defaults
+        # 5. numeric defaults
         elif name in NUMERIC_DEFAULTS:
             row[name] = NUMERIC_DEFAULTS[name]
-        # 7. categorical defaults
+        # 6. categorical defaults
         elif name in CATEGORICAL_DEFAULTS:
             row[name] = CATEGORICAL_DEFAULTS[name]
         else:

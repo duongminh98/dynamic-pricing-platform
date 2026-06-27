@@ -32,6 +32,7 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/products", "/products/**", "/products/lines/**").permitAll()
+                .requestMatchers("/internal/**").permitAll()
                 .requestMatchers("/admin/**").hasRole("Administrator")
                 .anyRequest().authenticated()
             )

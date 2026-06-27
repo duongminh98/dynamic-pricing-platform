@@ -21,4 +21,6 @@ public class NotificationResponse {
     private NotificationStatus status;
     private int retryCount;
     private OffsetDateTime createdAt;
+    private OffsetDateTime readAt;
+    private boolean read;
 }

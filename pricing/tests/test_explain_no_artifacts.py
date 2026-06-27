@@ -24,26 +24,27 @@ from app.pricing_engine.explain import (
     _direction,
     _extract_model_and_features,
     explain,
-    LABEL_VI,
+    LABEL_EN,
 )
 
 
 def test_direction_positive():
-    assert _direction(0.5) == "tang"
+    assert _direction(0.5) == "increase"
 
 
 def test_direction_zero():
-    assert _direction(0.0) == "tang"
+    assert _direction(0.0) == "increase"
 
 
 def test_direction_negative():
-    assert _direction(-0.3) == "giam"
+    assert _direction(-0.3) == "decrease"
 
 
-def test_label_vi_contains_known_features():
-    assert "age" in LABEL_VI
-    assert "coverage_amount_vnd" in LABEL_VI
-    assert LABEL_VI["age"] == "Tuoi"
+def test_label_en_contains_known_features():
+    assert "age" in LABEL_EN
+    assert "coverage_amount_vnd" in LABEL_EN
+    assert LABEL_EN["age"] == "Age"
+    assert LABEL_EN["coverage_amount_vnd"] == "Coverage amount"
 
 
 def test_extract_model_and_features_lgbm():
@@ -114,6 +115,11 @@ def test_explain_with_tree_model():
     assert result["available"] is True
     assert len(result["items"]) >= 3
     assert result["items"][0]["feature"] in ("coverage_amount_vnd", "age", "deductible_vnd")
+    # Verify English label key and direction values
+    item = result["items"][0]
+    assert "label" in item
+    assert "label_vi" not in item
+    assert item["direction"] in ("increase", "decrease")
 
 
 class FakeGLMEstimator:

@@ -2,6 +2,7 @@ package dpp.order;
 
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
+import dpp.common.outbox.OutboxPublisher;
 import dpp.order.client.BillingClient;
 import dpp.order.client.PricingClient;
 import dpp.order.dto.OrderResponse;
@@ -9,7 +10,9 @@ import dpp.order.entity.OrderEntity;
 import dpp.order.entity.OrderStatus;
 import dpp.order.entity.ReviewDecision;
 import dpp.order.repository.OrderRepository;
+import dpp.order.repository.PolicyRepository;
 import dpp.order.service.OrderService;
+import dpp.order.service.OrderApprovalTransactionService;
 import net.jqwik.api.*;
 import net.jqwik.api.constraints.LongRange;
 import org.junit.jupiter.api.Tag;
@@ -41,7 +44,7 @@ class OrderReviewGatePropertyTest {
         OrderRepository repo = mock(OrderRepository.class);
         PricingClient pricing = mock(PricingClient.class);
         BillingClient billing = mock(BillingClient.class);
-        OrderService svc = new OrderService(repo, pricing, billing);
+        OrderService svc = newService(repo, pricing, billing);
 
         UUID orderId = UUID.randomUUID();
         OrderEntity order = pendingReviewOrder(premium);
@@ -62,7 +65,7 @@ class OrderReviewGatePropertyTest {
         OrderRepository repo = mock(OrderRepository.class);
         PricingClient pricing = mock(PricingClient.class);
         BillingClient billing = mock(BillingClient.class);
-        OrderService svc = new OrderService(repo, pricing, billing);
+        OrderService svc = newService(repo, pricing, billing);
 
         UUID orderId = UUID.randomUUID();
         OrderEntity order = pendingReviewOrder(premium);
@@ -83,7 +86,7 @@ class OrderReviewGatePropertyTest {
         OrderRepository repo = mock(OrderRepository.class);
         PricingClient pricing = mock(PricingClient.class);
         BillingClient billing = mock(BillingClient.class);
-        OrderService svc = new OrderService(repo, pricing, billing);
+        OrderService svc = newService(repo, pricing, billing);
 
         UUID orderId = UUID.randomUUID();
         OrderEntity order = pendingReviewOrder(500_000L);
@@ -101,7 +104,7 @@ class OrderReviewGatePropertyTest {
         OrderRepository repo = mock(OrderRepository.class);
         PricingClient pricing = mock(PricingClient.class);
         BillingClient billing = mock(BillingClient.class);
-        OrderService svc = new OrderService(repo, pricing, billing);
+        OrderService svc = newService(repo, pricing, billing);
 
         UUID orderId = UUID.randomUUID();
         OrderEntity order = pendingReviewOrder(500_000L);
@@ -118,7 +121,7 @@ class OrderReviewGatePropertyTest {
         OrderRepository repo = mock(OrderRepository.class);
         PricingClient pricing = mock(PricingClient.class);
         BillingClient billing = mock(BillingClient.class);
-        OrderService svc = new OrderService(repo, pricing, billing);
+        OrderService svc = newService(repo, pricing, billing);
 
         UUID orderId = UUID.randomUUID();
         OrderEntity order = pendingReviewOrder(500_000L);
@@ -128,5 +131,12 @@ class OrderReviewGatePropertyTest {
 
         OrderResponse resp = svc.approve(orderId, "admin-001");
         assertEquals(OrderStatus.PENDING_PAYMENT, resp.getStatus());
+    }
+
+    private OrderService newService(OrderRepository repo, PricingClient pricing, BillingClient billing) {
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        PolicyRepository policyRepo = mock(PolicyRepository.class);
+        OrderApprovalTransactionService approvalTx = new OrderApprovalTransactionService(repo, outbox);
+        return new OrderService(repo, pricing, billing, outbox, policyRepo, approvalTx);
     }
 }

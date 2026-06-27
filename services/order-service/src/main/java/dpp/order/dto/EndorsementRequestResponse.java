@@ -27,4 +27,7 @@ public class EndorsementRequestResponse {
     private String reviewedBy;
     private OffsetDateTime reviewedAt;
     private OffsetDateTime createdAt;
+    private Long quotedPremiumVnd;
+    private UUID invoiceId;
+    private OffsetDateTime dueDate;
 }

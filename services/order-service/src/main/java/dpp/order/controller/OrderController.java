@@ -9,6 +9,9 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+import java.util.UUID;
+
 @RestController
 @RequestMapping("/orders")
 public class OrderController {
@@ -24,5 +27,15 @@ public class OrderController {
     public OrderResponse createOrder(@AuthenticationPrincipal Jwt jwt,
                                      @Valid @RequestBody CreateOrderRequest request) {
         return orderService.createOrder(jwt.getSubject(), request);
+    }
+
+    @GetMapping
+    public List<OrderResponse> myOrders(@AuthenticationPrincipal Jwt jwt) {
+        return orderService.myOrders(jwt.getSubject());
+    }
+
+    @GetMapping("/{id}")
+    public OrderResponse getMyOrder(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return orderService.getMyOrder(jwt.getSubject(), id);
     }
 }

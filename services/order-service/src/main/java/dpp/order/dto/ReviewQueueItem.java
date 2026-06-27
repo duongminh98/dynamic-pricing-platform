@@ -15,5 +15,6 @@ public class ReviewQueueItem {
     private String productId;
     private long finalPremiumVnd;
     private OrderStatus status;
+    private String line;
     private OffsetDateTime createdAt;
 }

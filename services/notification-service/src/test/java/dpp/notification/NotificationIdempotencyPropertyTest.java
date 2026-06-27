@@ -104,7 +104,7 @@ class NotificationIdempotencyPropertyTest {
         when(repo.save(any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
 
         NotificationService svc = new NotificationService(repo, null, null, true);
-        svc.createNotification(UUID.randomUUID().toString(), UUID.randomUUID(), UUID.randomUUID(), "EndorsementApplied", "msg");
+        svc.createNotification(UUID.randomUUID().toString(), UUID.randomUUID(), UUID.randomUUID(), "OrderCreated", "msg");
 
         // Only in_app for non-email event types
         verify(repo, times(1)).save(any(Notification.class));

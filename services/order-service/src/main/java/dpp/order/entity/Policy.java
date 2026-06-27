@@ -53,6 +53,9 @@ public class Policy {
     @Column(name = "final_premium_vnd", nullable = false)
     private long finalPremiumVnd;
 
+    @Column(name = "asset_key", length = 255)
+    private String assetKey;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 }

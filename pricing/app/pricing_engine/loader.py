@@ -2,7 +2,9 @@
 
 Loads the 36 model artifacts (6 lines x 3 families x 2 algorithms),
 champion_config.json, modeling metadata, geo risk lookup, cost indices
-and the product catalog at startup. Fail-fast on missing required files
+and the product catalog at startup. Product catalog is loaded from
+product-service at startup with TTL refresh; products.csv is fallback
++ offline training only. Fail-fast on missing required files
 (R11.2, R11.3). Feature discovery excludes leakage columns (R29.1).
 
 Requirements: R11.2, R11.3, R11.4, R29.1, R29.3, R29.4 (design 6.1, 5.8).
@@ -11,7 +13,10 @@ from __future__ import annotations
 
 import json
 import pathlib
+import time
 import warnings
+
+import httpx
 
 import sys as _sys
 import sklearn._loss._loss as _skloss
@@ -23,6 +28,10 @@ _sys.modules.setdefault("_loss", _skloss)
 
 import joblib
 import pandas as pd
+
+from ..config import (
+    PRODUCT_SERVICE_BASE_URL, PRODUCT_HTTP_TIMEOUT_SECONDS, PRODUCT_CACHE_TTL_SECONDS,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
@@ -52,7 +61,11 @@ metadata: dict = {}
 geo_by_province: dict[str, dict] = {}
 cost_indices_latest: dict[str, float] = {}
 products: dict[str, dict] = {}
+loading_factors: dict[str, float] = {}
+current_rate_version_id: str | None = None
 _loaded = False
+_products_loaded_at = 0.0
+_loading_loaded_at = 0.0
 
 
 def _algorithm_for(line: str) -> str:
@@ -109,6 +122,7 @@ def load_artifacts() -> None:
     _load_geo()
     _load_cost_indices()
     _load_products()
+    _load_loading_factors()
     _loaded = True
 
 
@@ -134,14 +148,90 @@ def _load_cost_indices() -> None:
             cost_indices_latest[c] = float(latest[c])
 
 
+def _product_json_to_row(p: dict) -> dict:
+    """Map snake_case JSON from product-service to snake_case dict for engine use.
+
+    Product-service uses Jackson SNAKE_CASE strategy, so all wire keys are
+    snake_case. camelCase input will raise KeyError → fallback to CSV.
+    """
+    return {
+        "product_id": p["product_id"],
+        "category": p["category"],
+        "product_name": p.get("product_name"),
+        "coverage_amount_vnd": p.get("coverage_amount_vnd", 0),
+        "deductible_vnd": p.get("deductible_vnd", 0),
+        "base_premium_vnd": p.get("base_premium_vnd", 0),
+        "admin_fee_vnd": p.get("admin_fee_vnd", 0),
+        "active": p.get("active", True),
+    }
+
+
 def _load_products() -> None:
-    global products
+    global products, _products_loaded_at
+    try:
+        url = f"{PRODUCT_SERVICE_BASE_URL}/internal/products"
+        resp = httpx.get(url, timeout=PRODUCT_HTTP_TIMEOUT_SECONDS)
+        resp.raise_for_status()
+        rows = {}
+        for p in resp.json():
+            row = _product_json_to_row(p)
+            rows[row["product_id"]] = row
+        if rows:
+            products = rows
+            _products_loaded_at = time.monotonic()
+            return  # empty response -> fall through to CSV
+    except Exception as e:
+        warnings.warn(f"Product-service unavailable, falling back to products.csv: {e}")
+    _load_products_from_csv()
+
+
+def _load_products_from_csv() -> None:
+    global products, _products_loaded_at
     products = {}
     if not PRODUCTS_PATH.exists():
         return
     df = pd.read_csv(PRODUCTS_PATH)
     for _, row in df.iterrows():
         products[row["product_id"]] = {c: row[c] for c in df.columns}
+    _products_loaded_at = time.monotonic()
+
+
+def _maybe_refresh_products() -> None:
+    if time.monotonic() - _products_loaded_at > PRODUCT_CACHE_TTL_SECONDS:
+        _load_products()
+
+
+def _load_loading_factors() -> None:
+    global loading_factors, _loading_loaded_at, current_rate_version_id
+    try:
+        url = f"{PRODUCT_SERVICE_BASE_URL}/internal/loading-factors/current"
+        resp = httpx.get(url, timeout=PRODUCT_HTTP_TIMEOUT_SECONDS)
+        resp.raise_for_status()
+        data = resp.json()
+        lf = {row["line"]: float(row["loading_value"]) for row in data}
+        if lf:
+            loading_factors = lf
+            if data and data[0].get("rate_version_id") is not None:
+                current_rate_version_id = str(data[0]["rate_version_id"])
+            _loading_loaded_at = time.monotonic()
+            return
+    except Exception as e:
+        warnings.warn(f"Loading factors unavailable, defaulting to 1.0: {e}")
+    if not loading_factors:
+        loading_factors = {ln: 1.0 for ln in LINES}
+        _loading_loaded_at = time.monotonic()
+
+
+def get_loading_factor(line: str) -> float:
+    ensure_loaded()
+    if time.monotonic() - _loading_loaded_at > PRODUCT_CACHE_TTL_SECONDS:
+        _load_loading_factors()
+    return float(loading_factors.get(line, 1.0))
+
+
+def get_current_rate_version_id() -> str | None:
+    ensure_loaded()
+    return current_rate_version_id
 
 
 def ensure_loaded() -> None:
@@ -151,6 +241,7 @@ def ensure_loaded() -> None:
 
 def get_line_for_product(product_id: str) -> str:
     ensure_loaded()
+    _maybe_refresh_products()
     prod = products.get(product_id)
     if prod is not None:
         return prod["category"]
@@ -163,6 +254,7 @@ def get_line_for_product(product_id: str) -> str:
 
 def get_product(product_id: str) -> dict:
     ensure_loaded()
+    _maybe_refresh_products()
     return products.get(product_id, {})
 
 

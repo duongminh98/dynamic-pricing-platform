@@ -9,4 +9,6 @@ import java.util.UUID;
 
 public interface EndorsementRequestRepository extends JpaRepository<EndorsementRequestEntity, UUID> {
     List<EndorsementRequestEntity> findByStatusOrderByCreatedAtAsc(EndorsementStatus status);
+    List<EndorsementRequestEntity> findByPolicyIdOrderByCreatedAtDesc(UUID policyId);
+    List<EndorsementRequestEntity> findByStatusOrderByDueDateAsc(EndorsementStatus status);
 }

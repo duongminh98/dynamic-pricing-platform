@@ -3,6 +3,8 @@ package dpp.order.repository;
 import dpp.order.entity.Policy;
 import dpp.order.entity.PolicyStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -12,4 +14,9 @@ public interface PolicyRepository extends JpaRepository<Policy, UUID> {
     Optional<Policy> findByOrderId(UUID orderId);
     List<Policy> findByCustomerIdOrderByCreatedAtDesc(UUID customerId);
     List<Policy> findByCustomerIdAndStatus(UUID customerId, PolicyStatus status);
+    List<Policy> findByStatusOrderByCreatedAtDesc(PolicyStatus status);
+    List<Policy> findAllByOrderByCreatedAtDesc();
+
+    @Query("SELECT COUNT(p) > 0 FROM Policy p WHERE p.customerId = :customerId AND p.assetKey = :assetKey AND p.status = dpp.order.entity.PolicyStatus.active")
+    boolean existsActivePolicy(@Param("customerId") UUID customerId, @Param("assetKey") String assetKey);
 }

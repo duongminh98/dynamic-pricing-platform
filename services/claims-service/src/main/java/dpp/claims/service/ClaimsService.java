@@ -62,10 +62,12 @@ public class ClaimsService {
         claim.setOccurrenceDate(occurrence);
         claim.setReportDate(reportDate);
         claim.setLossType(request.getLossType());
-        claim.setSeverityLevel(parseSeverity(request.getSeverityLevel()));
         claim.setIncurredAmount(0);
         claim.setPaidAmount(0);
         claim.setClaimStatus(ClaimStatus.pending);
+        claim.setDescription(request.getDescription());
+        claim.setEstimatedCost(request.getEstimatedCost());
+        claim.setAttachments(request.getAttachments());
         claim.setCreatedAt(OffsetDateTime.now());
         claim = claimRepository.save(claim);
         return toResponse(claim);
@@ -175,15 +177,6 @@ public class ClaimsService {
         return toResponse(claim);
     }
 
-    private SeverityLevel parseSeverity(String value) {
-        try {
-            return SeverityLevel.valueOf(value);
-        } catch (IllegalArgumentException | NullPointerException e) {
-            throw new ServiceException(ErrorCode.BAD_REQUEST, "Invalid severity_level",
-                    Map.of("severity_level", String.valueOf(value)));
-        }
-    }
-
     private MisrepresentationSanction parseSanction(String value) {
         try {
             return MisrepresentationSanction.valueOf(value);
@@ -223,6 +216,7 @@ public class ClaimsService {
         payload.put("policy_id", claim.getPolicyId().toString());
         payload.put("customer_id", claim.getCustomerId().toString());
         payload.put("status", claim.getClaimStatus().name());
+        payload.put("paid_amount_vnd", claim.getPaidAmount());
         try {
             outboxPublisher.enqueue("ClaimStatusChanged", objectMapper.writeValueAsString(payload));
         } catch (Exception e) {
@@ -239,12 +233,26 @@ public class ClaimsService {
         resp.setOccurrenceDate(claim.getOccurrenceDate());
         resp.setReportDate(claim.getReportDate());
         resp.setLossType(claim.getLossType());
-        resp.setSeverityLevel(claim.getSeverityLevel());
         resp.setIncurredAmount(claim.getIncurredAmount());
         resp.setPaidAmount(claim.getPaidAmount());
         resp.setClaimStatus(claim.getClaimStatus());
         resp.setMisrepresentationSanction(claim.getMisrepresentationSanction());
+        resp.setDescription(claim.getDescription());
+        resp.setEstimatedCost(claim.getEstimatedCost());
+        resp.setAttachments(claim.getAttachments());
         resp.setCreatedAt(claim.getCreatedAt());
         return resp;
+    }
+
+    @Transactional(readOnly = true)
+    public List<ClaimResponse> adminListAllClaims() {
+        return claimRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(this::toResponse).collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ClaimResponse> adminListClaimsByStatus(ClaimStatus status) {
+        return claimRepository.findByClaimStatusOrderByCreatedAtDesc(status).stream()
+                .map(this::toResponse).collect(Collectors.toList());
     }
 }

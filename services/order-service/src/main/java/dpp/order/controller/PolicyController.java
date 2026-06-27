@@ -71,10 +71,27 @@ public class PolicyController {
         return resp;
     }
 
+    @PostMapping("/{id}/endorsements/preview")
+    public EndorsementPreviewResponse previewEndorsement(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                          @Valid @RequestBody EndorsementRequest request) {
+        return lifecycleService.previewEndorsement(id, request, jwt.getSubject());
+    }
+
     @PostMapping("/{id}/endorsements")
     public EndorsementResult endorse(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                      @Valid @RequestBody EndorsementRequest request) {
         return lifecycleService.endorse(id, request, jwt.getSubject());
+    }
+
+    @GetMapping("/{id}/endorsements")
+    public List<EndorsementRequestResponse> listEndorsements(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return lifecycleService.policyEndorsements(id, jwt.getSubject());
+    }
+
+    @GetMapping("/{id}/endorsements/{endorsementId}")
+    public EndorsementRequestResponse getEndorsement(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                      @PathVariable UUID endorsementId) {
+        return lifecycleService.getEndorsement(id, endorsementId, jwt.getSubject());
     }
 
     @PostMapping("/{id}/renew")

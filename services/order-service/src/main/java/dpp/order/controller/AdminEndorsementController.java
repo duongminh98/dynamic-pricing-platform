@@ -1,6 +1,7 @@
 package dpp.order.controller;
 
 import dpp.order.dto.EndorsementRequestResponse;
+import dpp.order.dto.PolicyResponse;
 import dpp.order.dto.RejectRequest;
 import dpp.order.service.PolicyLifecycleService;
 import jakarta.validation.Valid;
@@ -10,6 +11,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -35,6 +37,18 @@ public class AdminEndorsementController {
         return lifecycleService.endorsementReviewQueue();
     }
 
+    @GetMapping("/pending-payment-queue")
+    @PreAuthorize("hasRole('Administrator')")
+    public List<EndorsementRequestResponse> pendingPaymentQueue() {
+        return lifecycleService.pendingPaymentQueue();
+    }
+
+    @GetMapping("/voided")
+    @PreAuthorize("hasRole('Administrator')")
+    public List<EndorsementRequestResponse> voidedEndorsements() {
+        return lifecycleService.voidedEndorsements();
+    }
+
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasRole('Administrator')")
     public EndorsementRequestResponse approve(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
@@ -46,5 +60,18 @@ public class AdminEndorsementController {
     public EndorsementRequestResponse reject(@PathVariable UUID id, @Valid @RequestBody RejectRequest request,
                                              @AuthenticationPrincipal Jwt jwt) {
         return lifecycleService.rejectEndorsement(id, request.getReason(), jwt.getSubject());
+    }
+
+    @PostMapping("/{id}/extend-due-date")
+    @PreAuthorize("hasRole('Administrator')")
+    public EndorsementRequestResponse extendDueDate(@PathVariable UUID id, @RequestBody Map<String, Integer> body) {
+        int extraDays = body.getOrDefault("extra_days", 7);
+        return lifecycleService.extendDueDate(id, extraDays);
+    }
+
+    @PostMapping("/{id}/cancel-policy")
+    @PreAuthorize("hasRole('Administrator')")
+    public PolicyResponse cancelPolicyFromEndorsement(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
+        return lifecycleService.cancelPolicyFromEndorsement(id, jwt.getSubject());
     }
 }

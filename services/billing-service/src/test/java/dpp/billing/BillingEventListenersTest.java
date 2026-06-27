@@ -6,6 +6,8 @@ import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.entity.InvoiceStatus;
 import dpp.billing.service.AdjustmentService;
 import dpp.billing.service.BillingService;
+import dpp.billing.service.CreditService;
+import dpp.billing.service.RefundService;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
@@ -19,7 +21,7 @@ class BillingEventListenersTest {
     void onEndorsementDelegatesToAdjustmentService() {
         AdjustmentService adjustmentService = mock(AdjustmentService.class);
         BillingService billingService = mock(BillingService.class);
-        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
 
         UUID policyId = UUID.randomUUID();
         UUID orderId = UUID.randomUUID();
@@ -38,7 +40,7 @@ class BillingEventListenersTest {
     void onEndorsementThrowsOnBadMessage() {
         AdjustmentService adjustmentService = mock(AdjustmentService.class);
         BillingService billingService = mock(BillingService.class);
-        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
 
         assertThrows(RuntimeException.class, () -> listener.onEndorsement("not-json", null));
         verify(adjustmentService, never()).applyEndorsement(any(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong());
@@ -48,7 +50,7 @@ class BillingEventListenersTest {
     void onCancellationDelegatesToAdjustmentService() {
         AdjustmentService adjustmentService = mock(AdjustmentService.class);
         BillingService billingService = mock(BillingService.class);
-        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
 
         UUID policyId = UUID.randomUUID();
         String message = "{\"policy_id\":\"" + policyId + "\","
@@ -66,7 +68,7 @@ class BillingEventListenersTest {
     void onCancellationThrowsOnBadMessage() {
         AdjustmentService adjustmentService = mock(AdjustmentService.class);
         BillingService billingService = mock(BillingService.class);
-        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
 
         assertThrows(RuntimeException.class, () -> listener.onCancellation("bad", null));
         verify(adjustmentService, never()).applyCancellation(any(), any(), anyLong(), anyLong(), anyLong());
@@ -76,7 +78,7 @@ class BillingEventListenersTest {
     void onRenewalCreatesInvoice() {
         AdjustmentService adjustmentService = mock(AdjustmentService.class);
         BillingService billingService = mock(BillingService.class);
-        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
 
         UUID policyId = UUID.randomUUID();
         UUID orderId = UUID.randomUUID();
@@ -100,7 +102,7 @@ class BillingEventListenersTest {
     void onRenewalThrowsOnBadMessage() {
         AdjustmentService adjustmentService = mock(AdjustmentService.class);
         BillingService billingService = mock(BillingService.class);
-        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
 
         assertThrows(RuntimeException.class, () -> listener.onRenewal("bad", null));
         verify(billingService, never()).createInvoice(any());

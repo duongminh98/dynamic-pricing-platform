@@ -68,6 +68,9 @@ public class OrderEntity {
     @Column(name = "reviewed_at")
     private OffsetDateTime reviewedAt;
 
+    @Column(name = "invoice_id")
+    private UUID invoiceId;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 }

@@ -2,7 +2,9 @@ package dpp.customer;
 
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
-import dpp.customer.dto.ProfileRequest;
+import dpp.customer.dto.BaseProfileRequest;
+import dpp.customer.dto.LineProfileRequest;
+import dpp.customer.dto.LineProfileResponse;
 import dpp.customer.dto.ProfileResponse;
 import dpp.customer.entity.Account;
 import dpp.customer.entity.CustomerProfile;
@@ -35,7 +37,18 @@ class ProfileServiceTest {
         return a;
     }
 
-    private ProfileRequest validRequest() {
+    private BaseProfileRequest validBaseRequest() {
+        BaseProfileRequest r = new BaseProfileRequest();
+        r.setAge(30);
+        r.setGender("male");
+        r.setProvince("Ha Noi");
+        r.setOccupation("engineer");
+        r.setMonthlyIncomeVnd(20_000_000L);
+        r.setMaritalStatus("single");
+        return r;
+    }
+
+    private LineProfileRequest validLineRequest() {
         Map<String, Object> attrs = new HashMap<>();
         attrs.put("height_cm", 170);
         attrs.put("weight_kg", 65);
@@ -47,24 +60,29 @@ class ProfileServiceTest {
         attrs.put("major_surgeries_count", 0);
         attrs.put("hospitalized_last_12m", false);
         attrs.put("medical_visit_count_12m", 1);
-
-        ProfileRequest r = new ProfileRequest();
-        r.setAge(30);
-        r.setGender("male");
-        r.setProvince("Ha Noi");
-        r.setRegion("Red River Delta");
-        r.setUrbanTier("tier1");
-        r.setOccupation("engineer");
-        r.setIncomeLevel("middle");
-        r.setMonthlyIncomeVnd(20_000_000L);
-        r.setMaritalStatus("single");
-        r.setLine("health");
+        LineProfileRequest r = new LineProfileRequest();
         r.setLineAttributes(attrs);
         return r;
     }
 
+    private CustomerProfile profileWithAge(int age) {
+        CustomerProfile p = new CustomerProfile();
+        p.setCustomerId(UUID.randomUUID());
+        p.setAge(age);
+        p.setGender("male");
+        p.setProvince("Ha Noi");
+        p.setRegion("Red River Delta");
+        p.setUrbanTier("tier1");
+        p.setOccupation("engineer");
+        p.setIncomeLevel("middle");
+        p.setMonthlyIncomeVnd(20_000_000L);
+        p.setMaritalStatus("single");
+        p.setUpdatedAt(OffsetDateTime.now());
+        return p;
+    }
+
     @Test
-    void upsertProfileCreatesNewWhenNoneExists() {
+    void updateBaseProfileCreatesNewWhenNoneExists() {
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
         ProfileVersionRepository versionRepo = mock(ProfileVersionRepository.class);
         AccountRepository accountRepo = mock(AccountRepository.class);
@@ -72,23 +90,23 @@ class ProfileServiceTest {
         Account acc = account(subject);
 
         when(accountRepo.findByKeycloakSubject(subject)).thenReturn(Optional.of(acc));
-        when(profileRepo.findByAccount_AccountId(acc.getAccountId())).thenReturn(null);
+        when(profileRepo.findByAccount_AccountId(acc.getAccountId()))
+                .thenReturn(null)
+                .thenReturn(profileWithAge(30));
         when(profileRepo.save(any(CustomerProfile.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(versionRepo.save(any(ProfileVersion.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(versionRepo.findLatestPerLine(any(UUID.class))).thenReturn(List.of());
 
         ProfileService svc = new ProfileService(profileRepo, versionRepo, accountRepo, new ProfileValidator());
-        ProfileResponse resp = svc.upsertProfile(subject, validRequest());
+        ProfileResponse resp = svc.updateBaseProfile(subject, validBaseRequest());
 
         assertNotNull(resp);
         assertEquals(30, resp.getAge());
         assertEquals("male", resp.getGender());
-        assertEquals("health", resp.getLine());
         verify(profileRepo, times(1)).save(any());
-        verify(versionRepo, times(1)).save(any());
     }
 
     @Test
-    void upsertProfileUpdatesExisting() {
+    void updateBaseProfileUpdatesExisting() {
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
         ProfileVersionRepository versionRepo = mock(ProfileVersionRepository.class);
         AccountRepository accountRepo = mock(AccountRepository.class);
@@ -102,19 +120,19 @@ class ProfileServiceTest {
         when(accountRepo.findByKeycloakSubject(subject)).thenReturn(Optional.of(acc));
         when(profileRepo.findByAccount_AccountId(acc.getAccountId())).thenReturn(existing);
         when(profileRepo.save(any(CustomerProfile.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(versionRepo.save(any(ProfileVersion.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(versionRepo.findLatestPerLine(any(UUID.class))).thenReturn(List.of());
 
         ProfileService svc = new ProfileService(profileRepo, versionRepo, accountRepo, new ProfileValidator());
-        ProfileRequest req = validRequest();
+        BaseProfileRequest req = validBaseRequest();
         req.setAge(35);
-        ProfileResponse resp = svc.upsertProfile(subject, req);
+        ProfileResponse resp = svc.updateBaseProfile(subject, req);
 
         assertEquals(35, resp.getAge());
         verify(profileRepo, times(1)).save(existing);
     }
 
     @Test
-    void upsertProfileRejectsUnknownSubject() {
+    void updateBaseProfileRejectsUnknownSubject() {
         AccountRepository accountRepo = mock(AccountRepository.class);
         when(accountRepo.findByKeycloakSubject("ghost")).thenReturn(Optional.empty());
 
@@ -123,12 +141,12 @@ class ProfileServiceTest {
                 accountRepo, new ProfileValidator());
 
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> svc.upsertProfile("ghost", validRequest()));
+                () -> svc.updateBaseProfile("ghost", validBaseRequest()));
         assertEquals(ErrorCode.UNAUTHENTICATED, ex.getErrorCode());
     }
 
     @Test
-    void getLatestProfileReturnsProfileAndVersion() {
+    void upsertLineProfileCreatesVersion() {
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
         ProfileVersionRepository versionRepo = mock(ProfileVersionRepository.class);
         AccountRepository accountRepo = mock(AccountRepository.class);
@@ -137,38 +155,21 @@ class ProfileServiceTest {
         CustomerProfile profile = new CustomerProfile();
         profile.setCustomerId(UUID.randomUUID());
         profile.setAccount(acc);
-        profile.setAge(30);
-        profile.setGender("male");
-        profile.setProvince("Ha Noi");
-        profile.setRegion("Red River Delta");
-        profile.setUrbanTier("tier1");
-        profile.setOccupation("engineer");
-        profile.setIncomeLevel("middle");
-        profile.setMonthlyIncomeVnd(20_000_000L);
-        profile.setMaritalStatus("single");
-
-        ProfileVersion version = new ProfileVersion();
-        version.setVersionId(UUID.randomUUID());
-        version.setCustomerProfile(profile);
-        version.setLine("health");
-        version.setLineAttributes(Map.of("bmi", 22.5));
-        version.setEffectiveAt(OffsetDateTime.now());
 
         when(accountRepo.findByKeycloakSubject(subject)).thenReturn(Optional.of(acc));
         when(profileRepo.findByAccount_AccountId(acc.getAccountId())).thenReturn(profile);
-        when(versionRepo.findByCustomerProfile_CustomerIdOrderByEffectiveAtDesc(profile.getCustomerId()))
-                .thenReturn(List.of(version));
+        when(versionRepo.save(any(ProfileVersion.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ProfileService svc = new ProfileService(profileRepo, versionRepo, accountRepo, new ProfileValidator());
-        ProfileResponse resp = svc.getLatestProfile(subject);
+        LineProfileResponse resp = svc.upsertLineProfile(subject, "health", validLineRequest());
 
-        assertEquals(30, resp.getAge());
+        assertNotNull(resp);
         assertEquals("health", resp.getLine());
-        assertNotNull(resp.getVersionId());
+        verify(versionRepo, times(1)).save(any());
     }
 
     @Test
-    void getLatestProfileRejectsWhenNoProfile() {
+    void upsertLineProfileRejectsWhenNoBaseProfile() {
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
         AccountRepository accountRepo = mock(AccountRepository.class);
         String subject = "test-subject-4";
@@ -181,12 +182,12 @@ class ProfileServiceTest {
                 profileRepo, mock(ProfileVersionRepository.class), accountRepo, new ProfileValidator());
 
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> svc.getLatestProfile(subject));
+                () -> svc.upsertLineProfile(subject, "health", validLineRequest()));
         assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Test
-    void getLatestProfileRejectsUnknownSubject() {
+    void getProfileRejectsUnknownSubject() {
         AccountRepository accountRepo = mock(AccountRepository.class);
         when(accountRepo.findByKeycloakSubject("ghost")).thenReturn(Optional.empty());
 
@@ -195,7 +196,25 @@ class ProfileServiceTest {
                 accountRepo, new ProfileValidator());
 
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> svc.getLatestProfile("ghost"));
+                () -> svc.getProfile("ghost"));
         assertEquals(ErrorCode.UNAUTHENTICATED, ex.getErrorCode());
+    }
+
+    @Test
+    void getProfileRejectsWhenNoProfile() {
+        CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
+        AccountRepository accountRepo = mock(AccountRepository.class);
+        String subject = "test-subject-5";
+        Account acc = account(subject);
+
+        when(accountRepo.findByKeycloakSubject(subject)).thenReturn(Optional.of(acc));
+        when(profileRepo.findByAccount_AccountId(acc.getAccountId())).thenReturn(null);
+
+        ProfileService svc = new ProfileService(
+                profileRepo, mock(ProfileVersionRepository.class), accountRepo, new ProfileValidator());
+
+        ServiceException ex = assertThrows(ServiceException.class,
+                () -> svc.getProfile(subject));
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 }

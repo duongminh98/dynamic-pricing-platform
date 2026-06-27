@@ -12,7 +12,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-# Vietnamese labels for the most important features.
 _EXPLAINER_CACHE: dict = {}
 
 
@@ -24,33 +23,33 @@ def _get_tree_explainer(est):
         _EXPLAINER_CACHE[key] = shap.TreeExplainer(est)
     return _EXPLAINER_CACHE[key]
 
-LABEL_VI = {
-    "age": "Tuoi",
-    "gender": "Gioi tinh",
-    "province": "Tinh thanh",
-    "region": "Vung",
-    "occupation": "Nghe nghiep",
-    "income_level": "Muc thu nhap",
-    "coverage_amount_vnd": "Muc bao hiem",
-    "deductible_vnd": "Muc mien thuong",
-    "annual_mileage_km": "So km nam",
-    "claim_count_36m_prior": "So lan boi thuong 36 thang",
-    "claim_count_12m_prior": "So lan boi thuong 12 thang",
-    "vehicle_age": "Tuoi xe",
-    "vehicle_value_vnd": "Gia tri xe",
-    "smoker": "Thuoc la",
+LABEL_EN = {
+    "age": "Age",
+    "gender": "Gender",
+    "province": "Province",
+    "region": "Region",
+    "occupation": "Occupation",
+    "income_level": "Income level",
+    "coverage_amount_vnd": "Coverage amount",
+    "deductible_vnd": "Deductible",
+    "annual_mileage_km": "Annual mileage",
+    "claim_count_36m_prior": "Claims in last 36 months",
+    "claim_count_12m_prior": "Claims in last 12 months",
+    "vehicle_age": "Vehicle age",
+    "vehicle_value_vnd": "Vehicle value",
+    "smoker": "Smoker",
     "bmi": "BMI",
-    "trip_duration_days": "Thoi han chuyen di",
-    "destination_country": "Quoc gia den",
-    "building_age": "Tuoi nha",
-    "floor_area_m2": "Dien tich san",
-    "occupation_class": "Lop nghe nghiep",
-    "sport_risk_level": "Muc do rui ro the thao",
+    "trip_duration_days": "Trip duration",
+    "destination_country": "Destination country",
+    "building_age": "Building age",
+    "floor_area_m2": "Floor area",
+    "occupation_class": "Occupation class",
+    "sport_risk_level": "Sport risk level",
 }
 
 
 def _direction(magnitude: float) -> str:
-    return "tang" if magnitude >= 0 else "giam"
+    return "increase" if magnitude >= 0 else "decrease"
 
 
 def _extract_model_and_features(model):
@@ -120,7 +119,7 @@ def explain(model, feature_df: "pd.DataFrame") -> dict:
         for name, magnitude in contributions[:10]:
             items.append({
                 "feature": name,
-                "label_vi": LABEL_VI.get(name, name),
+                "label": LABEL_EN.get(name, name),
                 "direction": _direction(float(magnitude)),
                 "magnitude": abs(float(magnitude)),
             })

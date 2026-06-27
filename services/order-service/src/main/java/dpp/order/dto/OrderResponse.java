@@ -22,4 +22,5 @@ public class OrderResponse {
     private String reviewedBy;
     private OffsetDateTime reviewedAt;
     private OffsetDateTime createdAt;
+    private UUID invoiceId;
 }

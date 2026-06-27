@@ -47,18 +47,9 @@ public class AdjustmentService {
         adj.setReason(AdjustmentReason.endorsement);
         adj.setCreatedAt(OffsetDateTime.now());
         adjustmentRepository.save(adj);
-        // For additional charges, create an unpaid invoice so the customer can pay via VNPAY.
-        // Refunds are recorded as adjustments only; the refund is settled at renewal or manually.
-        if (delta > 0) {
-            Invoice invoice = new Invoice();
-            invoice.setInvoiceId(UUID.randomUUID());
-            invoice.setOrderId(orderId);
-            invoice.setPolicyId(policyId);
-            invoice.setAmountVnd(Math.abs(delta));
-            invoice.setStatus(InvoiceStatus.unpaid);
-            invoice.setCreatedAt(OffsetDateTime.now());
-            invoiceRepository.save(invoice);
-        }
+        // Invoice is now created upfront by PolicyLifecycleService when the endorsement
+        // is approved (for premium increases) or not at all (for premium decreases —
+        // refund is recorded as adjustment only, settled at renewal or manually).
         recordProcessed(eventId, CONSUMER_ENDORSEMENT);
     }
 

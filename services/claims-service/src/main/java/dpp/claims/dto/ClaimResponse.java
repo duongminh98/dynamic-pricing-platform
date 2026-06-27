@@ -2,11 +2,11 @@ package dpp.claims.dto;
 
 import dpp.claims.entity.ClaimStatus;
 import dpp.claims.entity.MisrepresentationSanction;
-import dpp.claims.entity.SeverityLevel;
 import lombok.Getter;
 import lombok.Setter;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -19,10 +19,12 @@ public class ClaimResponse {
     private OffsetDateTime occurrenceDate;
     private OffsetDateTime reportDate;
     private String lossType;
-    private SeverityLevel severityLevel;
     private long incurredAmount;
     private long paidAmount;
     private ClaimStatus claimStatus;
     private MisrepresentationSanction misrepresentationSanction;
+    private String description;
+    private Long estimatedCost;
+    private List<String> attachments;
     private OffsetDateTime createdAt;
 }

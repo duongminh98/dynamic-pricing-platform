@@ -53,3 +53,10 @@ def is_monotonic_exempt(line: str, algorithm: str) -> bool:
     algo = (algorithm or "").strip().lower()
     is_glm = algo in ("glm", "tweedieregressor", "tweedie", "poissonregressor", "gamma")
     return line in MONOTONIC_EXEMPT_LINES and is_glm
+
+
+# ── Product-service integration (master data for catalog + loading factors) ─
+PRODUCT_SERVICE_BASE_URL = os.environ.get(
+    "PRODUCT_SERVICE_BASE_URL", "http://product-service-1:8080").rstrip("/")
+PRODUCT_HTTP_TIMEOUT_SECONDS = float(os.environ.get("PRODUCT_HTTP_TIMEOUT_SECONDS", "3"))
+PRODUCT_CACHE_TTL_SECONDS = float(os.environ.get("PRODUCT_CACHE_TTL_SECONDS", "300"))

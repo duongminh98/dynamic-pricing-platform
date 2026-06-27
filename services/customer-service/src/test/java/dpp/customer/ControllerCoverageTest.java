@@ -4,8 +4,10 @@ import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.customer.controller.AuthController;
 import dpp.customer.controller.ProfileController;
+import dpp.customer.dto.BaseProfileRequest;
+import dpp.customer.dto.LineProfileRequest;
+import dpp.customer.dto.LineProfileResponse;
 import dpp.customer.dto.LoginRequest;
-import dpp.customer.dto.ProfileRequest;
 import dpp.customer.dto.ProfileResponse;
 import dpp.customer.dto.RegisterRequest;
 import dpp.customer.dto.TokenResponse;
@@ -65,32 +67,26 @@ class ControllerCoverageTest {
     // ── ProfileController ──
 
     @Test
-    void profileControllerUpdateDelegatesToService() {
+    void profileControllerUpdateBaseDelegatesToService() {
         ProfileService profileService = mock(ProfileService.class);
         ProfileController controller = new ProfileController(profileService);
 
-        ProfileRequest req = new ProfileRequest();
-        req.setLine("health");
+        BaseProfileRequest req = new BaseProfileRequest();
         req.setAge(30);
         req.setGender("male");
-        req.setProvince("HN");
-        req.setRegion("north");
-        req.setUrbanTier("urban");
+        req.setProvince("Ha Noi");
         req.setOccupation("engineer");
-        req.setIncomeLevel("middle");
         req.setMonthlyIncomeVnd(20_000_000L);
         req.setMaritalStatus("single");
-        req.setLineAttributes(Map.of("smoker", "no", "chronic_disease", "no", "diabetes", "no",
-                "blood_pressure_problem", "no", "hospitalized_last_12m", "no"));
 
         ProfileResponse mockResp = new ProfileResponse();
         mockResp.setCustomerId(UUID.randomUUID());
-        when(profileService.upsertProfile("subject-123", req)).thenReturn(mockResp);
+        when(profileService.updateBaseProfile("subject-123", req)).thenReturn(mockResp);
 
-        ProfileResponse result = controller.updateProfile(jwtFor("subject-123"), req);
+        ProfileResponse result = controller.updateBaseProfile(jwtFor("subject-123"), req);
 
         assertNotNull(result);
-        verify(profileService, times(1)).upsertProfile("subject-123", req);
+        verify(profileService, times(1)).updateBaseProfile("subject-123", req);
     }
 
     @Test
@@ -100,11 +96,33 @@ class ControllerCoverageTest {
 
         ProfileResponse mockResp = new ProfileResponse();
         mockResp.setCustomerId(UUID.randomUUID());
-        when(profileService.getLatestProfile("subject-456")).thenReturn(mockResp);
+        when(profileService.getProfile("subject-456")).thenReturn(mockResp);
 
         ProfileResponse result = controller.getProfile(jwtFor("subject-456"));
 
         assertNotNull(result);
-        verify(profileService, times(1)).getLatestProfile("subject-456");
+        verify(profileService, times(1)).getProfile("subject-456");
+    }
+
+    @Test
+    void profileControllerUpsertLineDelegatesToService() {
+        ProfileService profileService = mock(ProfileService.class);
+        ProfileController controller = new ProfileController(profileService);
+
+        LineProfileRequest req = new LineProfileRequest();
+        req.setLineAttributes(Map.of("height_cm", 170, "weight_kg", 65, "bmi", 22.5,
+                "smoker", false, "chronic_disease", false, "diabetes", false,
+                "blood_pressure_problem", false, "major_surgeries_count", 0,
+                "hospitalized_last_12m", false, "medical_visit_count_12m", 1));
+
+        LineProfileResponse mockResp = new LineProfileResponse();
+        mockResp.setLine("health");
+        when(profileService.upsertLineProfile("subject-789", "health", req)).thenReturn(mockResp);
+
+        LineProfileResponse result = controller.upsertLineProfile(jwtFor("subject-789"), "health", req);
+
+        assertNotNull(result);
+        assertEquals("health", result.getLine());
+        verify(profileService, times(1)).upsertLineProfile("subject-789", "health", req);
     }
 }

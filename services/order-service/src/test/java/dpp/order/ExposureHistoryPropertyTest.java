@@ -3,6 +3,8 @@ package dpp.order;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
+import dpp.order.client.BillingClient;
+import dpp.order.client.PricingClient;
 import dpp.order.dto.EndorsementRequest;
 import dpp.order.dto.PolicyResponse;
 import dpp.order.entity.ExposureSegment;
@@ -11,7 +13,6 @@ import dpp.order.entity.PolicyStatus;
 import dpp.order.repository.EndorsementRequestRepository;
 import dpp.order.repository.ExposureSegmentRepository;
 import dpp.order.repository.PolicyDocumentRepository;
-import dpp.order.client.PricingClient;
 import dpp.order.repository.PolicyRepository;
 import dpp.order.service.PolicyLifecycleService;
 import net.jqwik.api.*;
@@ -70,7 +71,7 @@ class ExposureHistoryPropertyTest {
     private PolicyLifecycleService newService(PolicyRepository repo, ExposureSegmentRepository segRepo,
                                                PolicyDocumentRepository docRepo) {
         return new PolicyLifecycleService(repo, segRepo, docRepo, mock(EndorsementRequestRepository.class),
-                mock(PricingClient.class), mock(OutboxPublisher.class));
+                mock(PricingClient.class), mock(BillingClient.class), mock(OutboxPublisher.class));
     }
 
     @Property(tries = 100)

@@ -30,4 +30,31 @@ public class RabbitConfig {
 
     @Bean public Queue cancelledQueue() { return quorumQueue("policy.cancelled.queue","PolicyCancelled"); }
     @Bean public Binding cancelledBinding() { return BindingBuilder.bind(cancelledQueue()).to(eventsExchange()).with("PolicyCancelled"); }
+
+    @Bean public Queue orderApprovedQueue() { return quorumQueue("order.approved.queue","OrderApproved"); }
+    @Bean public Binding orderApprovedBinding() { return BindingBuilder.bind(orderApprovedQueue()).to(eventsExchange()).with("OrderApproved"); }
+
+    @Bean public Queue orderSubmittedQueue() { return quorumQueue("order.submitted.queue","OrderSubmitted"); }
+    @Bean public Binding orderSubmittedBinding() { return BindingBuilder.bind(orderSubmittedQueue()).to(eventsExchange()).with("OrderSubmitted"); }
+
+    @Bean public Queue orderRejectedQueue() { return quorumQueue("order.rejected.queue","OrderRejected"); }
+    @Bean public Binding orderRejectedBinding() { return BindingBuilder.bind(orderRejectedQueue()).to(eventsExchange()).with("OrderRejected"); }
+
+    @Bean public Queue endorsementRejectedQueue() { return quorumQueue("endorsement.rejected.queue","EndorsementRejected"); }
+    @Bean public Binding endorsementRejectedBinding() { return BindingBuilder.bind(endorsementRejectedQueue()).to(eventsExchange()).with("EndorsementRejected"); }
+
+    @Bean public Queue endorsementPendingPaymentQueue() { return quorumQueue("endorsement.pending.payment.queue","EndorsementPendingPayment"); }
+    @Bean public Binding endorsementPendingPaymentBinding() { return BindingBuilder.bind(endorsementPendingPaymentQueue()).to(eventsExchange()).with("EndorsementPendingPayment"); }
+
+    @Bean public Queue endorsementOverdueQueue() { return quorumQueue("endorsement.overdue.queue","EndorsementOverdue"); }
+    @Bean public Binding endorsementOverdueBinding() { return BindingBuilder.bind(endorsementOverdueQueue()).to(eventsExchange()).with("EndorsementOverdue"); }
+
+    @Bean public Queue creditIssuedQueue() { return quorumQueue("endorsement.credit.issued.queue","EndorsementCreditIssued"); }
+    @Bean public Binding creditIssuedBinding() { return BindingBuilder.bind(creditIssuedQueue()).to(eventsExchange()).with("EndorsementCreditIssued"); }
+
+    @Bean public Queue refundRequestedQueue() { return quorumQueue("refund.requested.queue","RefundRequested"); }
+    @Bean public Binding refundRequestedBinding() { return BindingBuilder.bind(refundRequestedQueue()).to(eventsExchange()).with("RefundRequested"); }
+
+    @Bean public Queue refundCompletedQueue() { return quorumQueue("refund.completed.queue","RefundCompleted"); }
+    @Bean public Binding refundCompletedBinding() { return BindingBuilder.bind(refundCompletedQueue()).to(eventsExchange()).with("RefundCompleted"); }
 }

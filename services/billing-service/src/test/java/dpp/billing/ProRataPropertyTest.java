@@ -44,15 +44,10 @@ class ProRataPropertyTest {
         }
         assertEquals(Math.abs(expectedDelta), adj.getAmountVnd());
         assertEquals(AdjustmentReason.endorsement, adj.getReason());
-        // When delta > 0, an unpaid invoice must be created for the customer to pay.
-        if (expectedDelta > 0) {
-            ArgumentCaptor<Invoice> invCaptor = ArgumentCaptor.forClass(Invoice.class);
-            verify(invRepo, times(1)).save(invCaptor.capture());
-            assertEquals(InvoiceStatus.unpaid, invCaptor.getValue().getStatus());
-            assertEquals(Math.abs(expectedDelta), invCaptor.getValue().getAmountVnd());
-        } else {
-            verify(invRepo, never()).save(any());
-        }
+        // Invoice is now created upfront by PolicyLifecycleService when the endorsement
+        // is approved (for premium increases), not by AdjustmentService.
+        // AdjustmentService only records the adjustment; no invoice is created here.
+        verify(invRepo, never()).save(any());
     }
 
     @Property(tries = 100)

@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Positive;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Getter
@@ -16,4 +17,6 @@ public class CreateInvoiceRequest {
     @NotNull
     @Positive
     private long amountVnd;
+    private UUID endorsementRequestId;
+    private OffsetDateTime dueDate;
 }
