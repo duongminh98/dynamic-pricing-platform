@@ -14,16 +14,16 @@ desktop.ini
 .vscode/
 *.iml
 
-# Datasets and generated reports — kept out of version control by request
+# Datasets and generated reports ??? kept out of version control by request
 data/
 !data/synthetic/geo_risk.csv
 reports/
 
-# Offline modelling work — kept out of version control by request
+# Offline modelling work ??? kept out of version control by request
 notebooks/
 scripts/
 
-# Documentation / spec markdown — kept out of version control by request
+# Documentation / spec markdown ??? kept out of version control by request
 *.md
 !README.md
 !.gitkeep
@@ -84,6 +84,7 @@ coverage.xml
 # Local scratch / e2e helper artifacts (tokens, request bodies, captured ids)
 *_token.txt
 *_body.json
+*_body*.json
 *_id.txt
 h.txt
 wsl.txt
