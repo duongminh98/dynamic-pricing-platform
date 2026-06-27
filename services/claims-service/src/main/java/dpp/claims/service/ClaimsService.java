@@ -79,11 +79,22 @@ public class ClaimsService {
      * [segment_start, segment_end]; otherwise it is outside coverage.
      */
     private int findSegmentSeq(List<Map<String, Object>> segments, OffsetDateTime occurrence) {
-        for (Map<String, Object> seg : segments) {
+        int last = segments.size() - 1;
+        for (int i = 0; i < segments.size(); i++) {
+            Map<String, Object> seg = segments.get(i);
             OffsetDateTime start = OffsetDateTime.parse(String.valueOf(seg.get("segment_start")));
             OffsetDateTime end = OffsetDateTime.parse(String.valueOf(seg.get("segment_end")));
-            if (!occurrence.isBefore(start) && !occurrence.isAfter(end)) {
-                return ((Number) seg.get("exposure_segment_seq")).intValue();
+            // A6: half-open [start, end) for non-final segments; inclusive for the last segment
+            // or when segment_end is null. This ensures a claim on the effective date of a
+            // new endorsement resolves to the new segment, not the prior one.
+            if (i == last || end == null) {
+                if (!occurrence.isBefore(start) && !occurrence.isAfter(end)) {
+                    return ((Number) seg.get("exposure_segment_seq")).intValue();
+                }
+            } else {
+                if (!occurrence.isBefore(start) && occurrence.isBefore(end)) {
+                    return ((Number) seg.get("exposure_segment_seq")).intValue();
+                }
             }
         }
         throw new ServiceException(ErrorCode.OCCURRENCE_OUT_OF_COVERAGE);

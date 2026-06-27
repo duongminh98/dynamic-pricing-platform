@@ -1,15 +1,20 @@
 package dpp.billing.controller;
 
+import dpp.billing.dto.CreateRefundRequest;
+import dpp.billing.dto.CompleteRefundRequest;
+import dpp.billing.dto.RejectRefundRequest;
 import dpp.billing.entity.RefundRequest;
 import dpp.billing.entity.RefundStatus;
 import dpp.billing.service.RefundService;
+import dpp.common.dto.PageResponse;
+import jakarta.validation.Valid;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -27,43 +32,40 @@ public class AdminRefundController {
 
     @GetMapping
     @PreAuthorize("hasRole('Administrator')")
-    public List<RefundRequest> listRefunds(@RequestParam(required = false) RefundStatus status) {
-        if (status != null) {
-            return refundService.listByStatus(status);
-        }
-        return refundService.listAll();
+    public PageResponse<RefundRequest> listRefunds(
+            @RequestParam(required = false) RefundStatus status,
+            @RequestParam(required = false) UUID customerId,
+            @RequestParam(required = false) UUID policyId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        size = Math.min(size, 100);
+        return PageResponse.from(refundService.listFiltered(status, customerId, policyId,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "requestedAt"))));
     }
 
     @PostMapping
     @PreAuthorize("hasRole('Administrator')")
-    public RefundRequest createRefund(@RequestBody Map<String, Object> body) {
-        UUID policyId = UUID.fromString(String.valueOf(body.get("policy_id")));
-        UUID customerId = UUID.fromString(String.valueOf(body.get("customer_id")));
-        UUID creditId = body.get("credit_id") != null
-                ? UUID.fromString(String.valueOf(body.get("credit_id"))) : null;
-        long amountVnd = Long.parseLong(String.valueOf(body.get("amount_vnd")));
-        String note = body.get("note") != null ? String.valueOf(body.get("note")) : null;
-        return refundService.createRefund(policyId, customerId, creditId, amountVnd, note);
+    public RefundRequest createRefund(@Valid @RequestBody CreateRefundRequest request) {
+        return refundService.createRefund(request.getPolicyId(), request.getCustomerId(),
+                request.getCreditId(), request.getAmountVnd(), request.getNote());
     }
 
     @PostMapping("/{id}/complete")
     @PreAuthorize("hasRole('Administrator')")
-    public RefundRequest completeRefund(@PathVariable UUID id, @RequestBody Map<String, String> body,
+    public RefundRequest completeRefund(@PathVariable UUID id,
+                                        @Valid @RequestBody CompleteRefundRequest request,
                                         @AuthenticationPrincipal Jwt jwt) {
-        String paymentReference = body.get("payment_reference");
-        String note = body.get("note");
-        String completedBy = jwt.getSubject();
-        RefundRequest refund = refundService.completeRefund(id, paymentReference, completedBy);
-        if (note != null && refund.getNote() == null) {
-            refund.setNote(note);
+        RefundRequest refund = refundService.completeRefund(id, request.getPaymentReference(), jwt.getSubject());
+        if (request.getNote() != null && refund.getNote() == null) {
+            refund.setNote(request.getNote());
         }
         return refund;
     }
 
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasRole('Administrator')")
-    public RefundRequest rejectRefund(@PathVariable UUID id, @RequestBody Map<String, String> body) {
-        String reason = body.get("reason");
-        return refundService.rejectRefund(id, reason);
+    public RefundRequest rejectRefund(@PathVariable UUID id,
+                                      @Valid @RequestBody RejectRefundRequest request) {
+        return refundService.rejectRefund(id, request.getReason());
     }
 }

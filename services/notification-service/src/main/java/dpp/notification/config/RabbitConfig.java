@@ -43,6 +43,12 @@ public class RabbitConfig {
     @Bean public Queue endorsementRejectedQueue() { return quorumQueue("endorsement.rejected.queue","EndorsementRejected"); }
     @Bean public Binding endorsementRejectedBinding() { return BindingBuilder.bind(endorsementRejectedQueue()).to(eventsExchange()).with("EndorsementRejected"); }
 
+    @Bean public Queue endorsementSubmittedQueue() { return quorumQueue("endorsement.submitted.queue","EndorsementSubmitted"); }
+    @Bean public Binding endorsementSubmittedBinding() { return BindingBuilder.bind(endorsementSubmittedQueue()).to(eventsExchange()).with("EndorsementSubmitted"); }
+
+    @Bean public Queue endorsementCancelledQueue() { return quorumQueue("endorsement.cancelled.queue","EndorsementCancelled"); }
+    @Bean public Binding endorsementCancelledBinding() { return BindingBuilder.bind(endorsementCancelledQueue()).to(eventsExchange()).with("EndorsementCancelled"); }
+
     @Bean public Queue endorsementPendingPaymentQueue() { return quorumQueue("endorsement.pending.payment.queue","EndorsementPendingPayment"); }
     @Bean public Binding endorsementPendingPaymentBinding() { return BindingBuilder.bind(endorsementPendingPaymentQueue()).to(eventsExchange()).with("EndorsementPendingPayment"); }
 

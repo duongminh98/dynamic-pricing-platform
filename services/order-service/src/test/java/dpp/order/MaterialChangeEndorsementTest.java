@@ -53,7 +53,7 @@ class MaterialChangeEndorsementTest {
         p.setCustomerId(UUID.nameUUIDFromBytes(SUBJECT.getBytes()));
         p.setProductId("MOTOR_BASIC");
         p.setStatus(PolicyStatus.active);
-        OffsetDateTime eff = OffsetDateTime.now().minusDays(30);
+        OffsetDateTime eff = OffsetDateTime.now().plusDays(1);
         p.setPolicyEffectiveDate(eff);
         p.setPolicyExpirationDate(eff.plus(365, ChronoUnit.DAYS));
         p.setFinalPremiumVnd(1_000_000L);
@@ -83,8 +83,6 @@ class MaterialChangeEndorsementTest {
         change.put("vehicle_value_vnd", 500_000_000L);
         req.setChange(change);
         req.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
-        req.setCoverageAmountVnd(500_000_000L);
-        req.setDeductibleVnd(1_000_000L);
         return req;
     }
 
@@ -101,7 +99,7 @@ class MaterialChangeEndorsementTest {
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), materialRequest(policy), SUBJECT);
 
-        assertEquals("pending_review", result.getStatus());
+        assertEquals("PENDING_REVIEW", result.getStatus());
         assertNotNull(result.getEndorsementRequestId());
         assertEquals(2_200_000L, result.getQuotedPremiumVnd(),
                 "customer must receive provisional premium at submission time");
@@ -140,8 +138,10 @@ class MaterialChangeEndorsementTest {
         verify(pricing, never()).rerate(eq("MOTOR_BASIC"), anyMap());
         ArgumentCaptor<ExposureSegment> captor = ArgumentCaptor.forClass(ExposureSegment.class);
         verify(segRepo, times(1)).save(captor.capture());
-        assertEquals(500_000_000L, captor.getValue().getCoverageAmountVnd());
-        assertEquals(1_000_000L, captor.getValue().getDeductibleVnd());
+        assertEquals(0L, captor.getValue().getCoverageAmountVnd(),
+                "coverage inherited from prior segment (empty in this test = 0)");
+        assertEquals(0L, captor.getValue().getDeductibleVnd(),
+                "deductible inherited from prior segment (empty in this test = 0)");
         assertEquals(EndorsementStatus.APPLIED, pending.getStatus());
     }
 
@@ -172,30 +172,21 @@ class MaterialChangeEndorsementTest {
     }
 
     @Test
-    void nonMaterialChangeIsAppliedImmediatelyAndReRates() {
+    void emptyChangeSetIsRejected() {
         Policy policy = activePolicy();
         PricingClient pricing = mock(PricingClient.class);
-        when(pricing.rerate(eq("MOTOR_BASIC"), anyMap()))
-                .thenReturn(Map.of("final_premium_vnd", 1_200_000L));
         ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
         EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
         PolicyLifecycleService s = svc(policy, pricing, segRepo,
                 mock(PolicyDocumentRepository.class), mock(PolicyRepository.class), endRepo);
 
         EndorsementRequest req = new EndorsementRequest();
-        req.setChange(new HashMap<>()); // non-material (coverage/deductible only)
+        req.setChange(new HashMap<>()); // empty change
         req.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
-        req.setCoverageAmountVnd(200_000_000L);
 
-        EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
-
-        assertEquals("applied", result.getStatus());
-        assertNotNull(result.getPolicy());
-        // Non-material changes are still re-rated because coverage/deductible affect premium.
-        verify(pricing, times(1)).rerate(eq("MOTOR_BASIC"), anyMap());
-        assertEquals(1_200_000L, policy.getFinalPremiumVnd(), "coverage change must re-rate to new premium");
-        verify(segRepo, times(1)).save(any(ExposureSegment.class));
-        verify(endRepo, never()).save(any(EndorsementRequestEntity.class));
+        ServiceException ex = assertThrows(ServiceException.class,
+                () -> s.endorse(policy.getPolicyId(), req, SUBJECT));
+        assertEquals(ErrorCode.INVALID_ENDORSEMENT_ATTRIBUTE, ex.getErrorCode());
     }
 
     @Test
@@ -239,11 +230,14 @@ class MaterialChangeEndorsementTest {
         // With price lock, rerate is NOT called at approve time — the locked quoted premium is used.
         verify(pricing, never()).rerate(eq("MOTOR_BASIC"), anyMap());
         // The merged profile is still built and persisted in the segment snapshot.
+        // A6: prior segment is closed at eff (1 save) + new segment created (1 save) = 2 saves.
         ArgumentCaptor<ExposureSegment> segCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
-        verify(segRepo, times(1)).save(segCaptor.capture());
-        ExposureSegment newSeg = segCaptor.getValue();
-        assertEquals(500_000_000L, newSeg.getCoverageAmountVnd());
-        assertEquals(1_000_000L, newSeg.getDeductibleVnd());
+        verify(segRepo, times(2)).save(segCaptor.capture());
+        ExposureSegment newSeg = segCaptor.getAllValues().get(1);
+        assertEquals(300_000_000L, newSeg.getCoverageAmountVnd(),
+                "coverage inherited from prior segment");
+        assertEquals(500_000L, newSeg.getDeductibleVnd(),
+                "deductible inherited from prior segment");
         // Verify the merged profile is persisted in the segment's risk snapshot
         String snapshot = newSeg.getRiskSnapshot();
         assertNotNull(snapshot);
@@ -271,25 +265,21 @@ class MaterialChangeEndorsementTest {
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
 
-        assertEquals("pending_review", result.getStatus(), "any risk attribute change must be material");
+        assertEquals("PENDING_REVIEW", result.getStatus(), "any risk attribute change must be material");
         // Re-rate is called for the provisional quote, but the change is not applied.
         verify(pricing, times(1)).rerate(eq("HEALTH_BASIC"), anyMap());
         verify(endRepo, times(1)).save(any(EndorsementRequestEntity.class));
     }
 
     @Test
-    void pureCoverageDeductibleChangeIsNonMaterialButStillReRates() {
+    void coverageDeductibleInChangeSetIsRejected() {
         Policy policy = activePolicy();
         PricingClient pricing = mock(PricingClient.class);
-        when(pricing.rerate(eq("MOTOR_BASIC"), anyMap()))
-                .thenReturn(Map.of("final_premium_vnd", 1_500_000L));
         ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
         EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
         PolicyLifecycleService s = svc(policy, pricing, segRepo,
                 mock(PolicyDocumentRepository.class), mock(PolicyRepository.class), endRepo);
 
-        // Only sum-insured / retention in the change set: non-material (no admin review)
-        // but still re-rated because coverage/deductible affect the premium.
         EndorsementRequest req = new EndorsementRequest();
         Map<String, Object> change = new HashMap<>();
         change.put("coverage_amount_vnd", 800_000_000L);
@@ -297,13 +287,9 @@ class MaterialChangeEndorsementTest {
         req.setChange(change);
         req.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
 
-        EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
-
-        assertEquals("applied", result.getStatus());
-        verify(pricing, times(1)).rerate(eq("MOTOR_BASIC"), anyMap());
-        verify(endRepo, never()).save(any(EndorsementRequestEntity.class));
-        assertEquals(1_500_000L, policy.getFinalPremiumVnd(),
-                "coverage/deductible change must re-rate to new premium");
+        ServiceException ex = assertThrows(ServiceException.class,
+                () -> s.endorse(policy.getPolicyId(), req, SUBJECT));
+        assertEquals(ErrorCode.INVALID_ENDORSEMENT_ATTRIBUTE, ex.getErrorCode());
     }
 
     // ── Real-world scenario: health policy endorsement ──
@@ -372,12 +358,10 @@ class MaterialChangeEndorsementTest {
         change.put("bmi", 28);
         req.setChange(change);
         req.setEffectiveDate(endorseDate);
-        req.setCoverageAmountVnd(500_000_000L);
-        req.setDeductibleVnd(5_000_000L);
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
 
-        assertEquals("pending_review", result.getStatus(),
+        assertEquals("PENDING_REVIEW", result.getStatus(),
                 "smoker + bmi change must be material and go to admin review");
         assertEquals(18_000_000L, result.getQuotedPremiumVnd(),
                 "customer must receive provisional premium at submission time");
@@ -408,9 +392,10 @@ class MaterialChangeEndorsementTest {
         verify(pricing, times(1)).rerate(eq("HEALTH_BASIC"), anyMap());
 
         // --- Verify: new segment has merged profile ---
+        // A6: prior segment closed (1 save) + new segment (1 save) = 2 saves.
         ArgumentCaptor<ExposureSegment> segCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
-        verify(segRepo, times(1)).save(segCaptor.capture());
-        ExposureSegment newSeg = segCaptor.getValue();
+        verify(segRepo, times(2)).save(segCaptor.capture());
+        ExposureSegment newSeg = segCaptor.getAllValues().get(1);
         assertEquals(1, newSeg.getExposureSegmentSeq(), "new segment must be seq=1");
         assertEquals(endorseDate, newSeg.getSegmentStart());
         assertEquals(exp, newSeg.getSegmentEnd());
@@ -440,14 +425,14 @@ class MaterialChangeEndorsementTest {
     }
 
     /**
-     * Scenario 2 — Non-material change: only coverage increase.
+     * Scenario 2 — Coverage/deductible are blocked from endorsement.
      *
-     * <p>Same health policy, customer wants to raise coverage from 500M to 800M.
-     * Expected: applied immediately (no admin review), no re-rate, premium
-     * unchanged, new segment records the higher coverage.
+     * <p>Same health policy, customer tries to raise coverage from 500M to 800M.
+     * Expected: rejected with INVALID_ENDORSEMENT_ATTRIBUTE (coverage/deductible
+     * cannot be changed through endorsement).
      */
     @Test
-    void healthEndorsementCoverageOnlyChange_appliedImmediately() {
+    void healthEndorsementCoverageOnlyChange_isRejected() {
         Policy policy = activePolicy();
         policy.setProductId("HEALTH_BASIC");
         policy.setFinalPremiumVnd(12_000_000L);
@@ -463,8 +448,6 @@ class MaterialChangeEndorsementTest {
         base.setRiskSnapshot("{\"age\":35,\"smoker\":false,\"bmi\":22,\"gender\":\"Male\"}");
 
         PricingClient pricing = mock(PricingClient.class);
-        when(pricing.rerate(eq("HEALTH_BASIC"), anyMap()))
-                .thenReturn(Map.of("final_premium_vnd", 15_000_000L));
         ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
         PolicyDocumentRepository docRepo = mock(PolicyDocumentRepository.class);
         PolicyRepository repo = mock(PolicyRepository.class);
@@ -472,12 +455,8 @@ class MaterialChangeEndorsementTest {
         OutboxPublisher outbox = mock(OutboxPublisher.class);
 
         when(repo.findById(policy.getPolicyId())).thenReturn(Optional.of(policy));
-        when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(segRepo.findByPolicyIdOrderByExposureSegmentSeqAsc(policy.getPolicyId()))
                 .thenReturn(List.of(base));
-        when(segRepo.save(any(ExposureSegment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(docRepo.findByPolicyIdOrderByVersionDesc(policy.getPolicyId())).thenReturn(List.of());
-        when(docRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         PolicyLifecycleService s = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, mock(BillingClient.class), outbox);
 
@@ -486,26 +465,10 @@ class MaterialChangeEndorsementTest {
         change.put("coverage_amount_vnd", 800_000_000L);
         req.setChange(change);
         req.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(150));
-        req.setCoverageAmountVnd(800_000_000L);
-        req.setDeductibleVnd(5_000_000L);
 
-        EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
-
-        assertEquals("applied", result.getStatus(),
-                "coverage-only change must be applied immediately (no admin review)");
-        // Coverage change still triggers re-rate because coverage_amount_vnd is a model feature.
-        verify(pricing, times(1)).rerate(eq("HEALTH_BASIC"), anyMap());
-        verify(endRepo, never()).save(any(EndorsementRequestEntity.class));
-        assertEquals(15_000_000L, policy.getFinalPremiumVnd(),
-                "coverage change must re-rate to new premium");
-
-        // New segment must reflect the increased coverage
-        ArgumentCaptor<ExposureSegment> segCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
-        verify(segRepo, times(1)).save(segCaptor.capture());
-        assertEquals(800_000_000L, segCaptor.getValue().getCoverageAmountVnd(),
-                "segment must carry the new coverage 800M");
-        assertEquals(5_000_000L, segCaptor.getValue().getDeductibleVnd(),
-                "deductible must be preserved");
+        ServiceException ex = assertThrows(ServiceException.class,
+                () -> s.endorse(policy.getPolicyId(), req, SUBJECT));
+        assertEquals(ErrorCode.INVALID_ENDORSEMENT_ATTRIBUTE, ex.getErrorCode());
     }
 
     /**
@@ -567,12 +530,10 @@ class MaterialChangeEndorsementTest {
         change.put("vehicle_value_vnd", 500_000_000L);
         req.setChange(change);
         req.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
-        req.setCoverageAmountVnd(300_000_000L);
-        req.setDeductibleVnd(500_000L);
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
 
-        assertEquals("pending_review", result.getStatus());
+        assertEquals("PENDING_REVIEW", result.getStatus());
         assertEquals(2_200_000L, result.getQuotedPremiumVnd(),
                 "customer must receive provisional premium at submission");
 
@@ -619,6 +580,8 @@ class MaterialChangeEndorsementTest {
                 "premium must reflect locked quoted premium after apply");
 
         // Verify EndorsementApplied event emitted with correct premiums
+        // A6: prior segment closed (1 save) + new segment (1 save) = 2 saves.
+        verify(segRepo, times(2)).save(any(ExposureSegment.class));
         verify(outbox).enqueue(eq("EndorsementApplied"), anyString());
     }
 
@@ -635,8 +598,6 @@ class MaterialChangeEndorsementTest {
         e.setPolicyId(policy.getPolicyId());
         e.setCustomerId(policy.getCustomerId());
         e.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
-        e.setCoverageAmountVnd(500_000_000L);
-        e.setDeductibleVnd(1_000_000L);
         e.setStatus(EndorsementStatus.PENDING_REVIEW);
         e.setChangeSet("{\"vehicle_value_vnd\":500000000}");
         e.setQuotedPremiumVnd(2_200_000L);

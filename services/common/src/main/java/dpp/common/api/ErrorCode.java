@@ -44,6 +44,8 @@ public enum ErrorCode {
     CANCEL_DATE_OUT_OF_RANGE(400, "Cancel date out of coverage range"),
     INVALID_ENDORSEMENT_ATTRIBUTE(400, "Invalid endorsement attribute for this policy line"),
     ENDORSEMENT_FREQUENCY_EXCEEDED(429, "Endorsement frequency limit exceeded"),
+    ENDORSEMENT_IN_PROGRESS(409, "An endorsement is already in progress for this policy"),
+    ENDORSEMENT_NOT_CANCELLABLE(409, "Endorsement request cannot be cancelled in its current state"),
     DUPLICATE_ACTIVE_POLICY(409, "An active policy already exists for this asset"),
 
     // ── Claims (R27, R28) ──

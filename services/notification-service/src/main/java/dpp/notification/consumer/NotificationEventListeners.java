@@ -37,6 +37,16 @@ public class NotificationEventListeners {
         handle(msg, eventId, "EndorsementApplied", this::buildEndorsementAppliedMessage);
     }
 
+    @RabbitListener(queues = "endorsement.submitted.queue")
+    public void onEndorsementSubmitted(@Payload String msg, @Header(name = "X-Event-Id", required = false) String eventId) {
+        handle(msg, eventId, "EndorsementSubmitted", this::buildEndorsementSubmittedMessage);
+    }
+
+    @RabbitListener(queues = "endorsement.cancelled.queue")
+    public void onEndorsementCancelled(@Payload String msg, @Header(name = "X-Event-Id", required = false) String eventId) {
+        handle(msg, eventId, "EndorsementCancelled", this::buildEndorsementCancelledMessage);
+    }
+
     @RabbitListener(queues = "endorsement.rejected.queue")
     public void onEndorsementRejected(@Payload String msg, @Header(name = "X-Event-Id", required = false) String eventId) {
         handle(msg, eventId, "EndorsementRejected", this::buildEndorsementRejectedMessage);
@@ -135,28 +145,65 @@ public class NotificationEventListeners {
         return sb.toString();
     }
 
-    private String buildEndorsementAppliedMessage(JsonNode n) {
+    private String buildEndorsementSubmittedMessage(JsonNode n) {
+        String endorsementId = text(n, "endorsement_request_id");
         String policyId = text(n, "policy_id");
+        String effectiveDate = text(n, "effective_date");
+        String differenceVnd = text(n, "difference_vnd");
+        String proRatedVnd = text(n, "pro_rated_charge_vnd");
+        StringBuilder sb = new StringBuilder();
+        sb.append("Your endorsement request ").append(endorsementId)
+          .append(" for policy ").append(policyId).append(" was submitted.");
+        if (effectiveDate != null) sb.append(" Effective date: ").append(effectiveDate).append(".");
+        if (differenceVnd != null) {
+            long diff = Long.parseLong(differenceVnd);
+            sb.append(" Estimated premium change: ").append(diff >= 0 ? "+" : "")
+              .append(formatVnd(differenceVnd)).append(" VND");
+            if (proRatedVnd != null) {
+                sb.append(" (pro-rated ").append(formatVnd(proRatedVnd)).append(" VND)");
+            }
+            sb.append(".");
+        }
+        return sb.toString();
+    }
+
+    private String buildEndorsementCancelledMessage(JsonNode n) {
+        String endorsementId = text(n, "endorsement_request_id");
+        String policyId = text(n, "policy_id");
+        StringBuilder sb = new StringBuilder();
+        sb.append("Your endorsement request ").append(endorsementId)
+          .append(" for policy ").append(policyId)
+          .append(" was cancelled. The policy was not changed.");
+        return sb.toString();
+    }
+
+    private String buildEndorsementAppliedMessage(JsonNode n) {
+        String endorsementId = text(n, "endorsement_request_id");
+        String policyId = text(n, "policy_id");
+        String effectiveDate = text(n, "effective_date");
         String premiumOld = text(n, "premium_old");
         String premiumNew = text(n, "premium_new");
-        String remainingDays = text(n, "remaining_days");
         StringBuilder sb = new StringBuilder();
-        sb.append("Your policy endorsement has been applied.");
-        if (policyId != null) sb.append(" Policy ID: ").append(policyId).append(".");
+        sb.append("Your endorsement request ").append(endorsementId)
+          .append(" was applied to policy ").append(policyId);
+        if (effectiveDate != null) sb.append(" from ").append(effectiveDate);
+        sb.append(".");
         if (premiumOld != null && premiumNew != null) {
-            sb.append(" Premium changed from ").append(formatVnd(premiumOld))
-              .append(" VND to ").append(formatVnd(premiumNew)).append(" VND.");
+            long diff = Long.parseLong(premiumNew) - Long.parseLong(premiumOld);
+            sb.append(" Premium change: ").append(diff >= 0 ? "+" : "")
+              .append(formatVnd(String.valueOf(Math.abs(diff)))).append(" VND.");
+            sb.append(" New annual premium: ").append(formatVnd(premiumNew)).append(" VND.");
         }
-        if (remainingDays != null) sb.append(" Remaining term: ").append(remainingDays).append(" days.");
         return sb.toString();
     }
 
     private String buildEndorsementRejectedMessage(JsonNode n) {
+        String endorsementId = text(n, "endorsement_request_id");
         String policyId = text(n, "policy_id");
         String reason = text(n, "review_reason");
         StringBuilder sb = new StringBuilder();
-        sb.append("Your endorsement request has been rejected.");
-        if (policyId != null) sb.append(" Policy ID: ").append(policyId).append(".");
+        sb.append("Your endorsement request ").append(endorsementId)
+          .append(" for policy ").append(policyId).append(" was rejected.");
         if (reason != null && !reason.isEmpty()) sb.append(" Reason: ").append(reason).append(".");
         return sb.toString();
     }
@@ -238,34 +285,38 @@ public class NotificationEventListeners {
     }
 
     private String buildEndorsementPendingPaymentMessage(JsonNode n) {
-        String policyId = text(n, "policy_id");
         String endorsementId = text(n, "endorsement_request_id");
+        String policyId = text(n, "policy_id");
         String invoiceId = text(n, "invoice_id");
-        String additionalCharge = text(n, "additional_charge_vnd");
-        String dueDays = text(n, "due_days");
+        String amountVnd = text(n, "additional_charge_vnd");
+        String dueDate = text(n, "due_date");
         StringBuilder sb = new StringBuilder();
-        sb.append("Your endorsement has been approved. Payment is required to take effect.");
-        if (policyId != null) sb.append(" Policy ID: ").append(policyId).append(".");
-        if (endorsementId != null) sb.append(" Endorsement ID: ").append(endorsementId).append(".");
-        if (additionalCharge != null) sb.append(" Additional charge: ").append(formatVnd(additionalCharge)).append(" VND.");
-        if (dueDays != null) sb.append(" Please pay within ").append(dueDays).append(" days.");
-        if (invoiceId != null && !invoiceId.isEmpty()) {
-            sb.append(" Invoice ID: ").append(invoiceId).append(".");
-            sb.append(" Please log in and use the payment portal to complete your payment via VNPAY.");
+        sb.append("Your endorsement request ").append(endorsementId)
+          .append(" for policy ").append(policyId).append(" was approved.");
+        if (amountVnd != null) {
+            sb.append(" Please pay ").append(formatVnd(amountVnd)).append(" VND");
+            if (dueDate != null) sb.append(" by ").append(dueDate);
+            sb.append(" to apply the changes.");
         }
         return sb.toString();
     }
 
     private String buildEndorsementOverdueMessage(JsonNode n) {
-        String policyId = text(n, "policy_id");
         String endorsementId = text(n, "endorsement_request_id");
+        String policyId = text(n, "policy_id");
+        String amountVnd = text(n, "additional_charge_vnd");
         String dueDate = text(n, "due_date");
+        String invoiceId = text(n, "invoice_id");
         StringBuilder sb = new StringBuilder();
-        sb.append("Your endorsement request has expired due to non-payment.");
-        if (policyId != null) sb.append(" Policy ID: ").append(policyId).append(".");
-        if (endorsementId != null) sb.append(" Endorsement ID: ").append(endorsementId).append(".");
-        if (dueDate != null) sb.append(" Due date was: ").append(dueDate).append(".");
-        sb.append(" Your policy remains unchanged.");
+        sb.append("Your endorsement request ").append(endorsementId)
+          .append(" for policy ").append(policyId).append(" expired because");
+        if (amountVnd != null) {
+            sb.append(" payment of ").append(formatVnd(amountVnd)).append(" VND");
+        } else {
+            sb.append(" payment");
+        }
+        if (dueDate != null) sb.append(" was not completed by ").append(dueDate);
+        sb.append(". The policy was not changed.");
         return sb.toString();
     }
 

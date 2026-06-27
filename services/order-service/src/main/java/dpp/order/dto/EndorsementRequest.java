@@ -22,13 +22,4 @@ public class EndorsementRequest {
     private Map<String, Object> change;
     @NotNull
     private OffsetDateTime effectiveDate;
-
-    /**
-     * New coverage amount (VND) for the endorsed segment. Optional; when absent
-     * the prior segment coverage is retained.
-     */
-    private Long coverageAmountVnd;
-
-    /** New deductible (VND) for the endorsed segment. Optional. */
-    private Long deductibleVnd;
 }

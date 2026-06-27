@@ -35,7 +35,7 @@ public class PolicyLifecycleService {
      * line-agnostic so a health change (e.g. smoker, age, bmi) is treated the
      * same as a motor change (e.g. vehicle_value_vnd).
      */
-    private static final Set<String> NON_MATERIAL_KEYS = Set.of(
+    private static final Set<String> BLOCKED_KEYS = Set.of(
             "coverage_amount_vnd", "deductible_vnd");
 
     static final int ENDORSEMENT_PAYMENT_DUE_DAYS = 14;
@@ -44,35 +44,29 @@ public class PolicyLifecycleService {
     private static final Map<String, Set<String>> ALLOWED_KEYS_BY_LINE = Map.of(
             "health", Set.of("height_cm", "weight_kg", "bmi", "smoker", "chronic_disease",
                     "diabetes", "blood_pressure_problem", "major_surgeries_count",
-                    "hospitalized_last_12m", "medical_visit_count_12m",
-                    "coverage_amount_vnd", "deductible_vnd"),
+                    "hospitalized_last_12m", "medical_visit_count_12m"),
             "motorbike", Set.of("vehicle_brand", "vehicle_model", "vehicle_segment",
                     "vehicle_age", "vehicle_value_vnd", "engine_capacity_cc",
                     "driving_experience_years", "annual_mileage_km",
                     "traffic_violation_count_12m", "parking_location",
-                    "anti_theft_device", "primary_use",
-                    "coverage_amount_vnd", "deductible_vnd"),
+                    "anti_theft_device", "primary_use"),
             "car", Set.of("vehicle_brand", "vehicle_model", "vehicle_segment",
                     "vehicle_age", "vehicle_value_vnd", "engine_capacity_cc",
                     "driving_experience_years", "annual_mileage_km",
                     "traffic_violation_count_12m", "parking_location",
                     "anti_theft_device", "primary_use",
-                    "driver_count", "garage_repair_option", "loan_or_leasing_flag",
-                    "coverage_amount_vnd", "deductible_vnd"),
+                    "driver_count", "garage_repair_option", "loan_or_leasing_flag"),
             "home", Set.of("property_type", "floor_area_m2", "number_of_floors",
                     "building_age", "construction_type", "roof_type",
                     "flood_risk_zone", "fire_protection", "has_fire_alarm",
-                    "has_sprinkler", "security_system", "declared_property_value_vnd",
-                    "coverage_amount_vnd", "deductible_vnd"),
+                    "has_sprinkler", "security_system", "declared_property_value_vnd"),
             "accident", Set.of("occupation_class", "workplace_risk_level",
                     "commute_mode", "commute_distance_km", "sport_activity_flag",
-                    "sport_risk_level", "hazardous_activity_exclusion_flag",
-                    "coverage_amount_vnd", "deductible_vnd"),
+                    "sport_risk_level", "hazardous_activity_exclusion_flag"),
             "travel", Set.of("domestic_or_international", "destination_region",
                     "destination_country", "trip_duration_days", "traveler_count",
                     "trip_cost_vnd", "travel_purpose", "has_baggage_cover",
-                    "has_trip_cancellation_cover",
-                    "coverage_amount_vnd", "deductible_vnd")
+                    "has_trip_cancellation_cover")
     );
 
     private final PolicyRepository policyRepository;    private final ExposureSegmentRepository segmentRepository;
@@ -101,10 +95,9 @@ public class PolicyLifecycleService {
     /**
      * Customer endorsement entry point.
      *
-     * <p>R23.9 / design §4.2 security gate: a Material_Change is NOT applied here.
-     * It is persisted as a PENDING_REVIEW endorsement request that only an
-     * Administrator can approve/reject — the customer can never self-approve.
-     * Non-material changes (coverage/deductible only) are applied immediately.
+     * <p>Every endorsement is a Material_Change: it is persisted as a
+     * PENDING_REVIEW endorsement request that only an Administrator can
+     * approve/reject — the customer can never self-approve.
      */
     /**
      * Preview an endorsement: re-rate without saving anything. Returns the current
@@ -121,17 +114,18 @@ public class PolicyLifecycleService {
         if (!eff.isAfter(policy.getPolicyEffectiveDate()) || !eff.isBefore(policy.getPolicyExpirationDate())) {
             throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE);
         }
+        if (eff.isBefore(OffsetDateTime.now())) {
+            throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE,
+                    "Effective date cannot be in the past", null);
+        }
 
         Map<String, Object> change = request.getChange();
         validateChangeKeys(change, policy.getProductId());
-        boolean material = isMaterialChange(change);
 
         List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
         ExposureSegment prior = segments.isEmpty() ? null : segments.get(segments.size() - 1);
-        long newCoverage = request.getCoverageAmountVnd() != null ? request.getCoverageAmountVnd()
-                : (prior != null ? prior.getCoverageAmountVnd() : 0L);
-        long newDeductible = request.getDeductibleVnd() != null ? request.getDeductibleVnd()
-                : (prior != null ? prior.getDeductibleVnd() : 0L);
+        long newCoverage = prior != null ? prior.getCoverageAmountVnd() : 0L;
+        long newDeductible = prior != null ? prior.getDeductibleVnd() : 0L;
         Map<String, Object> mergedProfile = prior != null ? readRiskSnapshot(prior) : new LinkedHashMap<>();
         mergedProfile.putAll(change);
         mergedProfile.put("coverage_amount_vnd", newCoverage);
@@ -150,9 +144,11 @@ public class PolicyLifecycleService {
         }
 
         EndorsementPreviewResponse resp = new EndorsementPreviewResponse();
+        resp.setPolicyId(policyId);
+        resp.setEffectiveDate(eff);
+        resp.setMaterialChange(true);
         resp.setCurrentPremiumVnd(currentPremium);
         resp.setQuotedPremiumVnd(quotedPremium);
-        resp.setMaterialChange(material);
         resp.setDifferenceVnd(quotedPremium - currentPremium);
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(eff, policy.getPolicyExpirationDate());
@@ -162,6 +158,8 @@ public class PolicyLifecycleService {
         resp.setProRatedChargeVnd(proRated);
         resp.setRemainingDays(remainingDays);
         resp.setTermDays(termDays);
+        resp.setCoverageAmountVnd(newCoverage);
+        resp.setDeductibleVnd(newDeductible);
         return resp;
     }
 
@@ -172,61 +170,80 @@ public class PolicyLifecycleService {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
         OffsetDateTime eff = request.getEffectiveDate();
-        // R23.5: effective date must be strictly inside the open interval (eff, exp).
         if (!eff.isAfter(policy.getPolicyEffectiveDate()) || !eff.isBefore(policy.getPolicyExpirationDate())) {
             throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE);
+        }
+        if (eff.isBefore(OffsetDateTime.now())) {
+            throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE,
+                    "Effective date cannot be in the past", null);
         }
 
         Map<String, Object> change = request.getChange();
         validateChangeKeys(change, policy.getProductId());
-        boolean material = isMaterialChange(change);
 
-        if (material) {
-            // R23.9: route to the Administrator review queue; do NOT apply yet.
-            // However, re-rate immediately so the customer sees the provisional premium.
-            List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
-            ExposureSegment prior = segments.isEmpty() ? null : segments.get(segments.size() - 1);
-            long newCoverage = request.getCoverageAmountVnd() != null ? request.getCoverageAmountVnd()
-                    : (prior != null ? prior.getCoverageAmountVnd() : 0L);
-            long newDeductible = request.getDeductibleVnd() != null ? request.getDeductibleVnd()
-                    : (prior != null ? prior.getDeductibleVnd() : 0L);
-            Map<String, Object> mergedProfile = prior != null ? readRiskSnapshot(prior) : new LinkedHashMap<>();
-            mergedProfile.putAll(change);
-            mergedProfile.put("coverage_amount_vnd", newCoverage);
-            mergedProfile.put("deductible_vnd", newDeductible);
-            Long quotedPremium = null;
-            try {
-                Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), mergedProfile);
-                Object premium = requote != null ? requote.get("final_premium_vnd") : null;
-                if (premium instanceof Number n) {
-                    quotedPremium = n.longValue();
-                }
-            } catch (RuntimeException e) {
-                quotedPremium = null;
+        // A4: Block concurrent endorsement — at most one in-progress per policy.
+        List<EndorsementRequestEntity> existing = endorsementRequestRepository.findByPolicyIdOrderByCreatedAtDesc(policyId);
+        for (EndorsementRequestEntity e : existing) {
+            if (e.getStatus() == EndorsementStatus.PENDING_REVIEW
+                    || e.getStatus() == EndorsementStatus.APPROVED_PENDING_PAYMENT) {
+                throw new ServiceException(ErrorCode.ENDORSEMENT_IN_PROGRESS,
+                        "An endorsement is already in progress for this policy",
+                        Map.of("endorsement_request_id", e.getEndorsementRequestId().toString()));
             }
-            EndorsementRequestEntity pending = new EndorsementRequestEntity();
-            pending.setEndorsementRequestId(UUID.randomUUID());
-            pending.setPolicyId(policyId);
-            pending.setCustomerId(policy.getCustomerId());
-            pending.setEffectiveDate(eff);
-            pending.setCoverageAmountVnd(request.getCoverageAmountVnd());
-            pending.setDeductibleVnd(request.getDeductibleVnd());
-            pending.setStatus(EndorsementStatus.PENDING_REVIEW);
-            pending.setCreatedAt(OffsetDateTime.now());
-            pending.setQuotedPremiumVnd(quotedPremium);
-            try {
-                pending.setChangeSet(objectMapper.writeValueAsString(change));
-            } catch (Exception e) {
-                pending.setChangeSet("{}");
-            }
-            endorsementRequestRepository.save(pending);
-            return EndorsementResult.pendingReview(pending.getEndorsementRequestId(), quotedPremium);
         }
 
-        // Non-material change: apply immediately (no admin needed).
-        PolicyResponse applied = applyEndorsement(policy, change, eff,
-                request.getCoverageAmountVnd(), request.getDeductibleVnd(), false);
-        return EndorsementResult.applied(applied);
+        // Re-rate immediately so the customer sees the provisional premium.
+        List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
+        ExposureSegment prior = segments.isEmpty() ? null : segments.get(segments.size() - 1);
+        long newCoverage = prior != null ? prior.getCoverageAmountVnd() : 0L;
+        long newDeductible = prior != null ? prior.getDeductibleVnd() : 0L;
+        Map<String, Object> mergedProfile = prior != null ? readRiskSnapshot(prior) : new LinkedHashMap<>();
+        mergedProfile.putAll(change);
+        mergedProfile.put("coverage_amount_vnd", newCoverage);
+        mergedProfile.put("deductible_vnd", newDeductible);
+        Long quotedPremium = null;
+        try {
+            Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), mergedProfile);
+            Object premium = requote != null ? requote.get("final_premium_vnd") : null;
+            if (premium instanceof Number n) {
+                quotedPremium = n.longValue();
+            }
+        } catch (RuntimeException e) {
+            quotedPremium = null;
+        }
+        EndorsementRequestEntity pending = new EndorsementRequestEntity();
+        pending.setEndorsementRequestId(UUID.randomUUID());
+        pending.setPolicyId(policyId);
+        pending.setCustomerId(policy.getCustomerId());
+        pending.setEffectiveDate(eff);
+        pending.setStatus(EndorsementStatus.PENDING_REVIEW);
+        pending.setCreatedAt(OffsetDateTime.now());
+        pending.setQuotedPremiumVnd(quotedPremium);
+        try {
+            pending.setChangeSet(objectMapper.writeValueAsString(change));
+        } catch (Exception e) {
+            pending.setChangeSet("{}");
+        }
+        endorsementRequestRepository.save(pending);
+
+        long currentPremium = policy.getFinalPremiumVnd();
+        long difference = quotedPremium != null ? quotedPremium - currentPremium : 0L;
+        long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
+        long remainingDays = ChronoUnit.DAYS.between(eff, policy.getPolicyExpirationDate());
+        double fraction = termDays > 0 ? remainingDays / (double) termDays : 0;
+        fraction = Math.max(0.0, Math.min(1.0, fraction));
+        long proRated = Math.round(difference * fraction);
+
+        enqueueEvent("EndorsementSubmitted", policyId, Map.of(
+                "customer_id", policy.getCustomerId().toString(),
+                "policy_id", policyId.toString(),
+                "endorsement_request_id", pending.getEndorsementRequestId().toString(),
+                "effective_date", eff.toString(),
+                "difference_vnd", difference,
+                "pro_rated_charge_vnd", proRated));
+
+        return EndorsementResult.pendingReview(pending.getEndorsementRequestId(), quotedPremium,
+                difference, proRated, eff, pending.getCreatedAt());
     }
 
     // ── Admin review of Material_Change endorsements (R23.9 / design §4.2) ──
@@ -360,6 +377,22 @@ public class PolicyLifecycleService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<EndorsementRequestResponse> adminEndorsementQueuePaged(
+            EndorsementStatus status, UUID customerId, UUID policyId,
+            org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.domain.Page<EndorsementRequestEntity> page =
+                endorsementRequestRepository.findFiltered(status, customerId, policyId, pageable);
+        return PageResponse.from(page.map(this::toEndorsementResponse));
+    }
+
+    @Transactional(readOnly = true)
+    public EndorsementRequestResponse adminGetEndorsementDetail(UUID endorsementRequestId) {
+        EndorsementRequestEntity req = endorsementRequestRepository.findById(endorsementRequestId)
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Endorsement not found", null));
+        return toEndorsementResponse(req);
+    }
+
+    @Transactional(readOnly = true)
     public List<EndorsementRequestResponse> pendingPaymentQueue() {
         return endorsementRequestRepository.findByStatusOrderByDueDateAsc(EndorsementStatus.APPROVED_PENDING_PAYMENT)
                 .stream().map(this::toEndorsementResponse).collect(java.util.stream.Collectors.toList());
@@ -379,14 +412,71 @@ public class PolicyLifecycleService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<EndorsementRequestResponse> policyEndorsementsPaged(UUID policyId, String keycloakSubject,
+                                                                             org.springframework.data.domain.Pageable pageable) {
+        Policy policy = findOwnedPolicy(policyId, keycloakSubject);
+        org.springframework.data.domain.Page<EndorsementRequestEntity> page =
+                endorsementRequestRepository.findByPolicyIdOrderByCreatedAtDesc(policyId, pageable);
+        return PageResponse.from(page.map(this::toEndorsementResponse));
+    }
+
+    @Transactional(readOnly = true)
     public EndorsementRequestResponse getEndorsement(UUID policyId, UUID endorsementRequestId, String keycloakSubject) {
         Policy policy = findOwnedPolicy(policyId, keycloakSubject);
         EndorsementRequestEntity req = endorsementRequestRepository.findById(endorsementRequestId)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Endorsement not found", null));
         if (!req.getPolicyId().equals(policyId)) {
-            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Endorsement not found", null);
         }
         return toEndorsementResponse(req);
+    }
+
+    /** A5: Customer self-cancel an endorsement in PENDING_REVIEW or APPROVED_PENDING_PAYMENT. */
+    @Transactional
+    public EndorsementCancelResponse cancelEndorsement(UUID policyId, UUID endorsementRequestId,
+                                                        String keycloakSubject, String reason) {
+        Policy policy = findOwnedPolicy(policyId, keycloakSubject);
+        EndorsementRequestEntity req = endorsementRequestRepository.findById(endorsementRequestId)
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Endorsement not found", null));
+        if (!req.getPolicyId().equals(policyId)) {
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Endorsement not found", null);
+        }
+        if (req.getStatus() != EndorsementStatus.PENDING_REVIEW
+                && req.getStatus() != EndorsementStatus.APPROVED_PENDING_PAYMENT) {
+            throw new ServiceException(ErrorCode.ENDORSEMENT_NOT_CANCELLABLE,
+                    "Endorsement cannot be cancelled in its current state",
+                    Map.of("status", req.getStatus().name()));
+        }
+
+        boolean invoiceVoided = false;
+        if (req.getStatus() == EndorsementStatus.APPROVED_PENDING_PAYMENT && req.getInvoiceId() != null) {
+            try {
+                billingClient.voidInvoiceByEndorsement(endorsementRequestId);
+                invoiceVoided = true;
+            } catch (Exception ignored) {
+            }
+        }
+
+        OffsetDateTime cancelledAt = OffsetDateTime.now();
+        req.setStatus(EndorsementStatus.CANCELLED);
+        req.setReviewReason(reason);
+        req.setReviewedAt(cancelledAt);
+        endorsementRequestRepository.save(req);
+
+        enqueueEvent("EndorsementCancelled", policyId, Map.of(
+                "customer_id", policy.getCustomerId().toString(),
+                "policy_id", policyId.toString(),
+                "endorsement_request_id", endorsementRequestId.toString(),
+                "policy_changed", false));
+
+        EndorsementCancelResponse resp = new EndorsementCancelResponse();
+        resp.setEndorsementRequestId(endorsementRequestId);
+        resp.setPolicyId(policyId);
+        resp.setStatus(EndorsementStatus.CANCELLED);
+        resp.setCancelledAt(cancelledAt);
+        resp.setInvoiceVoided(invoiceVoided);
+        resp.setPolicyChanged(false);
+        return resp;
     }
 
     /** Administrator approves a pending Material_Change.
@@ -446,11 +536,10 @@ public class PolicyLifecycleService {
                         "endorsement_request_id", endorsementRequestId.toString(),
                         "invoice_id", invoiceId != null ? invoiceId.toString() : "",
                         "additional_charge_vnd", netDue,
-                        "due_days", ENDORSEMENT_PAYMENT_DUE_DAYS));
+                        "due_date", req.getDueDate() != null ? req.getDueDate().toString() : ""));
             } else {
                 // Net due below threshold: waive, apply endorsement immediately.
-                applyEndorsement(policy, change, req.getEffectiveDate(),
-                        req.getCoverageAmountVnd(), req.getDeductibleVnd(), true, quotedPremium);
+                applyEndorsement(policy, change, req.getEffectiveDate(), true, quotedPremium);
                 req.setStatus(EndorsementStatus.APPLIED);
                 req.setReviewedBy(reviewer);
                 req.setReviewedAt(OffsetDateTime.now());
@@ -458,8 +547,7 @@ public class PolicyLifecycleService {
             }
         } else {
             // Premium decrease or no change (RP): apply immediately.
-            applyEndorsement(policy, change, req.getEffectiveDate(),
-                    req.getCoverageAmountVnd(), req.getDeductibleVnd(), true, quotedPremium);
+            applyEndorsement(policy, change, req.getEffectiveDate(), true, quotedPremium);
             req.setStatus(EndorsementStatus.APPLIED);
             req.setReviewedBy(reviewer);
             req.setReviewedAt(OffsetDateTime.now());
@@ -488,8 +576,7 @@ public class PolicyLifecycleService {
         Policy policy = policyRepository.findById(req.getPolicyId())
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null));
         Map<String, Object> change = readChangeSet(req);
-        applyEndorsement(policy, change, req.getEffectiveDate(),
-                req.getCoverageAmountVnd(), req.getDeductibleVnd(), true,
+        applyEndorsement(policy, change, req.getEffectiveDate(), true,
                 req.getQuotedPremiumVnd());
         req.setStatus(EndorsementStatus.APPLIED);
         endorsementRequestRepository.save(req);
@@ -627,6 +714,8 @@ public class PolicyLifecycleService {
                         "customer_id", req.getCustomerId().toString(),
                         "endorsement_request_id", req.getEndorsementRequestId().toString(),
                         "policy_id", req.getPolicyId().toString(),
+                        "invoice_id", req.getInvoiceId() != null ? req.getInvoiceId().toString() : "",
+                        "additional_charge_vnd", req.getQuotedPremiumVnd() != null ? req.getQuotedPremiumVnd() : 0,
                         "due_date", req.getDueDate().toString()));
             }
         }
@@ -676,13 +765,12 @@ public class PolicyLifecycleService {
         r.setStatus(req.getStatus());
         r.setChange(readChangeSet(req));
         r.setEffectiveDate(req.getEffectiveDate());
-        r.setCoverageAmountVnd(req.getCoverageAmountVnd());
-        r.setDeductibleVnd(req.getDeductibleVnd());
+        r.setMaterialChange(true);
+        r.setQuotedPremiumVnd(req.getQuotedPremiumVnd());
         r.setReviewReason(req.getReviewReason());
         r.setReviewedBy(req.getReviewedBy());
         r.setReviewedAt(req.getReviewedAt());
         r.setCreatedAt(req.getCreatedAt());
-        r.setQuotedPremiumVnd(req.getQuotedPremiumVnd());
         r.setInvoiceId(req.getInvoiceId());
         r.setDueDate(req.getDueDate());
         return r;
@@ -694,8 +782,8 @@ public class PolicyLifecycleService {
      * and emit the EndorsementApplied event with the real premium_old/premium_new.
      */
     private PolicyResponse applyEndorsement(Policy policy, Map<String, Object> change, OffsetDateTime eff,
-                                            Long coverageOverride, Long deductibleOverride, boolean material) {
-        return applyEndorsement(policy, change, eff, coverageOverride, deductibleOverride, material, null);
+                                            boolean material) {
+        return applyEndorsement(policy, change, eff, material, null);
     }
 
     /**
@@ -704,26 +792,22 @@ public class PolicyLifecycleService {
      * price the customer pays matches the price recorded on the policy and credit.
      */
     private PolicyResponse applyEndorsement(Policy policy, Map<String, Object> change, OffsetDateTime eff,
-                                            Long coverageOverride, Long deductibleOverride, boolean material,
+                                            boolean material,
                                             Long lockedPremium) {
         UUID policyId = policy.getPolicyId();
         List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
         ExposureSegment prior = segments.isEmpty() ? null : segments.get(segments.size() - 1);
         int nextSeq = prior == null ? 0 : prior.getExposureSegmentSeq() + 1;
 
-        long newCoverage = coverageOverride != null ? coverageOverride
-                : (prior != null ? prior.getCoverageAmountVnd() : 0L);
-        long newDeductible = deductibleOverride != null ? deductibleOverride
-                : (prior != null ? prior.getDeductibleVnd() : 0L);
+        // A1/A6: coverage and deductible always inherited from prior segment, never from request.
+        long newCoverage = prior != null ? prior.getCoverageAmountVnd() : 0L;
+        long newDeductible = prior != null ? prior.getDeductibleVnd() : 0L;
 
         long premiumOld = policy.getFinalPremiumVnd();
         long premiumNew = premiumOld;
 
         // Build the new effective risk profile by merging the change set onto the full
-        // base profile carried by the most recent segment (stamped at issuance and on
-        // every prior endorsement). This lets a material change re-rate against the
-        // complete product feature set rather than only the changed attributes, and
-        // keeps the full profile available for subsequent endorsements (R23.2/R23.8).
+        // base profile carried by the most recent segment.
         Map<String, Object> mergedProfile = prior != null ? readRiskSnapshot(prior) : new LinkedHashMap<>();
         mergedProfile.putAll(change);
         mergedProfile.put("coverage_amount_vnd", newCoverage);
@@ -735,8 +819,7 @@ public class PolicyLifecycleService {
             policy.setFinalPremiumVnd(premiumNew);
             policyRepository.save(policy);
         } else {
-            // Non-material or customer-initiated: re-rate (coverage/deductible changes
-            // affect premium). If pricing is unavailable, fail safe by keeping prior premium.
+            // Re-rate if pricing is available; fail safe by keeping prior premium.
             try {
                 Map<String, Object> requote = pricingClient.rerate(policy.getProductId(), mergedProfile);
                 Object premium = requote != null ? requote.get("final_premium_vnd") : null;
@@ -748,6 +831,14 @@ public class PolicyLifecycleService {
             } catch (RuntimeException e) {
                 premiumNew = premiumOld;
             }
+        }
+
+        // A6: Close prior segment at eff and recompute earned exposure before creating new segment.
+        if (prior != null && prior.getSegmentEnd() != null && prior.getSegmentEnd().isAfter(eff)) {
+            prior.setSegmentEnd(eff);
+            long priorDays = ChronoUnit.DAYS.between(prior.getSegmentStart(), eff);
+            prior.setEarnedExposureYears(Math.max(0, priorDays) / 365.25);
+            segmentRepository.save(prior);
         }
 
         ExposureSegment seg = new ExposureSegment();
@@ -779,12 +870,8 @@ public class PolicyLifecycleService {
         long priorCoverage = prior != null ? prior.getCoverageAmountVnd() : 0L;
         long priorDeductible = prior != null ? prior.getDeductibleVnd() : 0L;
         Map<String, Object> structuredChange = new LinkedHashMap<>();
-        if (newCoverage != priorCoverage) {
-            structuredChange.put("coverage_amount_vnd", Map.of("old", priorCoverage, "new", newCoverage));
-        }
-        if (newDeductible != priorDeductible) {
-            structuredChange.put("deductible_vnd", Map.of("old", priorDeductible, "new", newDeductible));
-        }
+        // Coverage/deductible are always inherited — they never appear in structuredChange.
+        // Only premium diff is recorded for the document.
         if (premiumNew != premiumOld) {
             structuredChange.put("premium", Map.of("old", premiumOld, "new", premiumNew));
         }
@@ -805,9 +892,12 @@ public class PolicyLifecycleService {
 
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(eff, policy.getPolicyExpirationDate());
-        enqueueEvent("EndorsementApplied", policyId, Map.of("customer_id", policy.getCustomerId().toString(),
+        enqueueEvent("EndorsementApplied", policyId, Map.of(
+                "customer_id", policy.getCustomerId().toString(),
                 "order_id", policy.getOrderId().toString(),
+                "effective_date", eff.toString(),
                 "premium_old", premiumOld, "premium_new", premiumNew,
+                "difference_vnd", premiumNew - premiumOld,
                 "remaining_days", remainingDays, "term_days", termDays));
         return toResponse(policy);
     }
@@ -816,13 +906,8 @@ public class PolicyLifecycleService {
         if (change == null || change.isEmpty()) {
             return false;
         }
-        // Any risk attribute (anything other than pure coverage/deductible) is material.
-        for (String key : change.keySet()) {
-            if (!NON_MATERIAL_KEYS.contains(key)) {
-                return true;
-            }
-        }
-        return false;
+        // After locking coverage/deductible, every remaining attribute is a risk attribute.
+        return true;
     }
 
     /**
@@ -831,7 +916,8 @@ public class PolicyLifecycleService {
      */
     private void validateChangeKeys(Map<String, Object> change, String productId) {
         if (change == null || change.isEmpty()) {
-            return;
+            throw new ServiceException(ErrorCode.INVALID_ENDORSEMENT_ATTRIBUTE,
+                    "Endorsement change set must not be empty", null);
         }
         String line = resolveLineFromProductId(productId);
         Set<String> allowed = ALLOWED_KEYS_BY_LINE.get(line);
@@ -839,7 +925,18 @@ public class PolicyLifecycleService {
             throw new ServiceException(ErrorCode.INVALID_ENDORSEMENT_ATTRIBUTE,
                     "Unknown product line for endorsement", Map.of("product_id", productId));
         }
-        for (String key : change.keySet()) {
+        for (Map.Entry<String, Object> entry : change.entrySet()) {
+            String key = entry.getKey();
+            if (BLOCKED_KEYS.contains(key)) {
+                throw new ServiceException(ErrorCode.INVALID_ENDORSEMENT_ATTRIBUTE,
+                        "Coverage and deductible cannot be changed through endorsement",
+                        Map.of("attribute", key));
+            }
+            if (entry.getValue() == null) {
+                throw new ServiceException(ErrorCode.INVALID_ENDORSEMENT_ATTRIBUTE,
+                        "Change value for '" + key + "' must not be null",
+                        Map.of("attribute", key));
+            }
             if (!allowed.contains(key)) {
                 throw new ServiceException(ErrorCode.INVALID_ENDORSEMENT_ATTRIBUTE,
                         "Attribute '" + key + "' is not valid for line '" + line + "'",

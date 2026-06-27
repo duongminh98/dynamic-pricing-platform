@@ -47,7 +47,6 @@ class FnolTemporalPropertyTest {
         req.setPolicyId(policyId);
         req.setOccurrenceDate(occurrence);
         req.setLossType("collision");
-        req.setSeverityLevel("medium");
         return req;
     }
 

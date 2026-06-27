@@ -6,6 +6,7 @@ import dpp.common.outbox.OutboxPublisher;
 import dpp.order.client.BillingClient;
 import dpp.order.client.PricingClient;
 import dpp.order.dto.EndorsementRequest;
+import dpp.order.dto.EndorsementResult;
 import dpp.order.dto.PolicyResponse;
 import dpp.order.entity.ExposureSegment;
 import dpp.order.entity.Policy;
@@ -26,6 +27,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -42,7 +44,7 @@ class ExposureHistoryPropertyTest {
         p.setCustomerId(customerId);
         p.setProductId("motor-basic");
         p.setStatus(PolicyStatus.active);
-        OffsetDateTime eff = OffsetDateTime.now().minusDays(30);
+        OffsetDateTime eff = OffsetDateTime.now().plusDays(1);
         p.setPolicyEffectiveDate(eff);
         p.setPolicyExpirationDate(eff.plus(365, ChronoUnit.DAYS));
         p.setRenewalNumber(0);
@@ -102,17 +104,14 @@ class ExposureHistoryPropertyTest {
         PolicyLifecycleService svc = newService(repo, segRepo, docRepo);
         EndorsementRequest req = new EndorsementRequest();
         req.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
-        req.setChange(new HashMap<>());
+        req.setChange(new HashMap<>(Map.of("vehicle_value_vnd", 500_000_000L)));
 
-        svc.endorse(policyId, req, subject);
+        // All endorsements are material → goes to PENDING_REVIEW, no segment saved at submit.
+        EndorsementResult result = svc.endorse(policyId, req, subject);
+        assertEquals("PENDING_REVIEW", result.getStatus());
 
-        ArgumentCaptor<ExposureSegment> captor = ArgumentCaptor.forClass(ExposureSegment.class);
-        verify(segRepo, times(1)).save(captor.capture());
-        ExposureSegment newSeg = captor.getValue();
-        assertEquals(existingCount, newSeg.getExposureSegmentSeq());
-        assertEquals(policyId, newSeg.getPolicyId());
-        assertTrue(newSeg.getEarnedExposureYears() > 0);
-
+        // Segment is NOT saved until admin approves.
+        verify(segRepo, never()).save(any(ExposureSegment.class));
         verify(segRepo, never()).delete(any());
         verify(segRepo, never()).deleteAll();
     }
@@ -134,7 +133,7 @@ class ExposureHistoryPropertyTest {
         PolicyLifecycleService svc = newService(repo, segRepo, mock(PolicyDocumentRepository.class));
         EndorsementRequest req = new EndorsementRequest();
         req.setEffectiveDate(policy.getPolicyExpirationDate().plusDays(10));
-        req.setChange(new HashMap<>());
+        req.setChange(new HashMap<>(Map.of("vehicle_value_vnd", 500_000_000L)));
 
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.endorse(policyId, req, subject));
@@ -162,7 +161,7 @@ class ExposureHistoryPropertyTest {
         PolicyLifecycleService svc = newService(repo, segRepo, docRepo);
         EndorsementRequest req = new EndorsementRequest();
         req.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
-        req.setChange(new HashMap<>());
+        req.setChange(new HashMap<>(Map.of("vehicle_value_vnd", 500_000_000L)));
 
         assertDoesNotThrow(() -> svc.endorse(policyId, req, subject));
     }

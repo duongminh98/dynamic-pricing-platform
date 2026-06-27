@@ -4,7 +4,6 @@ import dpp.claims.dto.ApproveClaimRequest;
 import dpp.claims.dto.ClaimResponse;
 import dpp.claims.entity.Claim;
 import dpp.claims.entity.ClaimStatus;
-import dpp.claims.entity.SeverityLevel;
 import dpp.claims.repository.ClaimRepository;
 import dpp.claims.service.ClaimsService;
 import dpp.common.api.ErrorCode;
@@ -36,7 +35,6 @@ class ClaimPayoutPropertyTest {
         claim.setOccurrenceDate(OffsetDateTime.now().minusDays(5));
         claim.setReportDate(OffsetDateTime.now());
         claim.setLossType("collision");
-        claim.setSeverityLevel(SeverityLevel.medium);
         claim.setIncurredAmount(0);
         claim.setPaidAmount(0);
         claim.setClaimStatus(ClaimStatus.pending);

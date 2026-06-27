@@ -5,6 +5,8 @@ import dpp.billing.repository.*;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -116,6 +118,11 @@ public class RefundService {
     @Transactional(readOnly = true)
     public List<RefundRequest> listAll() {
         return refundRepository.findAll();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<RefundRequest> listFiltered(RefundStatus status, UUID customerId, UUID policyId, Pageable pageable) {
+        return refundRepository.findFiltered(status, customerId, policyId, pageable);
     }
 
     @Transactional(readOnly = true)

@@ -73,14 +73,28 @@ public class PolicyController {
     }
 
     @GetMapping("/{id}/endorsements")
-    public List<EndorsementRequestResponse> listEndorsements(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return lifecycleService.policyEndorsements(id, jwt.getSubject());
+    public PageResponse<EndorsementRequestResponse> listEndorsements(
+            @AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        size = Math.min(size, 100);
+        return lifecycleService.policyEndorsementsPaged(id, jwt.getSubject(),
+                org.springframework.data.domain.PageRequest.of(page, size,
+                        org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")));
     }
 
     @GetMapping("/{id}/endorsements/{endorsementId}")
     public EndorsementRequestResponse getEndorsement(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                                       @PathVariable UUID endorsementId) {
         return lifecycleService.getEndorsement(id, endorsementId, jwt.getSubject());
+    }
+
+    @PostMapping("/{id}/endorsements/{endorsementId}/cancel")
+    public EndorsementCancelResponse cancelEndorsement(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                       @PathVariable UUID endorsementId,
+                                                       @RequestBody(required = false) CancelEndorsementRequest request) {
+        String reason = request != null ? request.getReason() : null;
+        return lifecycleService.cancelEndorsement(id, endorsementId, jwt.getSubject(), reason);
     }
 
     @PostMapping("/{id}/renew")

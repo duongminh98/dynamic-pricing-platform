@@ -189,10 +189,12 @@ class PolicyControllerTest {
         PolicyLifecycleService lifecycleService = mock(PolicyLifecycleService.class);
         UUID policyId = UUID.randomUUID();
         EndorsementRequest req = new EndorsementRequest();
-        req.setChange(java.util.Map.of("coverage_amount_vnd", 200_000_000L));
+        req.setChange(java.util.Map.of("vehicle_value_vnd", 500_000_000L));
         req.setEffectiveDate(OffsetDateTime.now().plusDays(10));
 
-        EndorsementResult mockResult = EndorsementResult.applied(new PolicyResponse());
+        EndorsementResult mockResult = EndorsementResult.pendingReview(
+                UUID.randomUUID(), 2_200_000L, 1_200_000L, 1_180_000L,
+                req.getEffectiveDate(), OffsetDateTime.now());
         when(lifecycleService.endorse(eq(policyId), eq(req), anyString())).thenReturn(mockResult);
 
         PolicyController controller = new PolicyController(lifecycleService, mock(PolicyRepository.class),
@@ -200,7 +202,7 @@ class PolicyControllerTest {
         EndorsementResult result = controller.endorse(jwtFor("subject"), policyId, req);
 
         assertNotNull(result);
-        assertEquals("applied", result.getStatus());
+        assertEquals("PENDING_REVIEW", result.getStatus());
     }
 
     @Test

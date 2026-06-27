@@ -21,13 +21,15 @@ public class EndorsementRequestResponse {
     private EndorsementStatus status;
     private Map<String, Object> change;
     private OffsetDateTime effectiveDate;
-    private Long coverageAmountVnd;
-    private Long deductibleVnd;
+    private boolean materialChange;
+    private Long currentPremiumVnd;
+    private Long quotedPremiumVnd;
+    private Long differenceVnd;
     private String reviewReason;
     private String reviewedBy;
     private OffsetDateTime reviewedAt;
     private OffsetDateTime createdAt;
-    private Long quotedPremiumVnd;
     private UUID invoiceId;
     private OffsetDateTime dueDate;
+    private OffsetDateTime cancelledAt;
 }

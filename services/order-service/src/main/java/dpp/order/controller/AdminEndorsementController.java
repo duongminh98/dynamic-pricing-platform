@@ -1,25 +1,25 @@
 package dpp.order.controller;
 
 import dpp.order.dto.EndorsementRequestResponse;
+import dpp.order.dto.ExtendDueDateRequest;
+import dpp.order.dto.PageResponse;
 import dpp.order.dto.PolicyResponse;
 import dpp.order.dto.RejectRequest;
+import dpp.order.entity.EndorsementStatus;
 import dpp.order.service.PolicyLifecycleService;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
  * Administrator review of Material_Change endorsement requests (R23.9 / design §4.2).
- *
- * <p>Role enforcement is at the application layer via {@code @PreAuthorize}
- * (gateway JWT only verifies signature/exp, not roles). Only an Administrator can
- * approve or reject a pending endorsement; a Customer can never self-approve.
  */
 @RestController
 @RequestMapping("/admin/endorsements")
@@ -29,6 +29,19 @@ public class AdminEndorsementController {
 
     public AdminEndorsementController(PolicyLifecycleService lifecycleService) {
         this.lifecycleService = lifecycleService;
+    }
+
+    @GetMapping
+    @PreAuthorize("hasRole('Administrator')")
+    public PageResponse<EndorsementRequestResponse> listEndorsements(
+            @RequestParam(required = false) EndorsementStatus status,
+            @RequestParam(required = false) UUID customerId,
+            @RequestParam(required = false) UUID policyId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        size = Math.min(size, 100);
+        return lifecycleService.adminEndorsementQueuePaged(status, customerId, policyId,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
     }
 
     @GetMapping("/review-queue")
@@ -49,6 +62,12 @@ public class AdminEndorsementController {
         return lifecycleService.voidedEndorsements();
     }
 
+    @GetMapping("/{id}")
+    @PreAuthorize("hasRole('Administrator')")
+    public EndorsementRequestResponse getDetail(@PathVariable UUID id) {
+        return lifecycleService.adminGetEndorsementDetail(id);
+    }
+
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasRole('Administrator')")
     public EndorsementRequestResponse approve(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
@@ -64,9 +83,9 @@ public class AdminEndorsementController {
 
     @PostMapping("/{id}/extend-due-date")
     @PreAuthorize("hasRole('Administrator')")
-    public EndorsementRequestResponse extendDueDate(@PathVariable UUID id, @RequestBody Map<String, Integer> body) {
-        int extraDays = body.getOrDefault("extra_days", 7);
-        return lifecycleService.extendDueDate(id, extraDays);
+    public EndorsementRequestResponse extendDueDate(@PathVariable UUID id,
+                                                     @Valid @RequestBody ExtendDueDateRequest request) {
+        return lifecycleService.extendDueDate(id, request.getExtraDays());
     }
 
     @PostMapping("/{id}/cancel-policy")

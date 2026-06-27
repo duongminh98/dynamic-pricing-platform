@@ -307,12 +307,10 @@ class RenewalAndCancellationTest {
         change.put("vehicle_value_vnd", 500_000_000L);
         endorseReq.setChange(change);
         endorseReq.setEffectiveDate(renewedPolicy.getPolicyEffectiveDate().plusDays(30));
-        endorseReq.setCoverageAmountVnd(300_000_000L);
-        endorseReq.setDeductibleVnd(2_000_000L);
 
         EndorsementResult endorseResult = svc.endorse(renewedPolicyId, endorseReq, SUBJECT);
 
-        assertEquals("pending_review", endorseResult.getStatus(),
+        assertEquals("PENDING_REVIEW", endorseResult.getStatus(),
                 "vehicle_value change is material, goes to admin review");
         assertEquals(2_200_000L, endorseResult.getQuotedPremiumVnd(),
                 "customer must receive provisional premium at submission");
@@ -420,12 +418,10 @@ class RenewalAndCancellationTest {
         change.put("smoker", true);
         req.setChange(change);
         req.setEffectiveDate(endorseDate);
-        req.setCoverageAmountVnd(500_000_000L);
-        req.setDeductibleVnd(5_000_000L);
 
         EndorsementResult endorseResult = svc.endorse(policy.getPolicyId(), req, SUBJECT);
 
-        assertEquals("pending_review", endorseResult.getStatus(),
+        assertEquals("PENDING_REVIEW", endorseResult.getStatus(),
                 "smoker change must be material and go to admin review");
         assertEquals(18_000_000L, endorseResult.getQuotedPremiumVnd(),
                 "customer must receive provisional premium at submission");
@@ -455,9 +451,10 @@ class RenewalAndCancellationTest {
                 "premium must reflect locked quoted premium after payment triggers apply");
 
         // Capture the new segment created by endorsement
+        // A6: prior segment closed (1 save) + new segment (1 save) = 2 saves.
         ArgumentCaptor<ExposureSegment> endSegCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
-        verify(segRepo, times(1)).save(endSegCaptor.capture());
-        ExposureSegment endorsedSeg = endSegCaptor.getValue();
+        verify(segRepo, times(2)).save(endSegCaptor.capture());
+        ExposureSegment endorsedSeg = endSegCaptor.getAllValues().get(1);
         assertEquals(1, endorsedSeg.getExposureSegmentSeq(), "endorsement must create segment seq=1");
         String endorsedSnapshot = endorsedSeg.getRiskSnapshot();
         assertNotNull(endorsedSnapshot);
@@ -495,9 +492,9 @@ class RenewalAndCancellationTest {
 
         // Verify renewal created segment 0 for the new policy with updated profile
         ArgumentCaptor<ExposureSegment> renewSegCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
-        // segRepo.save called twice: 1 for endorsement + 1 for renewal
-        verify(segRepo, times(2)).save(renewSegCaptor.capture());
-        ExposureSegment renewalSeg = renewSegCaptor.getValue();
+        // segRepo.save called 3 times: 2 for endorsement (A6: close prior + new) + 1 for renewal
+        verify(segRepo, times(3)).save(renewSegCaptor.capture());
+        ExposureSegment renewalSeg = renewSegCaptor.getAllValues().get(2);
         assertEquals(0, renewalSeg.getExposureSegmentSeq(), "renewed policy must have segment seq=0");
         String renewalSnapshot = renewalSeg.getRiskSnapshot();
         assertNotNull(renewalSnapshot);

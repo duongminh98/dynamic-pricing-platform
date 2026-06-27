@@ -3,39 +3,40 @@ package dpp.order.dto;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
  * Result of a customer endorsement submission.
  *
- * <ul>
- *   <li>Non-material change → {@code status = "applied"} with the updated {@code policy}.</li>
- *   <li>Material change → {@code status = "pending_review"} with the created
- *       {@code endorsementRequestId} and a provisional {@code quotedPremiumVnd}
- *       so the customer knows the expected new premium before admin approval.</li>
- * </ul>
+ * <p>Every endorsement is a material change routed to PENDING_REVIEW.
+ * The response includes the provisional quoted premium, difference, and
+ * pro-rated charge so the customer knows the expected cost before admin approval.
  */
 @Getter
 @Setter
 public class EndorsementResult {
 
-    private String status;
     private UUID endorsementRequestId;
-    private PolicyResponse policy;
+    private UUID policyId;
+    private String status;
+    private OffsetDateTime effectiveDate;
+    private boolean materialChange;
     private Long quotedPremiumVnd;
+    private Long differenceVnd;
+    private OffsetDateTime submittedAt;
 
-    public static EndorsementResult applied(PolicyResponse policy) {
+    public static EndorsementResult pendingReview(UUID endorsementRequestId, Long quotedPremiumVnd,
+                                                   long differenceVnd, long proRatedChargeVnd,
+                                                   OffsetDateTime effectiveDate, OffsetDateTime submittedAt) {
         EndorsementResult r = new EndorsementResult();
-        r.setStatus("applied");
-        r.setPolicy(policy);
-        return r;
-    }
-
-    public static EndorsementResult pendingReview(UUID endorsementRequestId, Long quotedPremiumVnd) {
-        EndorsementResult r = new EndorsementResult();
-        r.setStatus("pending_review");
         r.setEndorsementRequestId(endorsementRequestId);
+        r.setStatus("PENDING_REVIEW");
+        r.setMaterialChange(true);
         r.setQuotedPremiumVnd(quotedPremiumVnd);
+        r.setDifferenceVnd(differenceVnd);
+        r.setEffectiveDate(effectiveDate);
+        r.setSubmittedAt(submittedAt);
         return r;
     }
 }

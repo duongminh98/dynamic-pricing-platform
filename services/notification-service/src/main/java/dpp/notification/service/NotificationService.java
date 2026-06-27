@@ -27,7 +27,8 @@ public class NotificationService {
     /** Event types that should also be delivered via email (R7.2, design 2.2). */
     static final Set<String> EMAIL_EVENT_TYPES = Set.of(
             "PolicyIssued", "PolicyCancelled", "ClaimStatusChanged",
-            "EndorsementApplied", "EndorsementRejected", "PolicyRenewed",
+            "EndorsementSubmitted", "EndorsementApplied", "EndorsementRejected",
+            "EndorsementCancelled", "PolicyRenewed",
             "OrderApproved", "OrderRejected",
             "EndorsementPendingPayment", "EndorsementOverdue",
             "EndorsementCreditIssued", "RefundRequested", "RefundCompleted");
@@ -131,10 +132,12 @@ public class NotificationService {
             case "PolicyCancelled" -> "Your insurance policy has been cancelled";
             case "ClaimStatusChanged" -> "Your claim status has changed";
             case "PolicyRenewed" -> "Your insurance policy has been renewed";
+            case "EndorsementSubmitted" -> "Your endorsement request has been submitted";
             case "EndorsementApplied" -> "Your policy endorsement has been applied";
             case "EndorsementRejected" -> "Your endorsement request has been rejected";
+            case "EndorsementCancelled" -> "Your endorsement request has been cancelled";
             case "EndorsementPendingPayment" -> "Payment required for your endorsement";
-            case "EndorsementOverdue" -> "Your endorsement request has expired";
+            case "EndorsementOverdue" -> "Your endorsement payment has expired";
             case "OrderApproved" -> "Your order has been approved";
             case "OrderRejected" -> "Your order has been rejected";
             case "OrderSubmitted" -> "Your order has been submitted";
