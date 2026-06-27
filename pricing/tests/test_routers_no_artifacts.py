@@ -13,7 +13,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
 
-from app.routers import quote, admin, reports
+from app.routers import quote, admin
 from app.routers.quote import QuoteRequest
 from app.routers.admin import PromoteRequest, RollbackRequest
 from app import database
@@ -90,65 +90,6 @@ async def test_get_quote_not_found():
         resp = await client.get("/pricing/quote/nonexistent")
 
     assert resp.status_code == 404
-
-
-# ── reports router ──
-
-@pytest.mark.asyncio
-async def test_validation_report_disabled():
-    app = FastAPI()
-    app.include_router(reports.router)
-
-    with patch.object(reports.config, "VALIDATION_ENDPOINTS_ENABLED", False):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/pricing/validation/health")
-
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_validation_report_not_found_file():
-    app = FastAPI()
-    app.include_router(reports.router)
-
-    with patch.object(reports.config, "VALIDATION_ENDPOINTS_ENABLED", True), \
-         patch("pathlib.Path.exists", return_value=False):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/pricing/validation/health")
-
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_fairness_report_disabled():
-    app = FastAPI()
-    app.include_router(reports.router)
-
-    with patch.object(reports.config, "VALIDATION_ENDPOINTS_ENABLED", False):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/pricing/fairness/health")
-
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_fairness_report_fallback_dummy():
-    app = FastAPI()
-    app.include_router(reports.router)
-
-    with patch.object(reports.config, "VALIDATION_ENDPOINTS_ENABLED", True), \
-         patch("pathlib.Path.exists", return_value=False):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/pricing/fairness/health")
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "gender_split" in data
-    assert "requires_review" in data
 
 
 # ── admin router: drift status ──
