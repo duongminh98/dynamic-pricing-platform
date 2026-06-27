@@ -43,23 +43,12 @@ public class PolicyController {
 
     @GetMapping("/{id}")
     public PolicyResponse getPolicy(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        Policy p = policyRepository.findById(id)
-                .orElseThrow(() -> new ServiceException(ErrorCode.FORBIDDEN_RESOURCE));
-        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
-        if (!p.getCustomerId().equals(customerId)) {
-            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
-        }
-        return lifecycleService.toResponse(p);
+        return lifecycleService.toResponse(ownedPolicyOr404(id, jwt));
     }
 
     @GetMapping("/{id}/document")
     public PolicyDocumentResponse getDocument(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        Policy p = policyRepository.findById(id)
-                .orElseThrow(() -> new ServiceException(ErrorCode.FORBIDDEN_RESOURCE));
-        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
-        if (!p.getCustomerId().equals(customerId)) {
-            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
-        }
+        ownedPolicyOr404(id, jwt);
         PolicyDocument doc = documentRepository.findLatestByPolicyId(id)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Document not found", null));
         PolicyDocumentResponse resp = new PolicyDocumentResponse();
@@ -107,14 +96,19 @@ public class PolicyController {
 
     @GetMapping("/{id}/exposure-segments")
     public List<ExposureSegmentResponse> exposureSegments(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        Policy p = policyRepository.findById(id)
-                .orElseThrow(() -> new ServiceException(ErrorCode.FORBIDDEN_RESOURCE));
-        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
-        if (!p.getCustomerId().equals(customerId)) {
-            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
-        }
+        ownedPolicyOr404(id, jwt);
         return exposureSegmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(id).stream()
                 .map(this::toSegmentResponse).collect(Collectors.toList());
+    }
+
+    private Policy ownedPolicyOr404(UUID id, Jwt jwt) {
+        Policy p = policyRepository.findById(id)
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null));
+        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
+        if (!p.getCustomerId().equals(customerId)) {
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null);
+        }
+        return p;
     }
 
     private ExposureSegmentResponse toSegmentResponse(ExposureSegment seg) {

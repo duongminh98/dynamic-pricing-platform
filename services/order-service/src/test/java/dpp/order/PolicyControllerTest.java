@@ -109,7 +109,7 @@ class PolicyControllerTest {
                 mock(PolicyDocumentRepository.class), mock(ExposureSegmentRepository.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> controller.getPolicy(jwtFor("other-subject"), policyId));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Test
@@ -122,7 +122,7 @@ class PolicyControllerTest {
                 mock(PolicyDocumentRepository.class), mock(ExposureSegmentRepository.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> controller.getPolicy(jwtFor("subject"), policyId));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Test
@@ -163,7 +163,7 @@ class PolicyControllerTest {
                 mock(PolicyDocumentRepository.class), mock(ExposureSegmentRepository.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> controller.getDocument(jwtFor("other-subject"), policyId));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Test
@@ -279,6 +279,6 @@ class PolicyControllerTest {
                 mock(PolicyDocumentRepository.class), mock(ExposureSegmentRepository.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> controller.exposureSegments(jwtFor("other-subject"), policyId));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 }

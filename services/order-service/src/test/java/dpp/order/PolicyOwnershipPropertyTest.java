@@ -67,7 +67,7 @@ class PolicyOwnershipPropertyTest {
 
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.endorse(policyId, req, "intruder-subject"));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Property(tries = 100)
@@ -83,7 +83,7 @@ class PolicyOwnershipPropertyTest {
 
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.cancel(policyId, req, "intruder-subject"));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Property(tries = 100)
@@ -96,7 +96,7 @@ class PolicyOwnershipPropertyTest {
         PolicyLifecycleService svc = newService(repo);
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.renew(policyId, "intruder-subject"));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Property(tries = 100)
@@ -108,7 +108,7 @@ class PolicyOwnershipPropertyTest {
         PolicyLifecycleService svc = newService(repo);
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.renew(policyId, "some-subject"));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Test

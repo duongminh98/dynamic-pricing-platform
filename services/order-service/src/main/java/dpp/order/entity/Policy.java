@@ -56,6 +56,9 @@ public class Policy {
     @Column(name = "asset_key", length = 255)
     private String assetKey;
 
+    @Column(name = "line", length = 20)
+    private String line;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 }

@@ -1,0 +1,1 @@
+ALTER TABLE policy ADD COLUMN line VARCHAR(20);

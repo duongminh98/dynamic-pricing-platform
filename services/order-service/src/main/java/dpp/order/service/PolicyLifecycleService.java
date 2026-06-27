@@ -238,6 +238,13 @@ public class PolicyLifecycleService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<PolicyResponse> adminListPoliciesPaged(PolicyStatus status, UUID customerId,
+                                                                String line, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.domain.Page<Policy> page = policyRepository.findFiltered(status, customerId, line, pageable);
+        return PageResponse.from(page.map(this::toResponse));
+    }
+
+    @Transactional(readOnly = true)
     public List<PolicyResponse> adminListPoliciesByStatus(PolicyStatus status) {
         return policyRepository.findByStatusOrderByCreatedAtDesc(status)
                 .stream().map(this::toResponse).collect(java.util.stream.Collectors.toList());
@@ -260,6 +267,7 @@ public class PolicyLifecycleService {
         resp.setOrderId(policy.getOrderId());
         resp.setCustomerId(policy.getCustomerId());
         resp.setProductId(policy.getProductId());
+        resp.setLine(policy.getLine());
         resp.setStatus(policy.getStatus());
         resp.setPolicyEffectiveDate(policy.getPolicyEffectiveDate());
         resp.setPolicyExpirationDate(policy.getPolicyExpirationDate());
@@ -767,20 +775,32 @@ public class PolicyLifecycleService {
         doc.setDocumentId(UUID.randomUUID());
         doc.setPolicyId(policyId);
         doc.setVersion(newVersion);
-        Map<String, Object> docContent = new LinkedHashMap<>();
-        docContent.put("policy_id", policyId.toString());
-        docContent.put("version", newVersion);
-        docContent.put("effective_date", eff.toString());
-        docContent.put("coverage_amount_vnd", newCoverage);
-        docContent.put("deductible_vnd", newDeductible);
-        docContent.put("final_premium_vnd", policy.getFinalPremiumVnd());
-        docContent.put("change", change);
+
+        long priorCoverage = prior != null ? prior.getCoverageAmountVnd() : 0L;
+        long priorDeductible = prior != null ? prior.getDeductibleVnd() : 0L;
+        Map<String, Object> structuredChange = new LinkedHashMap<>();
+        if (newCoverage != priorCoverage) {
+            structuredChange.put("coverage_amount_vnd", Map.of("old", priorCoverage, "new", newCoverage));
+        }
+        if (newDeductible != priorDeductible) {
+            structuredChange.put("deductible_vnd", Map.of("old", priorDeductible, "new", newDeductible));
+        }
+        if (premiumNew != premiumOld) {
+            structuredChange.put("premium", Map.of("old", premiumOld, "new", premiumNew));
+        }
+
+        OffsetDateTime issuedAt = OffsetDateTime.now();
+        String docLine = resolveLineFromProductId(policy.getProductId());
+        Map<String, Object> docContent = PolicyDocumentContentBuilder.build(
+                newVersion, policy, docLine,
+                newCoverage, newDeductible,
+                structuredChange.isEmpty() ? null : structuredChange, issuedAt);
         try {
             doc.setContent(objectMapper.writeValueAsString(docContent));
         } catch (Exception e) {
             doc.setContent("{}");
         }
-        doc.setCreatedAt(OffsetDateTime.now());
+        doc.setCreatedAt(issuedAt);
         documentRepository.save(doc);
 
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
@@ -954,10 +974,10 @@ public class PolicyLifecycleService {
 
     private Policy findOwnedPolicy(UUID policyId, String keycloakSubject) {
         Policy policy = policyRepository.findById(policyId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.FORBIDDEN_RESOURCE));
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null));
         UUID customerId = CustomerId.fromSubject(keycloakSubject);
         if (!policy.getCustomerId().equals(customerId)) {
-            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null);
         }
         return policy;
     }
@@ -979,6 +999,7 @@ public class PolicyLifecycleService {
         resp.setOrderId(policy.getOrderId());
         resp.setCustomerId(policy.getCustomerId());
         resp.setProductId(policy.getProductId());
+        resp.setLine(policy.getLine());
         resp.setStatus(policy.getStatus());
         resp.setPolicyEffectiveDate(policy.getPolicyEffectiveDate());
         resp.setPolicyExpirationDate(policy.getPolicyExpirationDate());

@@ -2,6 +2,8 @@ package dpp.order.repository;
 
 import dpp.order.entity.Policy;
 import dpp.order.entity.PolicyStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -19,4 +21,13 @@ public interface PolicyRepository extends JpaRepository<Policy, UUID> {
 
     @Query("SELECT COUNT(p) > 0 FROM Policy p WHERE p.customerId = :customerId AND p.assetKey = :assetKey AND p.status = dpp.order.entity.PolicyStatus.active")
     boolean existsActivePolicy(@Param("customerId") UUID customerId, @Param("assetKey") String assetKey);
+
+    @Query("SELECT p FROM Policy p WHERE " +
+           "(:status IS NULL OR p.status = :status) AND " +
+           "(:customerId IS NULL OR p.customerId = :customerId) AND " +
+           "(:line IS NULL OR p.line = :line)")
+    Page<Policy> findFiltered(@Param("status") PolicyStatus status,
+                              @Param("customerId") UUID customerId,
+                              @Param("line") String line,
+                              Pageable pageable);
 }

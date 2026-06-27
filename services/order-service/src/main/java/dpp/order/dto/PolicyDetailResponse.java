@@ -15,6 +15,7 @@ public class PolicyDetailResponse {
     private UUID orderId;
     private UUID customerId;
     private String productId;
+    private String line;
     private PolicyStatus status;
     private OffsetDateTime policyEffectiveDate;
     private OffsetDateTime policyExpirationDate;

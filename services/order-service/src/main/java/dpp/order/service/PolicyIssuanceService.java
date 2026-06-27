@@ -88,6 +88,7 @@ public class PolicyIssuanceService {
         policy.setPolicyCountPrior(0);
         policy.setFinalPremiumVnd(order.getFinalPremiumVnd());
         policy.setAssetKey(extractAssetKey(order));
+        policy.setLine(order.getLine());
         policy.setCreatedAt(now);
         policyRepository.save(policy);
 
@@ -112,12 +113,11 @@ public class PolicyIssuanceService {
         doc.setDocumentId(UUID.randomUUID());
         doc.setPolicyId(policyId);
         doc.setVersion(1);
-        Map<String, Object> content = new LinkedHashMap<>();
-        content.put("customer_id", order.getCustomerId().toString());
-        content.put("product_id", order.getProductId());
-        content.put("premium_vnd", order.getFinalPremiumVnd());
-        content.put("effective", now.toString());
-        content.put("expiration", expiration.toString());
+        long coverageAmount = order.getCoverageAmountVnd() != null ? order.getCoverageAmountVnd() : 0;
+        long deductible = order.getDeductibleVnd() != null ? order.getDeductibleVnd() : 0;
+        Map<String, Object> content = PolicyDocumentContentBuilder.build(
+                1, policy, order.getLine(),
+                coverageAmount, deductible, null, now);
         try {
             doc.setContent(objectMapper.writeValueAsString(content));
         } catch (Exception e) {
