@@ -390,4 +390,29 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(8_000_000L, payload.get("paid_amount_vnd").asLong());
         assertTrue(payload.has("settled_at"));
     }
+
+    // -- T17: cached quote_id (from FNOL) used at settle without calling order-service --
+    @Test
+    void t17_settleUsesCachedQuoteIdWithoutOrderCall() throws Exception {
+        Claim claim = pendingClaim();
+        UUID claimId = claim.getClaimId();
+        UUID cachedQuoteId = UUID.randomUUID();
+        claim.setQuoteId(cachedQuoteId);
+        when(repo.findById(claimId)).thenReturn(Optional.of(claim));
+        when(orderClient.getExposureSegments(policyId)).thenReturn(List.of(segment(0, 100_000_000, 0)));
+        when(repo.save(any(Claim.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ApproveClaimRequest req = new ApproveClaimRequest();
+        req.setIncurredAmount(10_000_000L);
+        req.setPaidAmount(8_000_000L);
+        req.setPaymentReference("BANK-REF-017");
+        svc.approve(claimId, req);
+
+        ArgumentCaptor<String> eventCaptor = ArgumentCaptor.forClass(String.class);
+        verify(outbox, atLeast(1)).enqueue(eq("ClaimSettled"), eventCaptor.capture());
+        JsonNode payload = om.readTree(eventCaptor.getValue());
+        assertEquals(cachedQuoteId.toString(), payload.get("quote_id").asText());
+        // settle must NOT call order-service when quote_id is already cached on the claim
+        verify(orderClient, never()).getQuoteIdByPolicy(any());
+    }
 }

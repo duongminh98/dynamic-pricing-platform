@@ -72,4 +72,7 @@ public class Claim {
 
     @Column(name = "paid_at")
     private OffsetDateTime paidAt;
+
+    @Column(name = "quote_id")
+    private UUID quoteId;
 }

@@ -12,6 +12,8 @@ import dpp.common.outbox.OutboxPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +28,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class ClaimsService {
+
+    private static final Logger log = LoggerFactory.getLogger(ClaimsService.class);
 
     private final ClaimRepository claimRepository;
     private final OrderClient orderClient;
@@ -63,6 +67,18 @@ public class ClaimsService {
         List<Map<String, Object>> segments = orderClient.getExposureSegments(policyId);
         int segmentSeq = findSegmentSeq(segments, occurrence);
 
+        // Cache quote_id now (order is reachable during FNOL) so ClaimSettled can emit
+        // it later without a settle-time order call that could fail transiently.
+        UUID quoteId = null;
+        try {
+            Map<String, Object> orderInfo = orderClient.getQuoteIdByPolicy(policyId);
+            if (orderInfo != null && orderInfo.get("quote_id") != null) {
+                quoteId = UUID.fromString(String.valueOf(orderInfo.get("quote_id")));
+            }
+        } catch (Exception e) {
+            log.warn("Could not resolve quote_id at FNOL for policy {}: {}", policyId, e.getMessage());
+        }
+
         Claim claim = new Claim();
         claim.setClaimId(UUID.randomUUID());
         claim.setPolicyId(policyId);
@@ -78,6 +94,7 @@ public class ClaimsService {
         claim.setEstimatedCost(request.getEstimatedCost());
         claim.setAttachments(request.getAttachments());
         claim.setCreatedAt(OffsetDateTime.now());
+        claim.setQuoteId(quoteId);
         claim = claimRepository.save(claim);
 
         enqueueClaimSubmitted(claim);
@@ -304,15 +321,21 @@ public class ClaimsService {
     }
 
     private void enqueueClaimSettled(Claim claim) {
-        String quoteId = null;
+        // Prefer the quote_id cached at FNOL; only call order-service as a fallback
+        // for legacy claims created before quote_id caching.
+        String quoteId = claim.getQuoteId() != null ? claim.getQuoteId().toString() : null;
         String line = null;
-        try {
-            Map<String, Object> orderInfo = orderClient.getQuoteIdByPolicy(claim.getPolicyId());
-            if (orderInfo != null) {
-                quoteId = String.valueOf(orderInfo.get("quote_id"));
-                line = orderInfo.get("line") != null ? String.valueOf(orderInfo.get("line")) : null;
+        if (quoteId == null) {
+            try {
+                Map<String, Object> orderInfo = orderClient.getQuoteIdByPolicy(claim.getPolicyId());
+                if (orderInfo != null) {
+                    quoteId = orderInfo.get("quote_id") != null ? String.valueOf(orderInfo.get("quote_id")) : null;
+                    line = orderInfo.get("line") != null ? String.valueOf(orderInfo.get("line")) : null;
+                }
+            } catch (Exception e) {
+                log.warn("ClaimSettled for claim {} emitted without quote_id (order lookup failed): {}",
+                        claim.getClaimId(), e.getMessage());
             }
-        } catch (Exception ignored) {
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("claim_id", claim.getClaimId().toString());

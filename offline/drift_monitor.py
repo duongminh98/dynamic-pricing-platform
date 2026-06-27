@@ -346,7 +346,7 @@ def load_outcomes(line: str, window_days: int) -> list[dict]:
                            q.pure_premium_vnd, co.settled_at
                     FROM claim_outcome co
                     LEFT JOIN quote q ON co.quote_id = q.quote_id
-                    WHERE co.line = %s
+                    WHERE COALESCE(q.line, co.line) = %s
                       AND co.settled_at >= NOW() - INTERVAL '%s days'
                     ORDER BY co.settled_at DESC
                     """,
