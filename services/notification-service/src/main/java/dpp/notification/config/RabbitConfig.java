@@ -22,6 +22,9 @@ public class RabbitConfig {
     @Bean public Queue claimChangedQueue() { return quorumQueue("claim.status.changed.queue","ClaimStatusChanged"); }
     @Bean public Binding claimChangedBinding() { return BindingBuilder.bind(claimChangedQueue()).to(eventsExchange()).with("ClaimStatusChanged"); }
 
+    @Bean public Queue claimSubmittedQueue() { return quorumQueue("claim.submitted.queue","ClaimSubmitted"); }
+    @Bean public Binding claimSubmittedBinding() { return BindingBuilder.bind(claimSubmittedQueue()).to(eventsExchange()).with("ClaimSubmitted"); }
+
     @Bean public Queue endorsementQueue() { return quorumQueue("endorsement.applied.queue","EndorsementApplied"); }
     @Bean public Binding endorsementBinding() { return BindingBuilder.bind(endorsementQueue()).to(eventsExchange()).with("EndorsementApplied"); }
 

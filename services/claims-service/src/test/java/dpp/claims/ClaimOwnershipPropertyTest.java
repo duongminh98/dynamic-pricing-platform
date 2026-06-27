@@ -10,8 +10,12 @@ import dpp.common.outbox.OutboxPublisher;
 import net.jqwik.api.*;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -53,7 +57,7 @@ class ClaimOwnershipPropertyTest {
         ClaimsService svc = newService(repo);
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.getClaim("intruder-subject", claimId, false));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
     @Property(tries = 100)
@@ -88,12 +92,13 @@ class ClaimOwnershipPropertyTest {
         String subject = "owner-subject";
         UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
         ClaimRepository repo = mock(ClaimRepository.class);
-        when(repo.findByCustomerIdOrderByCreatedAtDesc(customerId)).thenReturn(java.util.List.of());
+        Page<Claim> emptyPage = new PageImpl<>(List.of());
+        when(repo.findByCustomerIdOrderByCreatedAtDesc(eq(customerId), any(PageRequest.class))).thenReturn(emptyPage);
 
         ClaimsService svc = newService(repo);
-        svc.myClaims(subject);
+        svc.myClaims(subject, 0, 20);
 
-        verify(repo, times(1)).findByCustomerIdOrderByCreatedAtDesc(customerId);
+        verify(repo, times(1)).findByCustomerIdOrderByCreatedAtDesc(eq(customerId), any(PageRequest.class));
     }
 
     @Property(tries = 100)
@@ -124,6 +129,6 @@ class ClaimOwnershipPropertyTest {
         ClaimsService svc = newService(repo);
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.getClaim("intruder-subject", claimId, false));
-        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 }

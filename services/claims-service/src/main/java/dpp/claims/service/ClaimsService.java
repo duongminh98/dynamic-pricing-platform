@@ -4,10 +4,14 @@ import dpp.claims.client.OrderClient;
 import dpp.claims.dto.*;
 import dpp.claims.entity.*;
 import dpp.claims.repository.ClaimRepository;
+import dpp.common.dto.PageResponse;
 import dpp.common.security.CustomerId;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,7 +46,12 @@ public class ClaimsService {
         UUID policyOwner = UUID.fromString(String.valueOf(policy.get("customer_id")));
         UUID customerId = CustomerId.fromSubject(keycloakSubject);
         if (!policyOwner.equals(customerId)) {
-            throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null);
+        }
+
+        String policyStatus = String.valueOf(policy.get("status"));
+        if (!"active".equalsIgnoreCase(policyStatus)) {
+            throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
 
         OffsetDateTime occurrence = request.getOccurrenceDate();
@@ -70,23 +79,17 @@ public class ClaimsService {
         claim.setAttachments(request.getAttachments());
         claim.setCreatedAt(OffsetDateTime.now());
         claim = claimRepository.save(claim);
+
+        enqueueClaimSubmitted(claim);
         return toResponse(claim);
     }
 
-    /**
-     * Resolve the exposure segment covering the occurrence date and return its
-     * sequence (R27.3). The occurrence must fall within some segment window
-     * [segment_start, segment_end]; otherwise it is outside coverage.
-     */
     private int findSegmentSeq(List<Map<String, Object>> segments, OffsetDateTime occurrence) {
         int last = segments.size() - 1;
         for (int i = 0; i < segments.size(); i++) {
             Map<String, Object> seg = segments.get(i);
             OffsetDateTime start = OffsetDateTime.parse(String.valueOf(seg.get("segment_start")));
             OffsetDateTime end = OffsetDateTime.parse(String.valueOf(seg.get("segment_end")));
-            // A6: half-open [start, end) for non-final segments; inclusive for the last segment
-            // or when segment_end is null. This ensures a claim on the effective date of a
-            // new endorsement resolves to the new segment, not the prior one.
             if (i == last || end == null) {
                 if (!occurrence.isBefore(start) && !occurrence.isAfter(end)) {
                     return ((Number) seg.get("exposure_segment_seq")).intValue();
@@ -100,10 +103,6 @@ public class ClaimsService {
         throw new ServiceException(ErrorCode.OCCURRENCE_OUT_OF_COVERAGE);
     }
 
-    /**
-     * Coverage minus deductible cap for the segment covering the claim occurrence
-     * (R28.5). Returns the max payable amount the approver must not exceed.
-     */
     private long payoutCapForClaim(Claim claim) {
         List<Map<String, Object>> segments = orderClient.getExposureSegments(claim.getPolicyId());
         for (Map<String, Object> seg : segments) {
@@ -129,25 +128,42 @@ public class ClaimsService {
         }
         long cap = payoutCapForClaim(claim);
         if (paid > cap) {
-            throw new ServiceException(ErrorCode.BAD_REQUEST,
-                    "Paid amount exceeds coverage minus deductible", Map.of("paid", paid, "cap", cap));
+            throw new ServiceException(ErrorCode.PAID_AMOUNT_EXCEEDS_REMAINING_COVERAGE,
+                    "Paid amount exceeds coverage minus deductible",
+                    Map.of("paid_amount_vnd", paid, "segment_cap_vnd", cap));
+        }
+        long alreadyPaid = claimRepository.sumApprovedPaidOnSegment(
+                claim.getPolicyId(), claim.getExposureSegmentSeq(), ClaimStatus.approved, claimId);
+        long remainingCap = Math.max(0L, cap - alreadyPaid);
+        if (paid > remainingCap) {
+            throw new ServiceException(ErrorCode.PAID_AMOUNT_EXCEEDS_REMAINING_COVERAGE,
+                    "Paid amount exceeds remaining aggregate coverage",
+                    Map.of("paid_amount_vnd", paid, "remaining_coverage_vnd", remainingCap,
+                           "segment_cap_vnd", cap, "already_paid_vnd", alreadyPaid));
         }
         claim.setIncurredAmount(incurred);
         claim.setPaidAmount(paid);
         claim.setClaimStatus(ClaimStatus.approved);
+        if (request.getAdminNote() != null) {
+            claim.setAdminNote(request.getAdminNote());
+        }
         claim = claimRepository.save(claim);
         enqueueClaimChanged(claim);
         return toResponse(claim);
     }
 
     @Transactional
-    public ClaimResponse reject(UUID claimId) {
+    public ClaimResponse reject(UUID claimId, RejectClaimRequest request) {
         Claim claim = findClaim(claimId);
         if (claim.getClaimStatus() != ClaimStatus.pending) {
             throw new ServiceException(ErrorCode.INVALID_CLAIM_TRANSITION);
         }
+        if (request.getReason() == null || request.getReason().isBlank()) {
+            throw new ServiceException(ErrorCode.BAD_REQUEST, "Reject reason is required", null);
+        }
         claim.setPaidAmount(0);
         claim.setClaimStatus(ClaimStatus.rejected);
+        claim.setAdminNote(request.getReason());
         claim = claimRepository.save(claim);
         enqueueClaimChanged(claim);
         return toResponse(claim);
@@ -156,17 +172,19 @@ public class ClaimsService {
     @Transactional
     public ClaimResponse misrepresentation(UUID claimId, MisrepresentationRequest request) {
         Claim claim = findClaim(claimId);
-        // R28.7: a misrepresentation sanction may only be applied to a claim in a valid
-        // state. A claim must be pending or approved; a rejected claim cannot be further
-        // sanctioned (invalid transition).
         if (claim.getClaimStatus() != ClaimStatus.pending && claim.getClaimStatus() != ClaimStatus.approved) {
             throw new ServiceException(ErrorCode.INVALID_CLAIM_TRANSITION);
         }
         MisrepresentationSanction sanction = parseSanction(request.getSanction());
         claim.setMisrepresentationSanction(sanction);
+        String reasonsJoined = String.join("; ", request.getReasons());
+        claim.setAdminNote(reasonsJoined);
 
         switch (sanction) {
-            case reject -> claim.setPaidAmount(0);
+            case reject -> {
+                claim.setPaidAmount(0);
+                claim.setClaimStatus(ClaimStatus.rejected);
+            }
             case proportional -> {
                 Long paidPremium = request.getPaidPremium();
                 Long shouldPremium = request.getShouldPremium();
@@ -177,6 +195,15 @@ public class ClaimsService {
                 double ratio = Math.min(1.0, (double) paidPremium / shouldPremium);
                 long adjusted = Math.round(claim.getPaidAmount() * ratio);
                 claim.setPaidAmount(adjusted);
+                if (claim.getClaimStatus() == ClaimStatus.approved) {
+                    long cap = payoutCapForClaim(claim);
+                    long alreadyPaid = claimRepository.sumApprovedPaidOnSegment(
+                            claim.getPolicyId(), claim.getExposureSegmentSeq(), ClaimStatus.approved, claimId);
+                    long remainingCap = Math.max(0L, cap - alreadyPaid);
+                    if (adjusted > remainingCap) {
+                        claim.setPaidAmount(remainingCap);
+                    }
+                }
             }
             case cancel -> {
                 claim.setPaidAmount(0);
@@ -198,10 +225,11 @@ public class ClaimsService {
     }
 
     @Transactional(readOnly = true)
-    public List<ClaimResponse> myClaims(String keycloakSubject) {
+    public PageResponse<ClaimResponse> myClaims(String keycloakSubject, int page, int size) {
         UUID customerId = CustomerId.fromSubject(keycloakSubject);
-        return claimRepository.findByCustomerIdOrderByCreatedAtDesc(customerId).stream()
-                .map(this::toResponse).collect(Collectors.toList());
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        Page<Claim> claims = claimRepository.findByCustomerIdOrderByCreatedAtDesc(customerId, pageable);
+        return PageResponse.from(claims.map(this::toResponse));
     }
 
     @Transactional(readOnly = true)
@@ -210,15 +238,38 @@ public class ClaimsService {
         if (!isAdmin) {
             UUID customerId = CustomerId.fromSubject(keycloakSubject);
             if (!claim.getCustomerId().equals(customerId)) {
-                throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
+                throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Claim not found", null);
             }
         }
         return toResponse(claim);
     }
 
+    @Transactional(readOnly = true)
+    public PageResponse<ClaimResponse> adminListClaims(ClaimStatus status, UUID customerId, UUID policyId,
+                                                        int page, int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
+        Page<Claim> claims = claimRepository.findAdminFiltered(status, customerId, policyId, pageable);
+        return PageResponse.from(claims.map(this::toResponse));
+    }
+
     private Claim findClaim(UUID claimId) {
         return claimRepository.findById(claimId)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Claim not found", null));
+    }
+
+    private void enqueueClaimSubmitted(Claim claim) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("claim_id", claim.getClaimId().toString());
+        payload.put("policy_id", claim.getPolicyId().toString());
+        payload.put("customer_id", claim.getCustomerId().toString());
+        payload.put("loss_type", claim.getLossType());
+        payload.put("occurrence_date", claim.getOccurrenceDate().toString());
+        payload.put("estimated_cost", claim.getEstimatedCost() != null ? claim.getEstimatedCost() : 0);
+        try {
+            outboxPublisher.enqueue("ClaimSubmitted", objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to enqueue ClaimSubmitted", e);
+        }
     }
 
     private void enqueueClaimChanged(Claim claim) {
@@ -227,7 +278,14 @@ public class ClaimsService {
         payload.put("policy_id", claim.getPolicyId().toString());
         payload.put("customer_id", claim.getCustomerId().toString());
         payload.put("status", claim.getClaimStatus().name());
+        payload.put("incurred_amount_vnd", claim.getIncurredAmount());
         payload.put("paid_amount_vnd", claim.getPaidAmount());
+        if (claim.getAdminNote() != null) {
+            payload.put("admin_note", claim.getAdminNote());
+        }
+        if (claim.getMisrepresentationSanction() != null) {
+            payload.put("misrepresentation_sanction", claim.getMisrepresentationSanction().name());
+        }
         try {
             outboxPublisher.enqueue("ClaimStatusChanged", objectMapper.writeValueAsString(payload));
         } catch (Exception e) {
@@ -252,18 +310,7 @@ public class ClaimsService {
         resp.setEstimatedCost(claim.getEstimatedCost());
         resp.setAttachments(claim.getAttachments());
         resp.setCreatedAt(claim.getCreatedAt());
+        resp.setAdminNote(claim.getAdminNote());
         return resp;
-    }
-
-    @Transactional(readOnly = true)
-    public List<ClaimResponse> adminListAllClaims() {
-        return claimRepository.findAllByOrderByCreatedAtDesc().stream()
-                .map(this::toResponse).collect(Collectors.toList());
-    }
-
-    @Transactional(readOnly = true)
-    public List<ClaimResponse> adminListClaimsByStatus(ClaimStatus status) {
-        return claimRepository.findByClaimStatusOrderByCreatedAtDesc(status).stream()
-                .map(this::toResponse).collect(Collectors.toList());
     }
 }

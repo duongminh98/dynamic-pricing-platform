@@ -39,6 +39,7 @@ class SegmentBoundaryClaimTest {
     private Map<String, Object> policyMap(UUID customerId) {
         Map<String, Object> policy = new HashMap<>();
         policy.put("customer_id", customerId.toString());
+        policy.put("status", "active");
         return policy;
     }
 

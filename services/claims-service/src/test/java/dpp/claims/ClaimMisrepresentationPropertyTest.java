@@ -41,6 +41,7 @@ class ClaimMisrepresentationPropertyTest {
     }
 
     private ClaimsService newService(ClaimRepository repo) {
+        when(repo.sumApprovedPaidOnSegment(any(), anyInt(), any(), any())).thenReturn(0L);
         return new ClaimsService(repo, mock(dpp.claims.client.OrderClient.class), mock(OutboxPublisher.class));
     }
 

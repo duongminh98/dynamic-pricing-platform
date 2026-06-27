@@ -52,6 +52,7 @@ public enum ErrorCode {
     // ── Claims (R27, R28) ──
     INVALID_CLAIM_TRANSITION(409, "Invalid claim status transition"),
     OCCURRENCE_OUT_OF_COVERAGE(400, "Occurrence date outside coverage period"),
+    PAID_AMOUNT_EXCEEDS_REMAINING_COVERAGE(400, "Paid amount exceeds remaining coverage"),
 
     // ── Overload (R17.5) ──
     SERVICE_OVERLOADED(503, "Service overloaded"),

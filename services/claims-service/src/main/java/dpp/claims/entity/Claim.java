@@ -63,4 +63,7 @@ public class Claim {
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
+
+    @Column(name = "admin_note", length = 2000)
+    private String adminNote;
 }

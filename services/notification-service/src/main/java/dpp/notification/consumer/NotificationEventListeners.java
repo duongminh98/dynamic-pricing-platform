@@ -32,6 +32,11 @@ public class NotificationEventListeners {
         handle(msg, eventId, "ClaimStatusChanged", this::buildClaimChangedMessage);
     }
 
+    @RabbitListener(queues = "claim.submitted.queue")
+    public void onClaimSubmitted(@Payload String msg, @Header(name = "X-Event-Id", required = false) String eventId) {
+        handle(msg, eventId, "ClaimSubmitted", this::buildClaimSubmittedMessage);
+    }
+
     @RabbitListener(queues = "endorsement.applied.queue")
     public void onEndorsement(@Payload String msg, @Header(name = "X-Event-Id", required = false) String eventId) {
         handle(msg, eventId, "EndorsementApplied", this::buildEndorsementAppliedMessage);
@@ -135,13 +140,49 @@ public class NotificationEventListeners {
 
     private String buildClaimChangedMessage(JsonNode n) {
         String claimId = text(n, "claim_id");
+        String policyId = text(n, "policy_id");
         String status = text(n, "status");
         String paidAmount = text(n, "paid_amount_vnd");
+        String adminNote = text(n, "admin_note");
+        String sanction = text(n, "misrepresentation_sanction");
         StringBuilder sb = new StringBuilder();
-        sb.append("Your claim status has changed.");
-        if (claimId != null) sb.append(" Claim ID: ").append(claimId).append(".");
-        if (status != null) sb.append(" New status: ").append(status).append(".");
-        if (paidAmount != null) sb.append(" Paid amount: ").append(formatVnd(paidAmount)).append(" VND.");
+        if (sanction != null && !sanction.isEmpty()) {
+            sb.append("A misrepresentation sanction was applied to claim ").append(claimId);
+            if (policyId != null) sb.append(" for policy ").append(policyId);
+            sb.append(". Sanction: ").append(sanction).append(".");
+            if (paidAmount != null) sb.append(" Updated paid amount: ").append(formatVnd(paidAmount)).append(" VND.");
+            if (adminNote != null && !adminNote.isEmpty()) sb.append(" Reason: ").append(adminNote).append(".");
+        } else if ("approved".equalsIgnoreCase(status)) {
+            sb.append("Your claim ").append(claimId);
+            if (policyId != null) sb.append(" for policy ").append(policyId);
+            sb.append(" has been approved.");
+            if (paidAmount != null) sb.append(" Paid amount: ").append(formatVnd(paidAmount)).append(" VND.");
+            if (adminNote != null && !adminNote.isEmpty()) sb.append(" Note: ").append(adminNote).append(".");
+        } else if ("rejected".equalsIgnoreCase(status)) {
+            sb.append("Your claim ").append(claimId);
+            if (policyId != null) sb.append(" for policy ").append(policyId);
+            sb.append(" has been rejected.");
+            if (adminNote != null && !adminNote.isEmpty()) sb.append(" Reason: ").append(adminNote).append(".");
+        } else {
+            sb.append("Your claim status has changed.");
+            if (claimId != null) sb.append(" Claim ID: ").append(claimId).append(".");
+            if (status != null) sb.append(" New status: ").append(status).append(".");
+            if (paidAmount != null) sb.append(" Paid amount: ").append(formatVnd(paidAmount)).append(" VND.");
+        }
+        return sb.toString();
+    }
+
+    private String buildClaimSubmittedMessage(JsonNode n) {
+        String claimId = text(n, "claim_id");
+        String policyId = text(n, "policy_id");
+        String lossType = text(n, "loss_type");
+        String estimatedCost = text(n, "estimated_cost");
+        StringBuilder sb = new StringBuilder();
+        sb.append("Your claim ").append(claimId);
+        if (policyId != null) sb.append(" for policy ").append(policyId);
+        sb.append(" has been submitted.");
+        if (lossType != null) sb.append(" Loss type: ").append(lossType).append(".");
+        if (estimatedCost != null) sb.append(" Estimated cost: ").append(formatVnd(estimatedCost)).append(" VND.");
         return sb.toString();
     }
 

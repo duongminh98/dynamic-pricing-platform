@@ -2,6 +2,7 @@ package dpp.claims;
 
 import dpp.claims.dto.ApproveClaimRequest;
 import dpp.claims.dto.ClaimResponse;
+import dpp.claims.dto.RejectClaimRequest;
 import dpp.claims.entity.Claim;
 import dpp.claims.entity.ClaimStatus;
 import dpp.claims.repository.ClaimRepository;
@@ -54,6 +55,7 @@ class ClaimPayoutPropertyTest {
         seg.put("coverage_amount_vnd", coverageVnd);
         seg.put("deductible_vnd", deductibleVnd);
         when(orderClient.getExposureSegments(any(UUID.class))).thenReturn(List.of(seg));
+        when(repo.sumApprovedPaidOnSegment(any(), anyInt(), any(), any())).thenReturn(0L);
         return new ClaimsService(repo, orderClient, mock(OutboxPublisher.class));
     }
 
@@ -126,7 +128,9 @@ class ClaimPayoutPropertyTest {
         when(repo.save(any(Claim.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ClaimsService svc = newService(repo);
-        ClaimResponse resp = svc.reject(claimId);
+        RejectClaimRequest req = new RejectClaimRequest();
+        req.setReason("Not covered");
+        ClaimResponse resp = svc.reject(claimId, req);
 
         assertEquals(ClaimStatus.rejected, resp.getClaimStatus());
         assertEquals(0, resp.getPaidAmount());
@@ -166,7 +170,7 @@ class ClaimPayoutPropertyTest {
         req.setIncurredAmount(incurred);
         req.setPaidAmount(paid);
         ServiceException ex = assertThrows(ServiceException.class, () -> svc.approve(claimId, req));
-        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
+        assertEquals(ErrorCode.PAID_AMOUNT_EXCEEDS_REMAINING_COVERAGE, ex.getErrorCode());
     }
 
     @Property(tries = 100)

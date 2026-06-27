@@ -27,4 +27,5 @@ public class ClaimResponse {
     private Long estimatedCost;
     private List<String> attachments;
     private OffsetDateTime createdAt;
+    private String adminNote;
 }
