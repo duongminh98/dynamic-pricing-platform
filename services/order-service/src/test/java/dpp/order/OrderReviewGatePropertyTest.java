@@ -56,7 +56,7 @@ class OrderReviewGatePropertyTest {
 
         assertEquals(OrderStatus.PENDING_PAYMENT, resp.getStatus());
         assertEquals(ReviewDecision.APPROVE, resp.getReviewDecision());
-        verify(billing, times(1)).createInvoice(eq(orderId), isNull(), eq(premium));
+        verify(billing, never()).createInvoice(eq(orderId), isNull(), eq(premium));
     }
 
     @Property(tries = 100)

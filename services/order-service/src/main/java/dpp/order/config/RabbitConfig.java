@@ -26,4 +26,19 @@ public class RabbitConfig {
     public Binding invoicePaidBinding() {
         return BindingBuilder.bind(invoicePaidQueue()).to(eventsExchange()).with("InvoicePaid");
     }
+
+    @Bean
+    public Queue invoiceCreatedQueue() {
+        return QueueBuilder.durable("invoice.created.order.queue")
+                .withArgument("x-queue-type", "quorum")
+                .withArgument("x-dead-letter-exchange", "platform.events.dlx")
+                .withArgument("x-dead-letter-routing-key", "InvoiceCreated")
+                .withArgument("x-delivery-limit", 3)
+                .build();
+    }
+
+    @Bean
+    public Binding invoiceCreatedBinding() {
+        return BindingBuilder.bind(invoiceCreatedQueue()).to(eventsExchange()).with("InvoiceCreated");
+    }
 }

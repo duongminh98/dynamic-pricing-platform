@@ -107,4 +107,82 @@ class BillingEventListenersTest {
         assertThrows(RuntimeException.class, () -> listener.onRenewal("bad", null));
         verify(billingService, never()).createInvoice(any());
     }
+
+    @Test
+    void onOrderApprovedCreatesInvoice() {
+        AdjustmentService adjustmentService = mock(AdjustmentService.class);
+        BillingService billingService = mock(BillingService.class);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
+
+        UUID orderId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        String message = "{\"order_id\":\"" + orderId + "\",\"customer_id\":\"" + customerId + "\","
+                + "\"final_premium_vnd\":500000}";
+
+        InvoiceResponse mockResp = new InvoiceResponse();
+        mockResp.setStatus(InvoiceStatus.unpaid);
+        when(billingService.createInvoice(any(CreateInvoiceRequest.class))).thenReturn(mockResp);
+
+        listener.onOrderApproved(message, UUID.randomUUID().toString());
+
+        verify(billingService, times(1)).createInvoice(argThat(req ->
+                req.getOrderId().equals(orderId) &&
+                req.getAmountVnd() == 500_000L &&
+                req.getCustomerId().equals(customerId) &&
+                req.getEndorsementRequestId() == null &&
+                req.getPolicyId() == null));
+    }
+
+    @Test
+    void onOrderApprovedThrowsOnBadMessage() {
+        AdjustmentService adjustmentService = mock(AdjustmentService.class);
+        BillingService billingService = mock(BillingService.class);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
+
+        assertThrows(RuntimeException.class, () -> listener.onOrderApproved("bad", null));
+        verify(billingService, never()).createInvoice(any());
+    }
+
+    @Test
+    void onEndorsementPendingPaymentCreatesInvoice() {
+        AdjustmentService adjustmentService = mock(AdjustmentService.class);
+        BillingService billingService = mock(BillingService.class);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
+
+        UUID orderId = UUID.randomUUID();
+        UUID policyId = UUID.randomUUID();
+        UUID endorsementRequestId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        String dueDate = "2025-12-31T23:59:59+07:00";
+        String message = "{\"order_id\":\"" + orderId + "\",\"policy_id\":\"" + policyId + "\","
+                + "\"endorsement_request_id\":\"" + endorsementRequestId + "\","
+                + "\"customer_id\":\"" + customerId + "\","
+                + "\"additional_charge_vnd\":1200000,"
+                + "\"due_date\":\"" + dueDate + "\","
+                + "\"invoice_id\":\"\"}";
+
+        InvoiceResponse mockResp = new InvoiceResponse();
+        mockResp.setStatus(InvoiceStatus.unpaid);
+        when(billingService.createInvoice(any(CreateInvoiceRequest.class))).thenReturn(mockResp);
+
+        listener.onEndorsementPendingPayment(message, UUID.randomUUID().toString());
+
+        verify(billingService, times(1)).createInvoice(argThat(req ->
+                req.getOrderId().equals(orderId) &&
+                req.getPolicyId().equals(policyId) &&
+                req.getEndorsementRequestId().equals(endorsementRequestId) &&
+                req.getCustomerId().equals(customerId) &&
+                req.getAmountVnd() == 1_200_000L &&
+                req.getDueDate() != null));
+    }
+
+    @Test
+    void onEndorsementPendingPaymentThrowsOnBadMessage() {
+        AdjustmentService adjustmentService = mock(AdjustmentService.class);
+        BillingService billingService = mock(BillingService.class);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
+
+        assertThrows(RuntimeException.class, () -> listener.onEndorsementPendingPayment("bad", null));
+        verify(billingService, never()).createInvoice(any());
+    }
 }

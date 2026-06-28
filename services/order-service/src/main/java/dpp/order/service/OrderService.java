@@ -153,12 +153,10 @@ public class OrderService {
         if (order.getStatus() != OrderStatus.PENDING_REVIEW) {
             throw new ServiceException(ErrorCode.ORDER_NOT_APPROVED);
         }
-        // Invoice creation: cross-service REST, OUTSIDE the DB transaction (billing dedups on order_id).
-        Map<String, Object> invoiceResp = billingClient.createInvoice(order.getOrderId(), null, order.getFinalPremiumVnd());
-        UUID invoiceId = invoiceResp != null && invoiceResp.get("invoice_id") != null
-                ? UUID.fromString(String.valueOf(invoiceResp.get("invoice_id"))) : null;
-        // DB write + outbox enqueue in the same transaction (atomic).
-        OrderEntity approved = approvalTxService.approveWithInvoice(orderId, reviewer, invoiceId);
+        // Invoice creation is now event-driven: billing consumes OrderApproved and
+        // creates the invoice asynchronously. OrderApproved carries order_id,
+        // customer_id, final_premium_vnd — billing dedups on order_id (Branch C).
+        OrderEntity approved = approvalTxService.approveWithInvoice(orderId, reviewer, null);
         return toResponse(approved);
     }
 

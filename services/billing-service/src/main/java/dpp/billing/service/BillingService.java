@@ -58,9 +58,18 @@ public class BillingService {
      */
     @Transactional
     public InvoiceResponse createInvoice(CreateInvoiceRequest request) {
-        // Endorsement adjustment invoices are not idempotent on order_id — multiple
-        // endorsements can create multiple invoices for the same order/policy.
+        // Endorsement adjustment invoices — idempotent on endorsement_request_id.
+        // Multiple events may be delivered (reconciliation re-enqueue, redelivery);
+        // dedup prevents duplicate invoices for the same endorsement.
         if (request.getEndorsementRequestId() != null) {
+            List<Invoice> existing = invoiceRepository
+                    .findByEndorsementRequestIdOrderByCreatedAtDesc(request.getEndorsementRequestId());
+            for (Invoice inv : existing) {
+                if (inv.getStatus() != InvoiceStatus.voided) {
+                    enqueueInvoiceCreated(inv);
+                    return toResponse(inv);
+                }
+            }
             Invoice invoice = new Invoice();
             invoice.setInvoiceId(UUID.randomUUID());
             invoice.setOrderId(request.getOrderId());
@@ -90,6 +99,7 @@ public class BillingService {
                     enqueueInvoicePaid(invoice);
                 }
             }
+            enqueueInvoiceCreated(invoice);
             return toResponse(invoice);
         }
         // Renewal invoices carry a policyId — idempotent on policyId so each renewal
@@ -129,7 +139,10 @@ public class BillingService {
                     });
         }
         return invoiceRepository.findByOrderId(request.getOrderId())
-                .map(this::toResponse)
+                .map(inv -> {
+                    enqueueInvoiceCreated(inv);
+                    return toResponse(inv);
+                })
                 .orElseGet(() -> {
                     Invoice invoice = new Invoice();
                     invoice.setInvoiceId(UUID.randomUUID());
@@ -138,7 +151,9 @@ public class BillingService {
                     invoice.setAmountVnd(request.getAmountVnd());
                     invoice.setStatus(InvoiceStatus.unpaid);
                     invoice.setCreatedAt(OffsetDateTime.now());
-                    return toResponse(invoiceRepository.save(invoice));
+                    invoice = invoiceRepository.save(invoice);
+                    enqueueInvoiceCreated(invoice);
+                    return toResponse(invoice);
                 });
     }
 
@@ -323,6 +338,24 @@ public class BillingService {
                 invoice.setStatus(InvoiceStatus.voided);
                 invoiceRepository.save(invoice);
             }
+        }
+    }
+
+    private void enqueueInvoiceCreated(Invoice invoice) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("invoice_id", invoice.getInvoiceId());
+        payload.put("order_id", invoice.getOrderId());
+        if (invoice.getPolicyId() != null) {
+            payload.put("policy_id", invoice.getPolicyId());
+        }
+        if (invoice.getEndorsementRequestId() != null) {
+            payload.put("endorsement_request_id", invoice.getEndorsementRequestId());
+        }
+        payload.put("amount_vnd", invoice.getAmountVnd());
+        try {
+            outboxPublisher.enqueue("InvoiceCreated", objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to enqueue InvoiceCreated event", e);
         }
     }
 

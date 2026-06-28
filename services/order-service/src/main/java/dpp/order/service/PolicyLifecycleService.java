@@ -522,38 +522,33 @@ public class PolicyLifecycleService {
             // Premium increase (AP): calculate pro-rata additional charge.
             long additionalCharge = Math.round((quotedPremium - currentPremium) * fraction);
 
-            // Net-off: apply available credits first via billing service.
+            // Net-off quote: apply available credits first via billing service (quote only, no persistence).
+            // Used solely for the waive decision (netDue < MIN_SETTLE_AMOUNT → waive).
+            // The actual credit application happens in billing when the invoice is created.
             Map<String, Object> creditResp = billingClient.applyCreditAndQuote(
                     policy.getCustomerId(), additionalCharge);
-            long creditApplied = creditResp != null && creditResp.get("credit_applied_vnd") != null
-                    ? Long.parseLong(String.valueOf(creditResp.get("credit_applied_vnd"))) : 0;
             long netDue = creditResp != null && creditResp.get("net_due_vnd") != null
                     ? Long.parseLong(String.valueOf(creditResp.get("net_due_vnd"))) : additionalCharge;
 
             if (netDue >= MIN_SETTLE_AMOUNT) {
-                // Create invoice for the net amount due after credit application.
+                // Invoice creation is now event-driven: billing consumes EndorsementPendingPayment
+                // and creates the invoice asynchronously with the GROSS additional charge.
+                // Billing applies credits for real via applyCreditsToInvoice.
                 OffsetDateTime dueDate = OffsetDateTime.now().plusDays(ENDORSEMENT_PAYMENT_DUE_DAYS);
-                Map<String, Object> invoiceResp = billingClient.createEndorsementInvoice(
-                        policy.getOrderId(), policy.getPolicyId(), netDue,
-                        endorsementRequestId, dueDate, policy.getCustomerId());
-                UUID invoiceId = null;
-                if (invoiceResp != null && invoiceResp.get("invoice_id") != null) {
-                    invoiceId = UUID.fromString(String.valueOf(invoiceResp.get("invoice_id")));
-                }
-
                 req.setStatus(EndorsementStatus.APPROVED_PENDING_PAYMENT);
                 req.setReviewedBy(reviewer);
                 req.setReviewedAt(OffsetDateTime.now());
-                req.setInvoiceId(invoiceId);
-                req.setDueDate(OffsetDateTime.now().plusDays(ENDORSEMENT_PAYMENT_DUE_DAYS));
+                req.setInvoiceId(null);
+                req.setDueDate(dueDate);
                 endorsementRequestRepository.save(req);
 
                 enqueueEvent("EndorsementPendingPayment", policy.getPolicyId(), Map.of(
                         "customer_id", policy.getCustomerId().toString(),
                         "endorsement_request_id", endorsementRequestId.toString(),
-                        "invoice_id", invoiceId != null ? invoiceId.toString() : "",
-                        "additional_charge_vnd", netDue,
-                        "due_date", req.getDueDate() != null ? req.getDueDate().toString() : ""));
+                        "invoice_id", "",
+                        "additional_charge_vnd", additionalCharge,
+                        "due_date", dueDate.toString(),
+                        "order_id", policy.getOrderId().toString()));
             } else {
                 // Net due below threshold: waive, apply endorsement immediately.
                 applyEndorsement(policy, change, req.getEffectiveDate(), true, quotedPremium);
@@ -633,18 +628,22 @@ public class PolicyLifecycleService {
         long additionalCharge = Math.round((quotedPremium - currentPremium) * fraction);
 
         OffsetDateTime newDueDate = OffsetDateTime.now().plusDays(extraDays);
-        Map<String, Object> invoiceResp = billingClient.createEndorsementInvoice(
-                policy.getOrderId(), policy.getPolicyId(), additionalCharge,
-                endorsementRequestId, newDueDate, policy.getCustomerId());
-        UUID newInvoiceId = null;
-        if (invoiceResp != null && invoiceResp.get("invoice_id") != null) {
-            newInvoiceId = UUID.fromString(String.valueOf(invoiceResp.get("invoice_id")));
-        }
 
+        // Invoice creation is now event-driven: billing consumes EndorsementPendingPayment
+        // and creates the invoice asynchronously with the GROSS additional charge.
         req.setStatus(EndorsementStatus.APPROVED_PENDING_PAYMENT);
-        req.setInvoiceId(newInvoiceId);
+        req.setInvoiceId(null);
         req.setDueDate(newDueDate);
         endorsementRequestRepository.save(req);
+
+        enqueueEvent("EndorsementPendingPayment", policy.getPolicyId(), Map.of(
+                "customer_id", policy.getCustomerId().toString(),
+                "endorsement_request_id", endorsementRequestId.toString(),
+                "invoice_id", "",
+                "additional_charge_vnd", additionalCharge,
+                "due_date", newDueDate.toString(),
+                "order_id", policy.getOrderId().toString()));
+
         return toEndorsementResponse(req);
     }
 

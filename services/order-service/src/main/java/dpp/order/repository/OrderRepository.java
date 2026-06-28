@@ -37,4 +37,9 @@ public interface OrderRepository extends JpaRepository<OrderEntity, UUID> {
     default Page<OrderEntity> findByStatusAndLine(OrderStatus status, String line, Pageable pageable) {
         return findByStatus(status, line, pageable);
     }
+
+    @Query("SELECT o FROM OrderEntity o WHERE o.status = :status AND o.invoiceId IS NULL " +
+           "AND o.reviewedAt IS NOT NULL AND o.reviewedAt < :threshold")
+    List<OrderEntity> findStaleWithoutInvoice(@Param("status") OrderStatus status,
+                                               @Param("threshold") java.time.OffsetDateTime threshold);
 }

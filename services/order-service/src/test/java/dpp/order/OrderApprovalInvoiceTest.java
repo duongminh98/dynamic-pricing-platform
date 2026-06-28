@@ -45,42 +45,37 @@ class OrderApprovalInvoiceTest {
     }
 
     @Test
-    void approveSetsInvoiceIdAndPendingPayment() {
+    void approveSetsPendingPaymentWithNullInvoiceId() {
         OrderRepository repo = mock(OrderRepository.class);
         BillingClient billing = mock(BillingClient.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
 
         UUID orderId = UUID.randomUUID();
-        UUID invoiceId = UUID.randomUUID();
         OrderEntity order = pendingReviewOrder();
         order.setOrderId(orderId);
         when(repo.findById(orderId)).thenReturn(Optional.of(order));
         when(repo.save(any(OrderEntity.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(billing.createInvoice(eq(orderId), isNull(), eq(500_000L)))
-                .thenReturn(Map.of("invoice_id", invoiceId.toString()));
 
         OrderService svc = newService(repo, billing, outbox);
         OrderResponse resp = svc.approve(orderId, "admin-001");
 
         assertEquals(OrderStatus.PENDING_PAYMENT, resp.getStatus());
         assertEquals(ReviewDecision.APPROVE, resp.getReviewDecision());
-        assertEquals(invoiceId, resp.getInvoiceId());
+        assertNull(resp.getInvoiceId(), "invoice_id must be null — billing creates it asynchronously");
+        verify(billing, never()).createInvoice(any(), any(), anyLong());
     }
 
     @Test
-    void approveEnqueuesOrderApprovedSameTransaction() {
+    void approveEnqueuesOrderApprovedWithoutInvoiceId() {
         OrderRepository repo = mock(OrderRepository.class);
         BillingClient billing = mock(BillingClient.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
 
         UUID orderId = UUID.randomUUID();
-        UUID invoiceId = UUID.randomUUID();
         OrderEntity order = pendingReviewOrder();
         order.setOrderId(orderId);
         when(repo.findById(orderId)).thenReturn(Optional.of(order));
         when(repo.save(any(OrderEntity.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(billing.createInvoice(eq(orderId), isNull(), eq(500_000L)))
-                .thenReturn(Map.of("invoice_id", invoiceId.toString()));
 
         OrderService svc = newService(repo, billing, outbox);
         svc.approve(orderId, "admin-001");
@@ -94,9 +89,11 @@ class OrderApprovalInvoiceTest {
             if ("OrderApproved".equals(typeCaptor.getAllValues().get(i))) {
                 foundApproved = true;
                 String payload = payloadCaptor.getAllValues().get(i);
-                assertTrue(payload.contains(invoiceId.toString()), "Payload must contain invoice_id");
+                assertFalse(payload.contains("invoice_id"),
+                        "OrderApproved payload must NOT contain invoice_id — billing creates it asynchronously");
                 assertTrue(payload.contains("\"status\":\"PENDING_PAYMENT\""), "Payload must contain status");
                 assertTrue(payload.contains("\"line\":\"health\""), "Payload must contain line");
+                assertTrue(payload.contains("\"final_premium_vnd\":500000"), "Payload must contain final_premium_vnd");
             }
         }
         assertTrue(foundApproved, "OrderApproved event must be enqueued");
@@ -118,10 +115,11 @@ class OrderApprovalInvoiceTest {
         ServiceException ex = assertThrows(ServiceException.class, () -> svc.approve(orderId, "admin-001"));
         assertEquals(ErrorCode.ORDER_NOT_APPROVED, ex.getErrorCode());
         verify(billing, never()).createInvoice(any(), any(), anyLong());
+        verify(outbox, never()).enqueue(anyString(), anyString());
     }
 
     @Test
-    void approveWithNullInvoiceIdStillSetsPendingPayment() {
+    void approveDoesNotCallBillingCreateInvoice() {
         OrderRepository repo = mock(OrderRepository.class);
         BillingClient billing = mock(BillingClient.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
@@ -131,13 +129,10 @@ class OrderApprovalInvoiceTest {
         order.setOrderId(orderId);
         when(repo.findById(orderId)).thenReturn(Optional.of(order));
         when(repo.save(any(OrderEntity.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(billing.createInvoice(eq(orderId), isNull(), eq(500_000L)))
-                .thenReturn(Map.of());
 
         OrderService svc = newService(repo, billing, outbox);
-        OrderResponse resp = svc.approve(orderId, "admin-001");
+        svc.approve(orderId, "admin-001");
 
-        assertEquals(OrderStatus.PENDING_PAYMENT, resp.getStatus());
-        assertNull(resp.getInvoiceId());
+        verify(billing, never()).createInvoice(any(), any(), anyLong());
     }
 }

@@ -43,6 +43,8 @@ dpp:
     base-url: ${PRICING_BASE_URL:http://localhost:8000}
   billing:
     base-url: ${BILLING_BASE_URL:http://localhost:8086}
+  reconcile:
+    invoice-stale-minutes: ${INVOICE_STALE_MINUTES:15}
 
 springdoc:
   swagger-ui:

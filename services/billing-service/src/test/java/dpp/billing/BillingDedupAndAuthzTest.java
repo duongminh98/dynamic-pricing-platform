@@ -16,7 +16,10 @@ import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -215,5 +218,137 @@ class BillingDedupAndAuthzTest {
         assertThrows(ServiceException.class, () -> svc.payInvoiceAsCustomer(invoiceId, attacker));
         verify(orderClient, times(1)).getPolicyOwner(policyId);
         verify(orderClient, never()).getOrderOwner(any());
+    }
+
+    // --- Endorsement invoice dedup (Branch A) ---
+
+    @Test
+    void createEndorsementInvoiceReturnsExistingWhenEndorsementAlreadyInvoiced() {
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        UUID endorsementRequestId = UUID.randomUUID();
+        UUID existingInvoiceId = UUID.randomUUID();
+        Invoice existing = new Invoice();
+        existing.setInvoiceId(existingInvoiceId);
+        existing.setEndorsementRequestId(endorsementRequestId);
+        existing.setStatus(InvoiceStatus.unpaid);
+        when(invRepo.findByEndorsementRequestIdOrderByCreatedAtDesc(endorsementRequestId))
+                .thenReturn(List.of(existing));
+
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
+                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+        CreateInvoiceRequest req = new CreateInvoiceRequest();
+        req.setEndorsementRequestId(endorsementRequestId);
+        req.setOrderId(UUID.randomUUID());
+        req.setPolicyId(UUID.randomUUID());
+        req.setAmountVnd(1_200_000L);
+
+        InvoiceResponse resp = svc.createInvoice(req);
+
+        assertEquals(existingInvoiceId, resp.getInvoiceId(), "must return the pre-existing invoice");
+        verify(invRepo, never()).save(any());
+        // InvoiceCreated must still be enqueued so order-service can update invoice_id
+        verify(outbox, times(1)).enqueue(eq("InvoiceCreated"), anyString());
+    }
+
+    @Test
+    void createEndorsementInvoiceInsertsWhenNotYetInvoiced() {
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        UUID endorsementRequestId = UUID.randomUUID();
+        when(invRepo.findByEndorsementRequestIdOrderByCreatedAtDesc(endorsementRequestId))
+                .thenReturn(List.of());
+        when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
+                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+        CreateInvoiceRequest req = new CreateInvoiceRequest();
+        req.setEndorsementRequestId(endorsementRequestId);
+        req.setOrderId(UUID.randomUUID());
+        req.setPolicyId(UUID.randomUUID());
+        req.setAmountVnd(1_200_000L);
+        req.setDueDate(OffsetDateTime.now().plusDays(14));
+
+        InvoiceResponse resp = svc.createInvoice(req);
+
+        assertEquals(1_200_000L, resp.getAmountVnd());
+        assertEquals(InvoiceStatus.unpaid, resp.getStatus());
+        verify(invRepo, times(1)).save(any());
+        verify(outbox, times(1)).enqueue(eq("InvoiceCreated"), anyString());
+    }
+
+    @Test
+    void createEndorsementInvoiceSkipsVoidedAndCreatesNew() {
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        UUID endorsementRequestId = UUID.randomUUID();
+        Invoice voided = new Invoice();
+        voided.setInvoiceId(UUID.randomUUID());
+        voided.setEndorsementRequestId(endorsementRequestId);
+        voided.setStatus(InvoiceStatus.voided);
+        when(invRepo.findByEndorsementRequestIdOrderByCreatedAtDesc(endorsementRequestId))
+                .thenReturn(List.of(voided));
+        when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
+                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+        CreateInvoiceRequest req = new CreateInvoiceRequest();
+        req.setEndorsementRequestId(endorsementRequestId);
+        req.setOrderId(UUID.randomUUID());
+        req.setPolicyId(UUID.randomUUID());
+        req.setAmountVnd(1_200_000L);
+
+        InvoiceResponse resp = svc.createInvoice(req);
+
+        assertEquals(InvoiceStatus.unpaid, resp.getStatus());
+        verify(invRepo, times(1)).save(any());
+        verify(outbox, times(1)).enqueue(eq("InvoiceCreated"), anyString());
+    }
+
+    // --- InvoiceCreated enqueue on Branch C (order invoice) ---
+
+    @Test
+    void createOrderInvoiceEnqueuesInvoiceCreatedOnNewInsert() {
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        UUID orderId = UUID.randomUUID();
+        when(invRepo.findByOrderId(orderId)).thenReturn(Optional.empty());
+        when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
+                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+        CreateInvoiceRequest req = new CreateInvoiceRequest();
+        req.setOrderId(orderId);
+        req.setAmountVnd(2_500_000L);
+
+        svc.createInvoice(req);
+
+        ArgumentCaptor<String> typeCaptor = ArgumentCaptor.forClass(String.class);
+        verify(outbox, atLeast(1)).enqueue(typeCaptor.capture(), anyString());
+        assertTrue(typeCaptor.getAllValues().contains("InvoiceCreated"),
+                "InvoiceCreated event must be enqueued for new order invoice");
+    }
+
+    @Test
+    void createOrderInvoiceEnqueuesInvoiceCreatedOnDedupReturn() {
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        UUID orderId = UUID.randomUUID();
+        UUID existingInvoiceId = UUID.randomUUID();
+        Invoice existing = new Invoice();
+        existing.setInvoiceId(existingInvoiceId);
+        existing.setOrderId(orderId);
+        existing.setStatus(InvoiceStatus.unpaid);
+        when(invRepo.findByOrderId(orderId)).thenReturn(Optional.of(existing));
+
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
+                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+        CreateInvoiceRequest req = new CreateInvoiceRequest();
+        req.setOrderId(orderId);
+        req.setAmountVnd(2_500_000L);
+
+        svc.createInvoice(req);
+
+        verify(outbox, times(1)).enqueue(eq("InvoiceCreated"), anyString());
     }
 }

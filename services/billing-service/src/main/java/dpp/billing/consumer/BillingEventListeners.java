@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Component
@@ -33,7 +34,7 @@ public class BillingEventListeners {
         this.objectMapper = new ObjectMapper();
     }
 
-    @RabbitListener(queues = "endorsement.applied.queue")
+    @RabbitListener(queues = "endorsement.applied.billing.queue")
     public void onEndorsement(@Payload String message,
                               @Header(name = "X-Event-Id", required = false) String eventId) {
         try {
@@ -45,7 +46,7 @@ public class BillingEventListeners {
         } catch (Exception e) { throw new RuntimeException("Endorsement processing failed", e); }
     }
 
-    @RabbitListener(queues = "policy.cancelled.queue")
+    @RabbitListener(queues = "policy.cancelled.billing.queue")
     public void onCancellation(@Payload String message,
                                @Header(name = "X-Event-Id", required = false) String eventId) {
         try {
@@ -54,7 +55,6 @@ public class BillingEventListeners {
             adjustmentService.applyCancellation(eventId, policyId,
                     n.get("final_premium_vnd").asLong(),
                     n.get("remaining_days").asLong(), n.get("term_days").asLong());
-            // Auto-create refund requests for remaining credits on cancelled policies.
             String customerIdStr = n.has("customer_id") ? n.get("customer_id").asText() : null;
             if (customerIdStr != null) {
                 refundService.createRefundsForCancelledPolicy(policyId, UUID.fromString(customerIdStr));
@@ -62,7 +62,7 @@ public class BillingEventListeners {
         } catch (Exception e) { throw new RuntimeException("Cancellation processing failed", e); }
     }
 
-    @RabbitListener(queues = "policy.renewed.queue")
+    @RabbitListener(queues = "policy.renewed.billing.queue")
     public void onRenewal(@Payload String message,
                           @Header(name = "X-Event-Id", required = false) String eventId) {
         try {
@@ -75,7 +75,7 @@ public class BillingEventListeners {
         } catch (Exception e) { throw new RuntimeException("Renewal processing failed", e); }
     }
 
-    @RabbitListener(queues = "endorsement.credit.issued.queue")
+    @RabbitListener(queues = "endorsement.credit.issued.billing.queue")
     public void onCreditIssued(@Payload String message,
                                @Header(name = "X-Event-Id", required = false) String eventId) {
         try {
@@ -86,5 +86,40 @@ public class BillingEventListeners {
                     UUID.fromString(n.get("endorsement_request_id").asText()),
                     n.get("amount_vnd").asLong());
         } catch (Exception e) { throw new RuntimeException("Credit issued processing failed", e); }
+    }
+
+    @RabbitListener(queues = "order.approved.billing.queue")
+    public void onOrderApproved(@Payload String message,
+                                @Header(name = "X-Event-Id", required = false) String eventId) {
+        try {
+            JsonNode n = objectMapper.readTree(message);
+            CreateInvoiceRequest req = new CreateInvoiceRequest();
+            req.setOrderId(UUID.fromString(n.get("order_id").asText()));
+            req.setAmountVnd(n.get("final_premium_vnd").asLong());
+            if (n.has("customer_id") && !n.get("customer_id").isNull()) {
+                req.setCustomerId(UUID.fromString(n.get("customer_id").asText()));
+            }
+            billingService.createInvoice(req);
+        } catch (Exception e) { throw new RuntimeException("OrderApproved processing failed", e); }
+    }
+
+    @RabbitListener(queues = "endorsement.pending.payment.billing.queue")
+    public void onEndorsementPendingPayment(@Payload String message,
+                                            @Header(name = "X-Event-Id", required = false) String eventId) {
+        try {
+            JsonNode n = objectMapper.readTree(message);
+            CreateInvoiceRequest req = new CreateInvoiceRequest();
+            req.setOrderId(UUID.fromString(n.get("order_id").asText()));
+            req.setPolicyId(UUID.fromString(n.get("policy_id").asText()));
+            req.setAmountVnd(n.get("additional_charge_vnd").asLong());
+            req.setEndorsementRequestId(UUID.fromString(n.get("endorsement_request_id").asText()));
+            if (n.has("due_date") && !n.get("due_date").isNull() && !n.get("due_date").asText().isEmpty()) {
+                req.setDueDate(OffsetDateTime.parse(n.get("due_date").asText()));
+            }
+            if (n.has("customer_id") && !n.get("customer_id").isNull()) {
+                req.setCustomerId(UUID.fromString(n.get("customer_id").asText()));
+            }
+            billingService.createInvoice(req);
+        } catch (Exception e) { throw new RuntimeException("EndorsementPendingPayment processing failed", e); }
     }
 }

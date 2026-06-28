@@ -300,10 +300,6 @@ class RenewalAndCancellationTest {
         BillingClient billing = mock(BillingClient.class);
         when(billing.applyCreditAndQuote(any(), anyLong()))
                 .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 438_356L));
-        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
-                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
-        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any()))
-                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
         // Replace svc with one that has the billing mock
         svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 
@@ -412,10 +408,6 @@ class RenewalAndCancellationTest {
         BillingClient billing = mock(BillingClient.class);
         when(billing.applyCreditAndQuote(any(), anyLong()))
                 .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 5_950_685L));
-        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
-                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
-        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any()))
-                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
 
         PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 

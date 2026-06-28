@@ -26,4 +26,10 @@ public interface EndorsementRequestRepository extends JpaRepository<EndorsementR
                                                  @Param("customerId") UUID customerId,
                                                  @Param("policyId") UUID policyId,
                                                  Pageable pageable);
+
+    @Query("SELECT e FROM EndorsementRequestEntity e WHERE e.status = :status " +
+           "AND e.invoiceId IS NULL AND e.reviewedAt IS NOT NULL " +
+           "AND e.reviewedAt < :threshold")
+    List<EndorsementRequestEntity> findStaleWithoutInvoice(@Param("status") EndorsementStatus status,
+                                                            @Param("threshold") java.time.OffsetDateTime threshold);
 }

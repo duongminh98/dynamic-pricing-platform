@@ -345,10 +345,6 @@ class MaterialChangeEndorsementTest {
         // Billing net-off quote returns full amount due (no credits available).
         when(billing.applyCreditAndQuote(any(), anyLong()))
                 .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 5_950_685L));
-        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
-                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
-        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any()))
-                .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
 
         PolicyLifecycleService s = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 
@@ -518,13 +514,9 @@ class MaterialChangeEndorsementTest {
         when(endRepo.findByPolicyIdOrderByCreatedAtDesc(policy.getPolicyId())).thenReturn(List.of());
 
         // Billing: no credits available, net due = full additional charge
-        UUID invoiceId = UUID.randomUUID();
+        // (applyCreditAndQuote is still called synchronously for the waive decision)
         when(billing.applyCreditAndQuote(any(), anyLong()))
                 .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 1_197_260L));
-        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any()))
-                .thenReturn(Map.of("invoice_id", invoiceId.toString()));
-        when(billing.createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any()))
-                .thenReturn(Map.of("invoice_id", invoiceId.toString()));
 
         PolicyLifecycleService s = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 
@@ -553,24 +545,27 @@ class MaterialChangeEndorsementTest {
         assertEquals(EndorsementStatus.APPROVED_PENDING_PAYMENT, approveResp.getStatus(),
                 "premium increase with netDue >= MIN_SETTLE_AMOUNT must wait for payment");
         assertEquals(ADMIN, approveResp.getReviewedBy());
-        assertEquals(invoiceId, approveResp.getInvoiceId(),
-                "invoice ID must be set from billing response");
+        assertNull(approveResp.getInvoiceId(),
+                "invoice_id must be null — billing creates it asynchronously via EndorsementPendingPayment event");
         assertEquals(1_000_000L, policy.getFinalPremiumVnd(),
                 "premium must NOT change until payment is received");
 
-        // Verify EndorsementPendingPayment event emitted
+        // Verify EndorsementPendingPayment event emitted with GROSS additional_charge_vnd
         ArgumentCaptor<String> eventCaptor = ArgumentCaptor.forClass(String.class);
         verify(outbox).enqueue(eq("EndorsementPendingPayment"), eventCaptor.capture());
         String eventPayload = eventCaptor.getValue();
         assertTrue(eventPayload.contains("\"endorsement_request_id\":\"" + pending.getEndorsementRequestId() + "\""),
                 "event must carry endorsement_request_id");
-        assertTrue(eventPayload.contains("\"invoice_id\":\"" + invoiceId + "\""),
-                "event must carry invoice_id");
+        assertTrue(eventPayload.contains("\"invoice_id\":\"\""),
+                "event must carry empty invoice_id");
+        assertTrue(eventPayload.contains("\"order_id\":\"" + policy.getOrderId() + "\""),
+                "event must carry order_id");
 
-        // Verify billing was called for net-off quote
+        // Verify billing was called for net-off quote (waive decision only)
         verify(billing).applyCreditAndQuote(eq(policy.getCustomerId()), anyLong());
-        verify(billing).createEndorsementInvoice(eq(policy.getOrderId()), eq(policy.getPolicyId()),
-                anyLong(), eq(pending.getEndorsementRequestId()), any(), eq(policy.getCustomerId()));
+        // Verify billing was NOT called to create endorsement invoice (async now)
+        verify(billing, never()).createEndorsementInvoice(any(), any(), anyLong(), any(), any());
+        verify(billing, never()).createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any());
 
         // Verify rerate called once (submit only, not at approve — price lock)
         verify(pricing, times(1)).rerate(eq("MOTOR_BASIC"), anyMap());

@@ -96,7 +96,7 @@ class PremiumLockPropertyTest {
         when(repo.findById(saved.getOrderId())).thenReturn(Optional.of(approveOrder));
         svc.approve(saved.getOrderId(), "admin-001");
 
-        verify(billing).createInvoice(eq(saved.getOrderId()), isNull(), eq(premium));
+        verify(billing, never()).createInvoice(eq(saved.getOrderId()), isNull(), eq(premium));
     }
 
     @Test
