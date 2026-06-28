@@ -14,6 +14,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.http.HttpStatus;
@@ -65,9 +66,14 @@ public class BillingController {
     }
 
     @GetMapping("/credits")
+    @PreAuthorize("hasRole('Customer')")
     public CustomerCreditsResponse getCustomerCredits(@AuthenticationPrincipal Jwt jwt,
                                                       @RequestParam(defaultValue = "0") int page,
                                                       @RequestParam(defaultValue = "20") int size) {
+        if (page < 0 || size <= 0) {
+            throw new ServiceException(ErrorCode.BAD_REQUEST,
+                    "page must be >= 0 and size must be > 0", null);
+        }
         UUID customerId = CustomerId.fromSubject(jwt.getSubject());
         size = Math.min(size, 100);
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "createdAt"));

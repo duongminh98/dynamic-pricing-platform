@@ -189,8 +189,8 @@ public class CreditService {
     /**
      * Get credits for a customer (across all policies) with application history.
      * Paginated to avoid unbounded response. Applications batch-loaded by creditId IN (...).
-     * totalRemainingVnd reflects all open + partially_applied credits (not just current page).
-     * Resolves applied_to_policy_id from Invoice with cache to avoid N+1.
+     * totalRemainingVnd computed via SQL SUM (not loading all active credits into Java).
+     * Invoice policy_id resolved via batch findAllById to avoid N+1.
      */
     @Transactional(readOnly = true)
     public CustomerCreditsResponse getCustomerCredits(UUID customerId, Pageable pageable) {
@@ -207,15 +207,22 @@ public class CreditService {
             }
         }
 
-        // Compute totalRemainingVnd across ALL credits (not just current page)
-        long totalRemaining = creditRepository
-                .findByCustomerIdAndStatusInOrderByCreatedAtAsc(customerId,
-                        List.of(CreditStatus.open, CreditStatus.partially_applied))
-                .stream()
-                .mapToLong(PremiumCredit::getRemainingAmountVnd)
-                .sum();
+        // Compute totalRemainingVnd via SQL SUM — no loading all active credits into Java
+        long totalRemaining = creditRepository.sumRemainingByCustomerIdAndStatuses(customerId,
+                List.of(CreditStatus.open, CreditStatus.partially_applied));
 
+        // Batch-load all distinct invoices referenced by applications on this page
+        Set<UUID> invoiceIds = appMap.values().stream()
+                .flatMap(List::stream)
+                .map(CreditApplication::getAppliedToInvoiceId)
+                .collect(java.util.stream.Collectors.toSet());
         Map<UUID, Invoice> invoiceCache = new HashMap<>();
+        if (!invoiceIds.isEmpty()) {
+            for (Invoice inv : invoiceRepository.findAllById(invoiceIds)) {
+                invoiceCache.put(inv.getInvoiceId(), inv);
+            }
+        }
+
         List<CreditWalletItem> items = new ArrayList<>();
 
         for (PremiumCredit credit : credits) {
@@ -224,12 +231,6 @@ public class CreditService {
             List<CreditApplicationView> appViews = new ArrayList<>();
             for (CreditApplication app : applications) {
                 Invoice inv = invoiceCache.get(app.getAppliedToInvoiceId());
-                if (inv == null) {
-                    inv = invoiceRepository.findById(app.getAppliedToInvoiceId()).orElse(null);
-                    if (inv != null) {
-                        invoiceCache.put(inv.getInvoiceId(), inv);
-                    }
-                }
 
                 CreditApplicationView view = new CreditApplicationView();
                 view.setAppliedToInvoiceId(app.getAppliedToInvoiceId());

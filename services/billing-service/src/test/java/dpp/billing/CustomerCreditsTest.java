@@ -8,6 +8,8 @@ import dpp.billing.repository.*;
 import dpp.billing.service.BillingService;
 import dpp.billing.service.CreditService;
 import dpp.billing.service.VnpayService;
+import dpp.common.api.ErrorCode;
+import dpp.common.api.ServiceException;
 import dpp.common.security.CustomerId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -100,9 +102,9 @@ class CustomerCreditsTest {
                 .thenReturn(page);
     }
 
-    private void mockTotalRemaining(UUID customerId, List<PremiumCredit> activeCredits) {
-        when(creditRepo.findByCustomerIdAndStatusInOrderByCreatedAtAsc(eq(customerId), any()))
-                .thenReturn(activeCredits);
+    private void mockTotalRemaining(UUID customerId, long total) {
+        when(creditRepo.sumRemainingByCustomerIdAndStatuses(eq(customerId), any()))
+                .thenReturn(total);
     }
 
     // ── T1: Multiple credits across policies, sorted, total correct ──
@@ -123,7 +125,7 @@ class CustomerCreditsTest {
         c3.setCreatedAt(OffsetDateTime.now());
 
         mockPage(customerId, List.of(c1, c2, c3));
-        mockTotalRemaining(customerId, List.of(c1, c2));
+        mockTotalRemaining(customerId, 500_000L);
         when(appRepo.findByCreditIdInOrderByCreatedAtAsc(any())).thenReturn(List.of());
 
         CustomerCreditsResponse resp = creditService.getCustomerCredits(customerId, defaultPageable());
@@ -150,9 +152,9 @@ class CustomerCreditsTest {
         Invoice invB = invoice(invoiceIdB, UUID.randomUUID(), policyB);
 
         mockPage(customerId, List.of(c));
-        mockTotalRemaining(customerId, List.of());
+        mockTotalRemaining(customerId, 0L);
         when(appRepo.findByCreditIdInOrderByCreatedAtAsc(any())).thenReturn(List.of(app));
-        when(invoiceRepo.findById(invoiceIdB)).thenReturn(Optional.of(invB));
+        when(invoiceRepo.findAllById(any())).thenReturn(List.of(invB));
 
         CustomerCreditsResponse resp = creditService.getCustomerCredits(customerId, defaultPageable());
 
@@ -171,7 +173,7 @@ class CustomerCreditsTest {
     void t3_noCredits_returnsEmptyListAndZeroTotal() {
         UUID customerId = UUID.randomUUID();
         mockPage(customerId, List.of());
-        mockTotalRemaining(customerId, List.of());
+        mockTotalRemaining(customerId, 0L);
 
         CustomerCreditsResponse resp = creditService.getCustomerCredits(customerId, defaultPageable());
 
@@ -189,9 +191,9 @@ class CustomerCreditsTest {
                 100_000, 100_000, CreditStatus.open);
 
         mockPage(customerA, List.of(creditA));
-        mockTotalRemaining(customerA, List.of(creditA));
+        mockTotalRemaining(customerA, 100_000L);
         mockPage(customerB, List.of());
-        mockTotalRemaining(customerB, List.of());
+        mockTotalRemaining(customerB, 0L);
 
         CustomerCreditsResponse respA = creditService.getCustomerCredits(customerA, defaultPageable());
         assertEquals(1, respA.getCredits().size());
@@ -225,13 +227,15 @@ class CustomerCreditsTest {
         Invoice sharedInv = invoice(sharedInvoiceId, UUID.randomUUID(), policyB);
 
         mockPage(customerId, List.of(c1, c2));
-        mockTotalRemaining(customerId, List.of());
+        mockTotalRemaining(customerId, 0L);
         when(appRepo.findByCreditIdInOrderByCreatedAtAsc(any())).thenReturn(List.of(app1, app2));
-        when(invoiceRepo.findById(sharedInvoiceId)).thenReturn(Optional.of(sharedInv));
+        when(invoiceRepo.findAllById(any())).thenReturn(List.of(sharedInv));
 
         creditService.getCustomerCredits(customerId, defaultPageable());
 
-        verify(invoiceRepo, times(1)).findById(eq(sharedInvoiceId));
+        // Invoice loaded in a single batch query, not per-id findById
+        verify(invoiceRepo, times(1)).findAllById(any());
+        verify(invoiceRepo, never()).findById(any());
     }
 
     // ── T6: Batch application loading — single query for all credits on the page ──
@@ -247,7 +251,7 @@ class CustomerCreditsTest {
         PremiumCredit c3 = credit(credit3Id, UUID.randomUUID(), customerId, 300_000, 300_000, CreditStatus.open);
 
         mockPage(customerId, List.of(c1, c2, c3));
-        mockTotalRemaining(customerId, List.of(c3));
+        mockTotalRemaining(customerId, 300_000L);
         when(appRepo.findByCreditIdInOrderByCreatedAtAsc(any())).thenReturn(List.of());
 
         creditService.getCustomerCredits(customerId, defaultPageable());
@@ -265,7 +269,7 @@ class CustomerCreditsTest {
         Page<PremiumCredit> page = new PageImpl<>(List.of(c1), defaultPageable(), 50);
         when(creditRepo.findByCustomerIdOrderByCreatedAtAsc(eq(customerId), any(Pageable.class)))
                 .thenReturn(page);
-        mockTotalRemaining(customerId, List.of(c1));
+        mockTotalRemaining(customerId, 100_000L);
         when(appRepo.findByCreditIdInOrderByCreatedAtAsc(any())).thenReturn(List.of());
 
         CustomerCreditsResponse resp = creditService.getCustomerCredits(customerId, defaultPageable());
@@ -301,5 +305,26 @@ class CustomerCreditsTest {
         verify(mockCreditService).getCustomerCredits(eq(derivedCustomerId), any(Pageable.class));
         assertNotNull(result);
         assertEquals(0L, result.getTotalRemainingVnd());
+    }
+
+    // ── T8: Invalid page/size returns clean 400 ──
+    @Test
+    void t8_invalidPageOrSize_throwsBadRequest() {
+        CreditService mockCreditService = mock(CreditService.class);
+        BillingController controller = new BillingController(
+                mock(BillingService.class), mockCreditService, mock(VnpayService.class), false);
+
+        Jwt jwt = mock(Jwt.class);
+        when(jwt.getSubject()).thenReturn("some-subject");
+
+        ServiceException ex1 = assertThrows(ServiceException.class,
+                () -> controller.getCustomerCredits(jwt, -1, 20));
+        assertEquals(ErrorCode.BAD_REQUEST, ex1.getErrorCode());
+
+        ServiceException ex2 = assertThrows(ServiceException.class,
+                () -> controller.getCustomerCredits(jwt, 0, 0));
+        assertEquals(ErrorCode.BAD_REQUEST, ex2.getErrorCode());
+
+        verifyNoInteractions(mockCreditService);
     }
 }
