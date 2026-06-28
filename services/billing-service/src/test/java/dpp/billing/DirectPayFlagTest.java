@@ -2,6 +2,7 @@ package dpp.billing;
 
 import dpp.billing.controller.BillingController;
 import dpp.billing.service.BillingService;
+import dpp.billing.service.CreditService;
 import dpp.billing.service.VnpayService;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
@@ -30,7 +31,7 @@ class DirectPayFlagTest {
     void directPayDisabledReturns403() {
         BillingService billingService = mock(BillingService.class);
         VnpayService vnpayService = mock(VnpayService.class);
-        BillingController controller = new BillingController(billingService, vnpayService, false);
+        BillingController controller = new BillingController(billingService, mock(CreditService.class), vnpayService, false);
 
         UUID invoiceId = UUID.randomUUID();
         ServiceException ex = assertThrows(ServiceException.class,
@@ -44,7 +45,7 @@ class DirectPayFlagTest {
     void directPayEnabledProceedsToService() {
         BillingService billingService = mock(BillingService.class);
         VnpayService vnpayService = mock(VnpayService.class);
-        BillingController controller = new BillingController(billingService, vnpayService, true);
+        BillingController controller = new BillingController(billingService, mock(CreditService.class), vnpayService, true);
 
         UUID invoiceId = UUID.randomUUID();
         Jwt jwt = mockJwt();

@@ -1,9 +1,11 @@
 package dpp.billing.controller;
 
 import dpp.billing.dto.CreateInvoiceRequest;
+import dpp.billing.dto.CustomerCreditsResponse;
 import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.dto.PolicyBillingResponse;
 import dpp.billing.service.BillingService;
+import dpp.billing.service.CreditService;
 import dpp.billing.service.VnpayService;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
@@ -23,12 +25,15 @@ import java.util.UUID;
 public class BillingController {
 
     private final BillingService billingService;
+    private final CreditService creditService;
     private final VnpayService vnpayService;
     private final boolean directPayEnabled;
 
-    public BillingController(BillingService billingService, VnpayService vnpayService,
+    public BillingController(BillingService billingService, CreditService creditService,
+                             VnpayService vnpayService,
                              @Value("${dpp.billing.direct-pay.enabled:false}") boolean directPayEnabled) {
         this.billingService = billingService;
+        this.creditService = creditService;
         this.vnpayService = vnpayService;
         this.directPayEnabled = directPayEnabled;
     }
@@ -55,6 +60,12 @@ public class BillingController {
                                                   @PathVariable UUID policyId) {
         UUID customerId = CustomerId.fromSubject(jwt.getSubject());
         return billingService.getPolicyBilling(policyId, customerId);
+    }
+
+    @GetMapping("/credits")
+    public CustomerCreditsResponse getCustomerCredits(@AuthenticationPrincipal Jwt jwt) {
+        UUID customerId = CustomerId.fromSubject(jwt.getSubject());
+        return creditService.getCustomerCredits(customerId);
     }
 
     // --- VNPAY endpoints (task 21.2-21.4, R33.2) ---

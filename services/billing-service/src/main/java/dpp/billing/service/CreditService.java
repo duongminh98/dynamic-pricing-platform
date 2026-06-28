@@ -2,14 +2,16 @@ package dpp.billing.service;
 
 import dpp.billing.entity.*;
 import dpp.billing.repository.*;
+import dpp.billing.dto.CreditApplicationView;
+import dpp.billing.dto.CreditWalletItem;
+import dpp.billing.dto.CustomerCreditsResponse;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
 /**
  * Credit net-off engine and premium credit lifecycle (design §4-7).
@@ -180,5 +182,62 @@ public class CreditService {
         } else {
             credit.setStatus(CreditStatus.open);
         }
+    }
+
+    /**
+     * Get all credits for a customer (across all policies) with their application
+     * history. Resolves applied_to_policy_id from Invoice to show cross-policy usage.
+     * Caches invoice lookups to avoid N+1 queries.
+     */
+    @Transactional(readOnly = true)
+    public CustomerCreditsResponse getCustomerCredits(UUID customerId) {
+        List<PremiumCredit> credits = creditRepository.findByCustomerIdOrderByCreatedAtAsc(customerId);
+
+        Map<UUID, Invoice> invoiceCache = new HashMap<>();
+        List<CreditWalletItem> items = new ArrayList<>();
+        long totalRemaining = 0;
+
+        for (PremiumCredit credit : credits) {
+            List<CreditApplication> applications =
+                    applicationRepository.findByCreditIdOrderByCreatedAtAsc(credit.getCreditId());
+
+            List<CreditApplicationView> appViews = new ArrayList<>();
+            for (CreditApplication app : applications) {
+                Invoice inv = invoiceCache.get(app.getAppliedToInvoiceId());
+                if (inv == null) {
+                    inv = invoiceRepository.findById(app.getAppliedToInvoiceId()).orElse(null);
+                    if (inv != null) {
+                        invoiceCache.put(inv.getInvoiceId(), inv);
+                    }
+                }
+
+                CreditApplicationView view = new CreditApplicationView();
+                view.setAppliedToInvoiceId(app.getAppliedToInvoiceId());
+                view.setAppliedToPolicyId(inv != null ? inv.getPolicyId() : null);
+                view.setAmountAppliedVnd(app.getAmountAppliedVnd());
+                view.setCreatedAt(app.getCreatedAt());
+                appViews.add(view);
+            }
+
+            CreditWalletItem item = new CreditWalletItem();
+            item.setCreditId(credit.getCreditId());
+            item.setPolicyId(credit.getPolicyId());
+            item.setSourceEndorsementId(credit.getSourceEndorsementId());
+            item.setOriginalAmountVnd(credit.getOriginalAmountVnd());
+            item.setRemainingAmountVnd(credit.getRemainingAmountVnd());
+            item.setStatus(credit.getStatus());
+            item.setCreatedAt(credit.getCreatedAt());
+            item.setApplications(appViews);
+            items.add(item);
+
+            if (credit.getStatus() == CreditStatus.open || credit.getStatus() == CreditStatus.partially_applied) {
+                totalRemaining += credit.getRemainingAmountVnd();
+            }
+        }
+
+        CustomerCreditsResponse response = new CustomerCreditsResponse();
+        response.setTotalRemainingVnd(totalRemaining);
+        response.setCredits(items);
+        return response;
     }
 }
