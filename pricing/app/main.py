@@ -11,8 +11,11 @@ from .pricing_engine.loader import load_artifacts
 async def lifespan(app: FastAPI):
     load_artifacts()
     from .consumers.claim_settled_consumer import start_consumer, stop_consumer
+    from .outbox_relay import start_outbox_relay, stop_outbox_relay
     start_consumer()
+    start_outbox_relay()
     yield
+    stop_outbox_relay()
     stop_consumer()
 
 
