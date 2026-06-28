@@ -1,0 +1,108 @@
+﻿name: Offline Model Lifecycle
+
+on:
+  schedule:
+    # Runs daily at 01:50 Asia/Saigon (18:50 UTC previous day).
+    # retrain_trigger.py no-ops unless schedule, data threshold, or drift conditions are met.
+    - cron: "50 18 * * *"
+  workflow_dispatch:
+    inputs:
+      line:
+        description: "Insurance line to force retrain, or all lines selected by trigger conditions"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - health
+          - motorbike
+          - car
+          - home
+          - accident
+          - travel
+      dry_run:
+        description: "Compute trigger decisions without retraining or persisting candidates"
+        required: false
+        default: false
+        type: boolean
+      skip_drift_monitor:
+        description: "Skip drift_monitor.py before retrain_trigger.py"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-model-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  drift-and-retrain:
+    name: Drift monitor and retrain trigger
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PRICING_DB_HOST: ${{ secrets.PRICING_DB_HOST }}
+      PRICING_DB_PORT: ${{ secrets.PRICING_DB_PORT }}
+      PRICING_DB_NAME: ${{ secrets.PRICING_DB_NAME }}
+      POSTGRES_USER: ${{ secrets.PRICING_DB_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.PRICING_DB_PASSWORD }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r pricing/requirements.txt
+
+      - name: Validate pricing database configuration
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run == false || inputs.skip_drift_monitor == false }}
+        run: |
+          missing=0
+          for name in PRICING_DB_HOST PRICING_DB_PORT PRICING_DB_NAME POSTGRES_USER POSTGRES_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required secret-backed environment variable: ${name}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Configure repository secrets: PRICING_DB_HOST, PRICING_DB_PORT, PRICING_DB_NAME, PRICING_DB_USER, PRICING_DB_PASSWORD."
+            exit 1
+          fi
+
+      - name: Run drift monitor
+        if: ${{ github.event_name == 'schedule' || inputs.skip_drift_monitor == false }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python offline/drift_monitor.py --dry-run
+          else
+            python offline/drift_monitor.py
+          fi
+
+      - name: Run retrain trigger
+        run: |
+          args=()
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=("--dry-run")
+          fi
+          if [ "${{ inputs.line }}" != "" ] && [ "${{ inputs.line }}" != "all" ]; then
+            args+=("--line" "${{ inputs.line }}")
+          fi
+          python offline/retrain_trigger.py "${args[@]}"
+
+      - name: Upload offline lifecycle artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-model-lifecycle-${{ github.run_id }}
+          path: |
+            reports/modeling/models/
+            reports/modeling/baselines/
+          if-no-files-found: ignore
+          retention-days: 14
