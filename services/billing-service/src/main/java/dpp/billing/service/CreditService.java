@@ -7,6 +7,8 @@ import dpp.billing.dto.CreditWalletItem;
 import dpp.billing.dto.CustomerCreditsResponse;
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -185,21 +187,39 @@ public class CreditService {
     }
 
     /**
-     * Get all credits for a customer (across all policies) with their application
-     * history. Resolves applied_to_policy_id from Invoice to show cross-policy usage.
-     * Caches invoice lookups to avoid N+1 queries.
+     * Get credits for a customer (across all policies) with application history.
+     * Paginated to avoid unbounded response. Applications batch-loaded by creditId IN (...).
+     * totalRemainingVnd reflects all open + partially_applied credits (not just current page).
+     * Resolves applied_to_policy_id from Invoice with cache to avoid N+1.
      */
     @Transactional(readOnly = true)
-    public CustomerCreditsResponse getCustomerCredits(UUID customerId) {
-        List<PremiumCredit> credits = creditRepository.findByCustomerIdOrderByCreatedAtAsc(customerId);
+    public CustomerCreditsResponse getCustomerCredits(UUID customerId, Pageable pageable) {
+        Page<PremiumCredit> creditPage = creditRepository.findByCustomerIdOrderByCreatedAtAsc(customerId, pageable);
+        List<PremiumCredit> credits = creditPage.getContent();
+
+        // Batch-load all applications for this page's credits in one query
+        List<UUID> creditIds = credits.stream().map(PremiumCredit::getCreditId).toList();
+        Map<UUID, List<CreditApplication>> appMap = new HashMap<>();
+        if (!creditIds.isEmpty()) {
+            List<CreditApplication> allApps = applicationRepository.findByCreditIdInOrderByCreatedAtAsc(creditIds);
+            for (CreditApplication app : allApps) {
+                appMap.computeIfAbsent(app.getCreditId(), k -> new ArrayList<>()).add(app);
+            }
+        }
+
+        // Compute totalRemainingVnd across ALL credits (not just current page)
+        long totalRemaining = creditRepository
+                .findByCustomerIdAndStatusInOrderByCreatedAtAsc(customerId,
+                        List.of(CreditStatus.open, CreditStatus.partially_applied))
+                .stream()
+                .mapToLong(PremiumCredit::getRemainingAmountVnd)
+                .sum();
 
         Map<UUID, Invoice> invoiceCache = new HashMap<>();
         List<CreditWalletItem> items = new ArrayList<>();
-        long totalRemaining = 0;
 
         for (PremiumCredit credit : credits) {
-            List<CreditApplication> applications =
-                    applicationRepository.findByCreditIdOrderByCreatedAtAsc(credit.getCreditId());
+            List<CreditApplication> applications = appMap.getOrDefault(credit.getCreditId(), List.of());
 
             List<CreditApplicationView> appViews = new ArrayList<>();
             for (CreditApplication app : applications) {
@@ -229,15 +249,15 @@ public class CreditService {
             item.setCreatedAt(credit.getCreatedAt());
             item.setApplications(appViews);
             items.add(item);
-
-            if (credit.getStatus() == CreditStatus.open || credit.getStatus() == CreditStatus.partially_applied) {
-                totalRemaining += credit.getRemainingAmountVnd();
-            }
         }
 
         CustomerCreditsResponse response = new CustomerCreditsResponse();
         response.setTotalRemainingVnd(totalRemaining);
         response.setCredits(items);
+        response.setPage(creditPage.getNumber());
+        response.setSize(creditPage.getSize());
+        response.setTotalElements(creditPage.getTotalElements());
+        response.setTotalPages(creditPage.getTotalPages());
         return response;
     }
 }

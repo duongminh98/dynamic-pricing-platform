@@ -9,4 +9,5 @@ import java.util.UUID;
 public interface CreditApplicationRepository extends JpaRepository<CreditApplication, UUID> {
     List<CreditApplication> findByCreditIdOrderByCreatedAtAsc(UUID creditId);
     List<CreditApplication> findByAppliedToInvoiceId(UUID invoiceId);
+    List<CreditApplication> findByCreditIdInOrderByCreatedAtAsc(List<UUID> creditIds);
 }

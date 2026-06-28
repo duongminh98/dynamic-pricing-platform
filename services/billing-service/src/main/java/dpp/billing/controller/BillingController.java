@@ -12,6 +12,8 @@ import dpp.common.api.ServiceException;
 import dpp.common.security.CustomerId;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.http.HttpStatus;
@@ -63,9 +65,13 @@ public class BillingController {
     }
 
     @GetMapping("/credits")
-    public CustomerCreditsResponse getCustomerCredits(@AuthenticationPrincipal Jwt jwt) {
+    public CustomerCreditsResponse getCustomerCredits(@AuthenticationPrincipal Jwt jwt,
+                                                      @RequestParam(defaultValue = "0") int page,
+                                                      @RequestParam(defaultValue = "20") int size) {
         UUID customerId = CustomerId.fromSubject(jwt.getSubject());
-        return creditService.getCustomerCredits(customerId);
+        size = Math.min(size, 100);
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "createdAt"));
+        return creditService.getCustomerCredits(customerId, pageable);
     }
 
     // --- VNPAY endpoints (task 21.2-21.4, R33.2) ---

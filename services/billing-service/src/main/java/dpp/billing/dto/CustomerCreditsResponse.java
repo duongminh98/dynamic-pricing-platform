@@ -10,4 +10,8 @@ import java.util.List;
 public class CustomerCreditsResponse {
     private long totalRemainingVnd;
     private List<CreditWalletItem> credits;
+    private int page;
+    private int size;
+    private long totalElements;
+    private int totalPages;
 }
