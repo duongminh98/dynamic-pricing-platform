@@ -268,7 +268,11 @@ def required_columns(line: str) -> list[str]:
     ensure_loaded()
     cfg = get_champion(line)
     algo = cfg.get("algorithm", "lgb")
-    model = all_artifacts[line]["tw"].get(algo) or artifacts[line]["tw"]
+    family = cfg.get("family", "tw")
+    if family in ("freqsev", "freq_sev"):
+        model = all_artifacts[line]["freq"].get(algo) or artifacts[line]["freq"]
+    else:
+        model = all_artifacts[line][family].get(algo) or artifacts[line][family]
     fn = getattr(model, "feature_name_", None)
     if fn is not None:
         return list(fn)

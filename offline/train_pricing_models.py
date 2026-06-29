@@ -47,6 +47,7 @@ Requirements: R12.7, R4.7, R29.5, R30.5, R31.3, R31.4 (design section 6.3, BR-19
 """
 
 import json
+import os
 import pathlib
 import warnings
 
@@ -63,7 +64,9 @@ MIN_EXPOSURE = 1e-6
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data" / "synthetic_real"
+DATA_DIR = pathlib.Path(os.environ.get("PRICING_TRAIN_DATA_DIR", ROOT / "data" / "synthetic_real"))
+if not DATA_DIR.is_absolute():
+    DATA_DIR = ROOT / DATA_DIR
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
 METADATA_PATH = DATA_DIR / "pricing_modeling_metadata.json"
 BASELINES_DIR = ROOT / "reports" / "modeling" / "baselines"
@@ -76,8 +79,76 @@ LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
 MONOTONE_COMMON = {
     "coverage_amount_vnd": 1,
     "deductible_vnd": -1,
+    "claim_count_12m_prior": 1,
     "claim_count_36m_prior": 1,
+    "claim_count_lifetime_prior": 1,
+    "total_incurred_36m_prior": 1,
+    "avg_incurred_36m_prior": 1,
+    "max_incurred_36m_prior": 1,
+    "days_since_last_claim_prior": -1,
+    "claim_severity_score_prior": 1,
 }
+
+MONOTONE_BY_LINE = {
+    "health": {
+        **MONOTONE_COMMON,
+        "bmi": 1,
+        "smoker": 1,
+        "chronic_disease": 1,
+        "diabetes": 1,
+        "blood_pressure_problem": 1,
+        "hospitalized_last_12m": 1,
+        "major_surgeries_count": 1,
+        "medical_visit_count_12m": 1,
+    },
+    "motorbike": {
+        **MONOTONE_COMMON,
+        "vehicle_age": 1,
+        "vehicle_value_vnd": 1,
+        "engine_capacity_cc": 1,
+        "driving_experience_years": -1,
+        "annual_mileage_km": 1,
+        "traffic_violation_count_12m": 1,
+        "anti_theft_device": -1,
+    },
+    "car": {
+        **MONOTONE_COMMON,
+        "vehicle_age": 1,
+        "vehicle_value_vnd": 1,
+        "engine_capacity_cc": 1,
+        "driving_experience_years": -1,
+        "annual_mileage_km": 1,
+        "traffic_violation_count_12m": 1,
+        "anti_theft_device": -1,
+        "driver_count": 1,
+        "loan_or_leasing_flag": 1,
+    },
+    "home": {
+        **MONOTONE_COMMON,
+        "floor_area_m2": 1,
+        "number_of_floors": 1,
+        "building_age": 1,
+        "declared_property_value_vnd": 1,
+        "fire_protection": -1,
+        "has_fire_alarm": -1,
+        "has_sprinkler": -1,
+        "security_system": -1,
+    },
+    "accident": {
+        **MONOTONE_COMMON,
+        "commute_distance_km": 1,
+        "sport_activity_flag": 1,
+    },
+    "travel": {
+        **MONOTONE_COMMON,
+        "trip_duration_days": 1,
+        "traveler_count": 1,
+        "trip_cost_vnd": 1,
+        "has_baggage_cover": 1,
+        "has_trip_cancellation_cover": 1,
+    },
+}
+
 MONOTONE_VEHICLE = {
     **MONOTONE_COMMON,
     "annual_mileage_km": 1,
@@ -115,7 +186,7 @@ def build_monotone_constraints(feature_names: list[str], line: str) -> list[int]
     training (same order as feature_names). This is critical — misalignment
     causes the constraint to apply to the wrong variable (HIGH RISK per design).
     """
-    monotone_map = MONOTONE_VEHICLE if line in ("car", "motorbike") else MONOTONE_COMMON
+    monotone_map = MONOTONE_BY_LINE.get(line, MONOTONE_COMMON)
     return [monotone_map.get(fn, 0) for fn in feature_names]
 
 

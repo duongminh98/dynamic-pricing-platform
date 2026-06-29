@@ -55,6 +55,18 @@ def test_extract_model_and_features_lgbm():
     assert names == ["age", "coverage_amount_vnd"]
 
 
+
+def test_extract_model_and_features_freqsev_composite_prefers_frequency_model():
+    freq_model = MagicMock()
+    freq_model.feature_name_ = ["age", "claim_count_36m_prior"]
+    sev_model = MagicMock()
+    sev_model.feature_name_ = ["age", "avg_incurred_36m_prior"]
+
+    est, names = _extract_model_and_features({"freq": freq_model, "sev": sev_model})
+
+    assert est is freq_model
+    assert names == ["age", "claim_count_36m_prior"]
+
 def test_extract_model_and_features_pipeline():
     model = MagicMock()
     del model.feature_name_
@@ -113,6 +125,7 @@ def test_explain_with_tree_model():
         result = explain(mock_model, feature_df)
 
     assert result["available"] is True
+    assert result["method"] == "tree_shap"
     assert len(result["items"]) >= 3
     assert result["items"][0]["feature"] in ("coverage_amount_vnd", "age", "deductible_vnd")
     # Verify English label key and direction values

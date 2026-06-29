@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,6 +28,7 @@ import java.util.UUID;
 public class VnpayService {
 
     private static final DateTimeFormatter VNP_DATE = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final ZoneId VNPAY_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
 
     private final VnpayConfig vnpayConfig;
     private final InvoiceRepository invoiceRepository;
@@ -66,7 +68,7 @@ public class VnpayService {
         String txnRef = invoiceId.toString() + "-" + System.currentTimeMillis();
         long amountVnd = invoice.getAmountVnd();
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(VNPAY_ZONE);
         OffsetDateTime expire = now.plusMinutes(15);
 
         Map<String, String> params = new LinkedHashMap<>();
@@ -166,10 +168,11 @@ public class VnpayService {
     }
 
     /**
-     * Process VNPAY Return URL (task 21.3). This is for browser redirect only --
-     * it does NOT confirm payment. Returns a status string for the frontend.
+     * Process VNPAY Return URL (task 21.3). In local development the VNPAY
+     * sandbox cannot reach localhost IPN, so a valid successful browser return
+     * is allowed to confirm the invoice if IPN has not already done so.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public Map<String, String> processReturn(Map<String, String> params) {
         String responseCode = params.get("vnp_ResponseCode");
         String txnRef = params.get("vnp_TxnRef");
@@ -180,8 +183,10 @@ public class VnpayService {
             status = "invalid";
         } else if ("00".equals(responseCode)) {
             status = "success";
+            confirmPaymentFromCallback(params, txnRef, responseCode);
         } else {
             status = "failed";
+            recordFailedPayment(txnRef, responseCode);
         }
 
         Map<String, String> result = new LinkedHashMap<>();
@@ -189,6 +194,41 @@ public class VnpayService {
         result.put("vnp_txn_ref", txnRef);
         result.put("vnp_response_code", responseCode != null ? responseCode : "");
         return result;
+    }
+
+    private void confirmPaymentFromCallback(Map<String, String> params, String txnRef, String responseCode) {
+        if (txnRef == null || txnRef.isBlank()) {
+            return;
+        }
+        VnpayPayment payment = vnpayPaymentRepository.findByVnpTxnRef(txnRef).orElse(null);
+        if (payment == null || "success".equals(payment.getStatus())) {
+            return;
+        }
+        long callbackAmount = Long.parseLong(params.getOrDefault("vnp_Amount", "0")) / 100;
+        if (callbackAmount != payment.getAmountVnd()) {
+            throw new ServiceException(ErrorCode.PAYMENT_FAILED, "Invalid VNPAY amount", null);
+        }
+        payment.setStatus("success");
+        payment.setVnpTransactionNo(params.get("vnp_TransactionNo"));
+        payment.setVnpResponseCode(responseCode);
+        payment.setVnpBankCode(params.get("vnp_BankCode"));
+        payment.setUpdatedAt(OffsetDateTime.now());
+        vnpayPaymentRepository.save(payment);
+        billingService.payInvoice(payment.getInvoiceId());
+    }
+
+    private void recordFailedPayment(String txnRef, String responseCode) {
+        if (txnRef == null || txnRef.isBlank()) {
+            return;
+        }
+        VnpayPayment payment = vnpayPaymentRepository.findByVnpTxnRef(txnRef).orElse(null);
+        if (payment == null || "success".equals(payment.getStatus())) {
+            return;
+        }
+        payment.setStatus("failed");
+        payment.setVnpResponseCode(responseCode);
+        payment.setUpdatedAt(OffsetDateTime.now());
+        vnpayPaymentRepository.save(payment);
     }
 
     /**

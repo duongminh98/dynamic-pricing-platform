@@ -50,18 +50,25 @@ class BillingEventListenersTest {
     void onCancellationDelegatesToAdjustmentService() {
         AdjustmentService adjustmentService = mock(AdjustmentService.class);
         BillingService billingService = mock(BillingService.class);
-        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
+        RefundService refundService = mock(RefundService.class);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), refundService);
 
         UUID policyId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
         String message = "{\"policy_id\":\"" + policyId + "\","
+                + "\"customer_id\":\"" + customerId + "\","
                 + "\"final_premium_vnd\":2000000,"
                 + "\"remaining_days\":100,\"term_days\":365}";
         String eventId = UUID.randomUUID().toString();
+        when(adjustmentService.applyCancellation(eventId, policyId, 2_000_000L, 100, 365))
+                .thenReturn(547_945L);
 
         listener.onCancellation(message, eventId);
 
         verify(adjustmentService, times(1)).applyCancellation(
                 eventId, policyId, 2_000_000L, 100, 365);
+        verify(refundService, times(1)).createCancellationRefund(policyId, customerId, 547_945L);
+        verify(refundService, times(1)).createRefundsForCancelledPolicy(policyId, customerId);
     }
 
     @Test
@@ -82,8 +89,10 @@ class BillingEventListenersTest {
 
         UUID policyId = UUID.randomUUID();
         UUID orderId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
         String message = "{\"policy_id\":\"" + policyId + "\",\"order_id\":\"" + orderId + "\","
-                + "\"final_premium_vnd\":3000000}";
+                + "\"customer_id\":\"" + customerId + "\","
+                + "\"renewed_premium_vnd\":3000000,\"payment_required\":true}";
         String eventId = UUID.randomUUID().toString();
 
         InvoiceResponse mockResp = new InvoiceResponse();
@@ -95,6 +104,7 @@ class BillingEventListenersTest {
         verify(billingService, times(1)).createInvoice(argThat(req ->
                 req.getOrderId().equals(orderId) &&
                 req.getPolicyId().equals(policyId) &&
+                req.getCustomerId().equals(customerId) &&
                 req.getAmountVnd() == 3_000_000L));
     }
 

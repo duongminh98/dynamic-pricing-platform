@@ -110,16 +110,17 @@ public class PolicyLifecycleService {
         if (policy.getStatus() != PolicyStatus.active) {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
-        OffsetDateTime eff = request.getEffectiveDate();
-        if (!eff.isAfter(policy.getPolicyEffectiveDate()) || !eff.isBefore(policy.getPolicyExpirationDate())) {
-            throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE);
-        }
-        if (eff.isBefore(OffsetDateTime.now())) {
+        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime eff = resolveEffectiveDate(request, now);
+        if (eff.isBefore(now)) {
             throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE,
                     "Effective date cannot be in the past", null);
         }
+        if (!eff.isAfter(policy.getPolicyEffectiveDate()) || !eff.isBefore(policy.getPolicyExpirationDate())) {
+            throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE);
+        }
 
-        Map<String, Object> change = request.getChange();
+        Map<String, Object> change = resolveChangeSet(request);
         validateChangeKeys(change, policy.getProductId());
 
         List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
@@ -169,16 +170,17 @@ public class PolicyLifecycleService {
         if (policy.getStatus() != PolicyStatus.active) {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
-        OffsetDateTime eff = request.getEffectiveDate();
-        if (!eff.isAfter(policy.getPolicyEffectiveDate()) || !eff.isBefore(policy.getPolicyExpirationDate())) {
-            throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE);
-        }
-        if (eff.isBefore(OffsetDateTime.now())) {
+        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime eff = resolveEffectiveDate(request, now);
+        if (eff.isBefore(now)) {
             throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE,
                     "Effective date cannot be in the past", null);
         }
+        if (!eff.isAfter(policy.getPolicyEffectiveDate()) || !eff.isBefore(policy.getPolicyExpirationDate())) {
+            throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE);
+        }
 
-        Map<String, Object> change = request.getChange();
+        Map<String, Object> change = resolveChangeSet(request);
         validateChangeKeys(change, policy.getProductId());
 
         // A4: Block concurrent endorsement — at most one in-progress per policy.
@@ -976,6 +978,17 @@ public class PolicyLifecycleService {
         return "";
     }
 
+    private OffsetDateTime resolveEffectiveDate(EndorsementRequest request, OffsetDateTime now) {
+        return request != null && request.getEffectiveDate() != null ? request.getEffectiveDate() : now;
+    }
+
+    private Map<String, Object> resolveChangeSet(EndorsementRequest request) {
+        if (request == null || request.getChange() == null) {
+            return new LinkedHashMap<>();
+        }
+        return request.getChange();
+    }
+
     @Transactional(readOnly = true)
     public RenewalPreviewResponse previewRenewal(UUID policyId, String keycloakSubject) {
         Policy old = findOwnedPolicy(policyId, keycloakSubject);
@@ -1152,11 +1165,14 @@ public class PolicyLifecycleService {
         resp.setNewExpirationDate(newExp);
 
         if (paymentRequired) {
-            // Create invoice for net_due; billing will net-off credits and return invoice_id.
+            // Pass the gross renewed premium; createInvoice is the single place that
+            // nets off customer credit (idempotent on policy_id) and returns invoice_id.
+            // Passing netDue here would double-discount, since applyCreditsToQuote above
+            // only previews credit (does not consume it).
             UUID invoiceId = null;
             try {
                 Map<String, Object> invoiceResp = billingClient.createRenewalInvoice(
-                        renewed.getOrderId(), renewed.getPolicyId(), netDue, renewed.getCustomerId());
+                        renewed.getOrderId(), renewed.getPolicyId(), renewedPremium, renewed.getCustomerId());
                 if (invoiceResp != null && invoiceResp.get("invoice_id") != null) {
                     invoiceId = UUID.fromString(String.valueOf(invoiceResp.get("invoice_id")));
                 }
@@ -1219,9 +1235,9 @@ public class PolicyLifecycleService {
         if (policy.getStatus() != PolicyStatus.active) {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
-        OffsetDateTime cancelDate = request.getCancelDate();
         // E1: Block backdate — cancel_date must be >= now and within [effective, expiration].
         OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime cancelDate = request != null && request.getCancelDate() != null ? request.getCancelDate() : now;
         if (cancelDate.isBefore(now) || cancelDate.isAfter(policy.getPolicyExpirationDate())
                 || cancelDate.isBefore(policy.getPolicyEffectiveDate())) {
             throw new ServiceException(ErrorCode.CANCEL_DATE_OUT_OF_RANGE);

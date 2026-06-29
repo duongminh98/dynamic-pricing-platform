@@ -14,7 +14,7 @@ public interface CustomerProfileRepository extends JpaRepository<CustomerProfile
     CustomerProfile findByAccount_AccountId(UUID accountId);
 
     @Query("select p from CustomerProfile p join p.account a " +
-            "where (:q is null or lower(a.email) like lower(concat('%', :q, '%'))) " +
+            "where (:q is null or lower(a.email) like lower(concat('%', cast(:q as string), '%'))) " +
             "and (:province is null or p.province = :province) " +
             "and (:locked is null " +
             "     or (:locked = true and a.lockedUntil is not null and a.lockedUntil > :now) " +

@@ -52,8 +52,26 @@ def _direction(magnitude: float) -> str:
     return "increase" if magnitude >= 0 else "decrease"
 
 
+def _select_explanation_model(model):
+    """Choose the estimator used for explanation and return a method prefix."""
+    if isinstance(model, dict):
+        if model.get("freq") is not None:
+            return model["freq"], "freqsev_frequency"
+        if model.get("tw") is not None:
+            return model["tw"], "tweedie"
+        if model.get("sev") is not None:
+            return model["sev"], "freqsev_severity"
+    return model, None
+
+def _method_name(prefix: str | None, method: str) -> str:
+    return f"{prefix}_{method}" if prefix else method
+
+def _unavailable(method: str = "unavailable") -> dict:
+    return {"available": False, "method": method, "items": []}
+
 def _extract_model_and_features(model):
     """Return (estimator, feature_names) handling both LGBMRegressor and Pipeline."""
+    model, _ = _select_explanation_model(model)
     if hasattr(model, "feature_name_"):
         return model, list(model.feature_name_)
     if hasattr(model, "named_steps") and "est" in model.named_steps:
@@ -68,13 +86,15 @@ def _extract_model_and_features(model):
 def explain(model, feature_df: "pd.DataFrame") -> dict:
     """Produce a SHAP-based explanation; degrade gracefully on any error."""
     try:
-        est, feature_names = _extract_model_and_features(model)
+        selected_model, method_prefix = _select_explanation_model(model)
+        est, feature_names = _extract_model_and_features(selected_model)
         if feature_df is None or feature_df.empty:
-            return {"available": False, "items": []}
+            return _unavailable()
 
         import shap
 
         values = None
+        method = "unavailable"
         est_name = type(est).__name__.lower()
         is_tree = ("lgbm" in est_name or "xgb" in est_name
                    or "gradient" in est_name or "forest" in est_name
@@ -83,12 +103,14 @@ def explain(model, feature_df: "pd.DataFrame") -> dict:
             try:
                 explainer = _get_tree_explainer(est)
                 values = explainer.shap_values(feature_df)
+                method = "tree_shap"
             except Exception:
                 values = None
         if values is None and hasattr(est, "coef_"):
             try:
                 explainer = shap.LinearExplainer(est, feature_df)
                 values = explainer.shap_values(feature_df)
+                method = "linear_shap"
             except Exception:
                 values = None
         if values is None:
@@ -104,6 +126,7 @@ def explain(model, feature_df: "pd.DataFrame") -> dict:
                 perturbed[c] = perturbed[c].mean()
                 contribs.append(float(est.predict(perturbed)[0]) - base)
             values = np.array([contribs])
+            method = "perturbation_fallback"
 
         arr = np.asarray(values)
         if arr.ndim == 3:
@@ -124,7 +147,7 @@ def explain(model, feature_df: "pd.DataFrame") -> dict:
                 "magnitude": abs(float(magnitude)),
             })
         if len(items) < 3:
-            return {"available": False, "items": []}
-        return {"available": True, "items": items[:10]}
+            return _unavailable(_method_name(method_prefix, method))
+        return {"available": True, "method": _method_name(method_prefix, method), "items": items[:10]}
     except Exception:
-        return {"available": False, "items": []}
+        return _unavailable()

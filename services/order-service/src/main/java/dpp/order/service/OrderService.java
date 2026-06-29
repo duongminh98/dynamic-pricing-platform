@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
@@ -35,6 +36,7 @@ public class OrderService {
     private final PolicyRepository policyRepository;
     private final OrderApprovalTransactionService approvalTxService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private static final TypeReference<Map<String, Object>> RISK_PROFILE_TYPE = new TypeReference<>() {};
 
     private static final Set<String> INDEMNITY_LINES = Set.of("motorbike", "car", "home", "health", "travel");
 
@@ -261,6 +263,11 @@ public class OrderService {
         resp.setCustomerId(order.getCustomerId());
         resp.setProductId(order.getProductId());
         resp.setFinalPremiumVnd(order.getFinalPremiumVnd());
+        resp.setLine(order.getLine());
+        resp.setTripDurationDays(order.getTripDurationDays());
+        resp.setCoverageAmountVnd(order.getCoverageAmountVnd());
+        resp.setDeductibleVnd(order.getDeductibleVnd());
+        resp.setRiskProfile(parseRiskProfile(order.getRiskProfile()));
         resp.setStatus(order.getStatus());
         resp.setReviewDecision(order.getReviewDecision());
         resp.setReviewReason(order.getReviewReason());
@@ -269,5 +276,16 @@ public class OrderService {
         resp.setCreatedAt(order.getCreatedAt());
         resp.setInvoiceId(order.getInvoiceId());
         return resp;
+    }
+
+    private Map<String, Object> parseRiskProfile(String riskProfile) {
+        if (riskProfile == null || riskProfile.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(riskProfile, RISK_PROFILE_TYPE);
+        } catch (Exception e) {
+            return Map.of();
+        }
     }
 }

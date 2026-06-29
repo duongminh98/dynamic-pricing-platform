@@ -84,6 +84,7 @@ services:
       - name: customer-routes
         paths:
           - /customers
+          - /admin/customers
         strip_path: false
         preserve_host: false
 
@@ -127,6 +128,7 @@ services:
           - /policies
           - /admin/orders
           - /admin/endorsements
+          - /admin/policies
         strip_path: false
         preserve_host: false
 
@@ -149,6 +151,7 @@ services:
       - name: claims-routes
         paths:
           - /claims
+          - /admin/claims
         strip_path: false
         preserve_host: false
 
@@ -164,6 +167,8 @@ services:
       - name: billing-routes
         paths:
           - /billing
+          - /admin/billing
+          - /admin/refunds
         strip_path: false
         preserve_host: false
 

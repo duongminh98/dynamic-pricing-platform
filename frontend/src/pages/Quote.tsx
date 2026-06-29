@@ -1,12 +1,206 @@
-import { useState } from 'react';
-import { apiFetch } from '../api/client';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { apiFetch, ApiError } from '../api/client';
+import { useApi, useMutation, vndLabel } from '../lib/format';
+import { viFeature, viProduct } from '../lib/labels';
+import { LINE_LABEL, LINE_ICON, Line } from '../lib/domain';
+import { SelectField } from '../lib/fields';
+import { Loading, ErrorBanner, Spinner, Alert, useToast } from '../lib/ui';
+
+interface ProductSummary { product_id: string; line: string; product_name: string; }
+interface BaseProfile {
+  age: number; gender: string; province: string; region: string; urban_tier: string;
+  occupation: string; income_level: string; marital_status: string;
+  lines?: { line: string; line_attributes: Record<string, any> }[];
+}
+interface ExplItem { feature: string; label: string; direction: 'increase' | 'decrease'; magnitude: number; }
+interface QuoteResult {
+  quote_id: string; line: string; product_id: string;
+  coverage_amount_vnd: number; deductible_vnd: number;
+  pure_premium_vnd: number; final_premium_vnd: number; admin_fee_vnd: number;
+  loading_factor: number; expires_at: string;
+  explanation: { available: boolean; method?: string; items: ExplItem[] };
+  model_version: string;
+}
 
 export default function Quote() {
-  const [productId, setProductId] = useState('HEALTH_BASIC');
-  const [result, setResult] = useState<any>(null);
-  const quote = async () => {
-    const r = await apiFetch('/pricing/quote', { method: 'POST', body: JSON.stringify({ product_id: productId, profile: {} }) });
-    setResult(r);
+  const [params] = useSearchParams();
+  const nav = useNavigate();
+  const toast = useToast();
+  const { data: products } = useApi<ProductSummary[]>('/products');
+  const [productId, setProductId] = useState(params.get('product') || '');
+  const [profile, setProfile] = useState<BaseProfile | null>(null);
+  const [profileMissing, setProfileMissing] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [result, setResult] = useState<QuoteResult | null>(null);
+  const { run, busy, error } = useMutation();
+
+  useEffect(() => {
+    apiFetch<BaseProfile>('/customers/me/profile')
+      .then(setProfile)
+      .catch((e: ApiError) => { if (e.code === 'RESOURCE_NOT_FOUND') setProfileMissing(true); })
+      .finally(() => setLoadingProfile(false));
+  }, []);
+
+  const selected = products?.find((p) => p.product_id === productId);
+  const lineAttrs = selected ? profile?.lines?.find((l) => l.line === selected.line)?.line_attributes : undefined;
+
+  const getQuote = async () => {
+    if (!profile || !selected) return;
+    const body = {
+      product_id: productId,
+      profile: {
+        age: profile.age, gender: profile.gender, province: profile.province,
+        region: profile.region, urban_tier: profile.urban_tier, occupation: profile.occupation,
+        income_level: profile.income_level, marital_status: profile.marital_status,
+        line_attributes: lineAttrs || {},
+      },
+    };
+    try {
+      const r = await run<QuoteResult>('/pricing/quote', { method: 'POST', body });
+      setResult(r);
+    } catch { /* shown below */ }
   };
-  return <div><h2>Get Quote</h2><input value={productId} onChange={e => setProductId(e.target.value)} /><button onClick={quote}>Quote</button>{result && <div><p>Final Premium: {result.final_premium_vnd} VND</p>{result.explanation && <ul>{result.explanation.items?.map((it: any, i: number) => <li key={i}>{it.label}: {it.direction} {it.magnitude}</li>)}</ul>}</div>}</div>;
+
+  const placeOrder = async () => {
+    if (!result) return;
+    try {
+      const order = await run<{ order_id: string }>('/orders', { method: 'POST', body: { quote_id: result.quote_id } });
+      toast.push('Đã gửi đơn hàng. Đang chờ duyệt.');
+      nav(`/orders/${order.order_id}`);
+    } catch (e) {
+      const err = e as ApiError;
+      if (err.code === 'QUOTE_EXPIRED') toast.push('Báo giá đã hết hạn, vui lòng báo giá lại.', 'warn');
+      else if (err.code === 'QUOTE_ALREADY_USED') toast.push('Báo giá này đã được dùng cho một đơn khác.', 'warn');
+      else if (err.code === 'DUPLICATE_ACTIVE_POLICY') toast.push('Bạn đã có hợp đồng đang hiệu lực cho tài sản này.', 'warn');
+    }
+  };
+
+  if (loadingProfile) return <Loading />;
+
+  if (profileMissing) {
+    return (
+      <div className="stack" style={{ maxWidth: 560 }}>
+        <Alert kind="warn">Bạn cần hoàn thiện hồ sơ rủi ro trước khi nhận báo giá.</Alert>
+        <button className="btn btn-primary" onClick={() => nav('/profile')}>Hoàn thiện hồ sơ →</button>
+      </div>
+    );
+  }
+
+  const lineMissing = selected && !lineAttrs;
+
+  return (
+    <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 380px) 1fr', alignItems: 'start', gap: 'var(--s6)' }}>
+      <div className="card stack">
+        <div>
+          <p className="eyebrow">Bước 1</p>
+          <h3 style={{ fontSize: 'var(--step-1)' }}>Chọn sản phẩm</h3>
+        </div>
+        <SelectField
+          label="Sản phẩm"
+          value={productId}
+          onChange={(v) => { setProductId(v); setResult(null); }}
+          options={(products || []).map((p) => p.product_id)}
+          labelFn={(id) => { const p = products?.find((x) => x.product_id === id); return p ? `${LINE_ICON[p.line as Line]} ${viProduct(p.product_id, p.product_name)}` : id; }}
+          placeholder="Chọn sản phẩm…"
+        />
+
+        {selected && (
+          <div className="panel">
+            <div className="row-between" style={{ marginBottom: 8 }}>
+              <span className="prod-line">{LINE_ICON[selected.line as Line]} {LINE_LABEL[selected.line as Line]}</span>
+            </div>
+            {lineMissing ? (
+              <Alert kind="warn">
+                Chưa có thuộc tính hồ sơ cho dòng {LINE_LABEL[selected.line as Line].toLowerCase()}.{' '}
+                <button className="btn-link" onClick={() => nav('/profile')}>Bổ sung ngay</button>
+              </Alert>
+            ) : (
+              <p className="field-hint" style={{ margin: 0 }}>Báo giá dùng hồ sơ {LINE_LABEL[selected.line as Line].toLowerCase()} đã lưu của bạn.</p>
+            )}
+          </div>
+        )}
+
+        <ErrorBanner error={result ? null : error} />
+
+        <button className="btn btn-primary" disabled={!productId || busy || !!lineMissing} onClick={getQuote}>
+          {busy && !result ? <Spinner /> : 'Tính phí cho tôi'}
+        </button>
+      </div>
+
+      <div>
+        {!result ? (
+          <div className="card price-hero" style={{ minHeight: 280, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
+            <div>
+              <div className="price-label">Mức phí của bạn</div>
+              <div className="price-amount" style={{ opacity: 0.35 }}>— — —<span className="cur">₫</span></div>
+              <p style={{ color: '#7E887E', marginTop: 16, maxWidth: 360 }}>Chọn sản phẩm và bấm tính phí. Chúng tôi sẽ phân rã từng yếu tố tạo nên con số này.</p>
+            </div>
+          </div>
+        ) : (
+          <QuoteHero result={result} onOrder={placeOrder} ordering={busy} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function QuoteHero({ result, onOrder, ordering }: { result: QuoteResult; onOrder: () => void; ordering: boolean }) {
+  const items = result.explanation?.available ? [...result.explanation.items].sort((a, b) => b.magnitude - a.magnitude).slice(0, 10) : [];
+  const maxMag = items.reduce((m, it) => Math.max(m, it.magnitude), 0) || 1;
+
+  return (
+    <div className="stack">
+      <div className="price-hero">
+        <div className="row-between">
+          <div className="price-label">Phí bảo hiểm của bạn</div>
+          <span className="tag mono" style={{ background: 'rgba(255,255,255,.06)', color: '#9AA39A', borderColor: 'rgba(255,255,255,.1)' }}>{result.model_version}</span>
+        </div>
+        <div className="price-amount">{vndLabel(result.final_premium_vnd).replace(' ₫', '')}<span className="cur">₫ / năm</span></div>
+
+        {/* the signature: decomposition bars */}
+        {items.length > 0 ? (
+          <>
+            <div className="decomp">
+              {items.map((it) => (
+                <div className="decomp-row" key={it.feature}>
+                  <span className="decomp-feat">{viFeature(it.feature)}</span>
+                  <div className="decomp-track">
+                    <span className="decomp-mid" />
+                    <span
+                      className={'decomp-fill ' + (it.direction === 'increase' ? 'up' : 'down')}
+                      style={{ width: `${Math.max(4, (it.magnitude / maxMag) * 48)}%` }}
+                    />
+                  </div>
+                  <span className="decomp-mag">{it.direction === 'increase' ? '+' : '−'}{it.magnitude.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="decomp-legend">
+              <span><span className="legend-dot" style={{ background: 'var(--terra)' }} />Đẩy phí lên</span>
+              <span><span className="legend-dot" style={{ background: '#2FB89E' }} />Kéo phí xuống</span>
+            </div>
+          </>
+        ) : (
+          <p style={{ color: '#7E887E', marginTop: 20 }}>Bản phân rã chi tiết không khả dụng cho báo giá này, nhưng mức phí vẫn hợp lệ.</p>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="stat-row">
+          <div className="stat"><span className="stat-l">Phí thuần (rủi ro)</span><span className="stat-n">{vndLabel(result.pure_premium_vnd)}</span></div>
+          <div className="stat"><span className="stat-l">Hệ số tải</span><span className="stat-n">×{result.loading_factor}</span></div>
+          <div className="stat"><span className="stat-l">Phí quản lý</span><span className="stat-n">{vndLabel(result.admin_fee_vnd)}</span></div>
+        </div>
+        <hr className="divider" />
+        <div className="kv" style={{ borderTop: 'none' }}><span className="kv-k">Số tiền bảo hiểm</span><span className="kv-v">{vndLabel(result.coverage_amount_vnd)}</span></div>
+        <div className="kv"><span className="kv-k">Mức miễn thường</span><span className="kv-v">{vndLabel(result.deductible_vnd)}</span></div>
+        <p className="field-hint" style={{ marginTop: 12 }}>Báo giá có hiệu lực đến {new Date(result.expires_at).toLocaleDateString('vi-VN')}.</p>
+      </div>
+
+      <button className="btn btn-primary btn-block" disabled={ordering} onClick={onOrder}>
+        {ordering ? <Spinner /> : 'Đặt mua với mức phí này →'}
+      </button>
+    </div>
+  );
 }

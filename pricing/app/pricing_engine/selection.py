@@ -12,6 +12,12 @@ from common.errors import ErrorCode, ServiceException
 from . import loader
 
 def _champion_model(line: str, algo: str, family: str):
+    if family in ("freqsev", "freq_sev"):
+        freq = loader.all_artifacts.get(line, {}).get("freq", {}).get(algo) or loader.artifacts.get(line, {}).get("freq")
+        sev = loader.all_artifacts.get(line, {}).get("sev", {}).get(algo) or loader.artifacts.get(line, {}).get("sev")
+        if freq is None or sev is None:
+            return None
+        return {"freq": freq, "sev": sev}
     model = loader.all_artifacts.get(line, {}).get(family, {}).get(algo)
     if model is None:
         model = loader.artifacts.get(line, {}).get(family)

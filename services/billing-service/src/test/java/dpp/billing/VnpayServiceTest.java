@@ -13,7 +13,10 @@ import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -28,6 +31,7 @@ class VnpayServiceTest {
 
     private static final String SECRET = "test-service-secret";
     private static final String TMN_CODE = "TEST001";
+    private static final ZoneId VNPAY_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
 
     private VnpayConfig config() {
         VnpayConfig c = new VnpayConfig();
@@ -240,6 +244,41 @@ class VnpayServiceTest {
         assertTrue(url.contains("vnp_ExpireDate="));
     }
 
+    @Test
+    void createPaymentUrlUsesVietnamTimeForVnpayDates() {
+        UUID invoiceId = UUID.randomUUID();
+
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        VnpayPaymentRepository payRepo = mock(VnpayPaymentRepository.class);
+        BillingService billing = mock(BillingService.class);
+
+        when(invRepo.findById(invoiceId)).thenReturn(Optional.of(unpaidInvoice(invoiceId, 1_000_000L)));
+        when(payRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        VnpayService svc = serviceWith(config(), payRepo, invRepo, billing);
+        String url = svc.createPaymentUrl(invoiceId, "127.0.0.1").get("payment_url");
+
+        LocalDateTime createDate = LocalDateTime.parse(queryParam(url, "vnp_CreateDate"),
+                java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        LocalDateTime expireDate = LocalDateTime.parse(queryParam(url, "vnp_ExpireDate"),
+                java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        LocalDateTime vietnamNow = LocalDateTime.now(VNPAY_ZONE);
+
+        assertTrue(Math.abs(ChronoUnit.MINUTES.between(vietnamNow, createDate)) <= 1,
+                "VNPAY create date must use Vietnam local time");
+        assertEquals(15, ChronoUnit.MINUTES.between(createDate, expireDate),
+                "VNPAY expiry must be 15 minutes after create date");
+    }
+
+    private String queryParam(String url, String name) {
+        String prefix = name + "=";
+        return Arrays.stream(url.substring(url.indexOf('?') + 1).split("&"))
+                .filter(part -> part.startsWith(prefix))
+                .map(part -> part.substring(prefix.length()))
+                .findFirst()
+                .orElseThrow();
+    }
+
     // ==================== processReturn ====================
 
     private Map<String, String> returnParams(String txnRef, String responseCode, boolean validSignature) {
@@ -265,6 +304,9 @@ class VnpayServiceTest {
         VnpayPaymentRepository payRepo = mock(VnpayPaymentRepository.class);
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
         BillingService billing = mock(BillingService.class);
+        UUID invoiceId = UUID.randomUUID();
+        VnpayPayment pending = pendingPayment("TXN-OK-001", invoiceId, 1_000_000L);
+        when(payRepo.findByVnpTxnRef("TXN-OK-001")).thenReturn(Optional.of(pending));
 
         VnpayService svc = serviceWith(config(), payRepo, invRepo, billing);
         Map<String, String> params = returnParams("TXN-OK-001", "00", true);
@@ -274,6 +316,8 @@ class VnpayServiceTest {
         assertEquals("success", result.get("status"));
         assertEquals("00", result.get("vnp_response_code"));
         assertEquals("TXN-OK-001", result.get("vnp_txn_ref"));
+        verify(payRepo).save(argThat(p -> "success".equals(((VnpayPayment) p).getStatus())));
+        verify(billing).payInvoice(invoiceId);
     }
 
     @Test
@@ -281,6 +325,8 @@ class VnpayServiceTest {
         VnpayPaymentRepository payRepo = mock(VnpayPaymentRepository.class);
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
         BillingService billing = mock(BillingService.class);
+        VnpayPayment pending = pendingPayment("TXN-FAIL-001", UUID.randomUUID(), 1_000_000L);
+        when(payRepo.findByVnpTxnRef("TXN-FAIL-001")).thenReturn(Optional.of(pending));
 
         VnpayService svc = serviceWith(config(), payRepo, invRepo, billing);
         Map<String, String> params = returnParams("TXN-FAIL-001", "24", true);
@@ -289,6 +335,8 @@ class VnpayServiceTest {
 
         assertEquals("failed", result.get("status"));
         assertEquals("24", result.get("vnp_response_code"));
+        verify(payRepo).save(argThat(p -> "failed".equals(((VnpayPayment) p).getStatus())));
+        verify(billing, never()).payInvoice(any());
     }
 
     @Test
@@ -306,13 +354,14 @@ class VnpayServiceTest {
     }
 
     @Test
-    void processReturnDoesNotCallPayInvoice() {
+    void processReturnInvalidSignatureDoesNotCallPayInvoice() {
         VnpayPaymentRepository payRepo = mock(VnpayPaymentRepository.class);
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
         BillingService billing = mock(BillingService.class);
 
         VnpayService svc = serviceWith(config(), payRepo, invRepo, billing);
         Map<String, String> params = returnParams("TXN-RETURN-001", "00", true);
+        params.put("vnp_SecureHash", "invalidhash123");
 
         svc.processReturn(params);
 

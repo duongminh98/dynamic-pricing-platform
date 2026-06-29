@@ -1,7 +1,10 @@
 package dpp.billing.controller;
 
+import dpp.billing.dto.AdjustmentResponse;
 import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.dto.PageResponse;
+import dpp.billing.entity.AdjustmentReason;
+import dpp.billing.entity.AdjustmentType;
 import dpp.billing.entity.InvoiceStatus;
 import dpp.billing.service.BillingService;
 import org.springframework.data.domain.PageRequest;
@@ -46,4 +49,18 @@ public class AdminBillingController {
     public InvoiceResponse voidInvoice(@PathVariable UUID id) {
         return billingService.voidInvoice(id);
     }
+
+    @GetMapping("/adjustments")
+    @PreAuthorize("hasRole('Administrator')")
+    public PageResponse<AdjustmentResponse> listAdjustments(
+            @RequestParam(required = false) AdjustmentType type,
+            @RequestParam(required = false) AdjustmentReason reason,
+            @RequestParam(required = false) UUID policyId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        size = Math.min(size, 100);
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return billingService.adminListAdjustmentsPaged(type, reason, policyId, pageable);
+    }
 }
+

@@ -1,30 +1,39 @@
-"""Register Champion Model_Version rows + champion_assignment in pricing_db,
+﻿"""Register Champion Model_Version rows + champion_assignment in pricing_db,
 and keep champion_config.json in sync (task 6.2).
 
-Uses DETERMINISTIC model_version ids (UUID5) so the DB rows and the
-champion_config.json file reference the same identifier (risk: file/DB drift).
+Uses artifact-derived model_version ids (UUID5 over line, algorithm, family,
+dataset version, and artifact checksum) so each retrain produces a traceable
+version while remaining deterministic for the same artifacts.
 Prerequisite: the offline monotonic gate (task 6.3) MUST pass for a line
 before it is registered as champion (BR-23 / C-8).
 
 Run:  python offline/register_models.py
-Requires: pricing_db (postgres-pricing) running + champion_config.json present.
+      python offline/register_models.py --sync-file-only
+Requires: pricing_db (postgres-pricing) running + champion_config.json present,
+unless --sync-file-only is used.
 """
-import json
-import uuid
-import pathlib
+import argparse
 import datetime
+import hashlib
+import json
 import os
+import pathlib
+import uuid
 
 import psycopg2
 import psycopg2.extras
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data" / "synthetic_real"
+DATA_DIR = pathlib.Path(os.environ.get("PRICING_TRAIN_DATA_DIR", ROOT / "data" / "synthetic_real"))
+if not DATA_DIR.is_absolute():
+    DATA_DIR = ROOT / DATA_DIR
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
+METADATA_PATH = DATA_DIR / "pricing_modeling_metadata.json"
 
 LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
 
-# Deterministic namespace so model_version ids are stable across runs.
+# Deterministic namespace so identical artifacts produce the same id, while
+# retrained artifacts produce a new id.
 NAMESPACE = uuid.UUID("00000000-0000-0000-0000-cab000000001")
 
 
@@ -38,33 +47,99 @@ def get_db_connection():
                             password=password, dbname=dbname)
 
 
-def model_version_for(line: str) -> str:
-    return str(uuid.uuid5(NAMESPACE, "champion:" + line))
+def _load_config(config_path: pathlib.Path) -> dict:
+    with open(config_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _write_config(config_path: pathlib.Path, config: dict) -> None:
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+
+def _artifact_paths(line: str, cfg: dict) -> list[pathlib.Path]:
+    algorithm = cfg.get("algorithm", "lgb")
+    family = cfg.get("family", "tw")
+    if family in ("freqsev", "freq_sev"):
+        return [
+            MODELS_DIR / f"{line}__{algorithm}_freq.joblib",
+            MODELS_DIR / f"{line}__{algorithm}_sev.joblib",
+        ]
+    return [MODELS_DIR / f"{line}__{algorithm}_{family}.joblib"]
+
+
+def _sha256_files(paths: list[pathlib.Path]) -> str:
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode("utf-8"))
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _dataset_version() -> str:
+    try:
+        meta = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return DATA_DIR.name
+    return str(meta.get("dataset_version") or meta.get("dataset_desc") or DATA_DIR.name)
+
+
+def enrich_model_version(line: str, cfg: dict, trained_at: str | None = None) -> str:
+    paths = _artifact_paths(line, cfg)
+    missing = [str(path) for path in paths if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing champion artifacts for {line}: {missing}")
+    checksum = _sha256_files(paths)
+    dataset_version = _dataset_version()
+    version_key = ":".join([
+        "champion",
+        line,
+        str(cfg.get("algorithm", "lgb")),
+        str(cfg.get("family", "tw")),
+        dataset_version,
+        checksum,
+    ])
+    model_version_id = str(uuid.uuid5(NAMESPACE, version_key))
+    cfg["model_version"] = model_version_id
+    cfg["artifact_checksum"] = checksum
+    cfg["artifact_files"] = [path.name for path in paths]
+    cfg["dataset_version"] = dataset_version
+    cfg["trained_at"] = trained_at or cfg.get("trained_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return model_version_id
+
+
+def sync_config(config: dict) -> dict:
+    champion_by_line = config["champion_by_line"]
+    for line in LINES:
+        enrich_model_version(line, champion_by_line[line])
+    return config
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sync-file-only", action="store_true",
+                        help="Update champion_config.json without connecting to pricing_db.")
+    args = parser.parse_args()
+
     config_path = MODELS_DIR / "champion_config.json"
-    with open(config_path, encoding="utf-8") as f:
-        config = json.load(f)
+    config = _load_config(config_path)
     champion_by_line = config["champion_by_line"]
+
+    if args.sync_file_only:
+        sync_config(config)
+        _write_config(config_path, config)
+        print(f"Wrote synchronized champion_config.json to {config_path}")
+        return
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             for line in LINES:
                 cfg = champion_by_line[line]
-                model_version_id = model_version_for(line)
-                # Keep config + DB in sync: overwrite the file id with the
-                # deterministic one (idempotent across runs).
-                cfg["model_version"] = model_version_id
+                model_version_id = enrich_model_version(line, cfg)
 
-                # BR-19 travel exemption (task 20.8b): GLM champions on
-                # monotonic-exempt lines do not carry artifact-level
-                # monotone_constraints (monotonic_applied=false). The exemption
-                # is recorded in champion_config.json via "monotonic_exempt" and
-                # honoured by the promote gate in pricing_engine/governance.py.
-                # We surface it here so registration is auditable; the model_version
-                # row still records the actual monotonic_applied value.
                 if cfg.get("monotonic_exempt"):
                     print(f"  NOTE: {line} is MONOTONIC-EXEMPT "
                           f"(algorithm={cfg.get('algorithm')}): "
@@ -83,11 +158,10 @@ def main():
                     (model_version_id, line, "LightGBM" if cfg["algorithm"] == "lgb" else "GLM",
                      float(cfg["gini"]), 0.0, 0.0, 0.0,
                      datetime.datetime.now(datetime.timezone.utc),
-                     cfg.get("dataset_desc", "synthetic_real"),
+                     cfg.get("dataset_version") or cfg.get("dataset_desc", "synthetic_real"),
                      bool(cfg["monotonic_applied"])),
                 )
 
-                # Append-only champion assignment: retire previous current, insert new.
                 cur.execute(
                     "UPDATE champion_assignment SET is_current = FALSE WHERE line = %s",
                     (line,),
@@ -105,8 +179,7 @@ def main():
     finally:
         conn.close()
 
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+    _write_config(config_path, config)
     print(f"Wrote synchronized champion_config.json to {config_path}")
 
 

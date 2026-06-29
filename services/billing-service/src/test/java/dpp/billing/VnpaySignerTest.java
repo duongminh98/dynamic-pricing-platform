@@ -86,12 +86,12 @@ class VnpaySignerTest {
     }
 
     @Test
-    void buildQueryStringEncodesSpacesAsPercent20() {
+    void buildQueryStringEncodesSpacesAsPlus() {
         Map<String, String> params = new LinkedHashMap<>();
         params.put("vnp_OrderInfo", "Payment for invoice 123");
 
         String qs = VnpaySigner.buildQueryString(params);
-        assertEquals("vnp_OrderInfo=Payment%20for%20invoice%20123", qs);
+        assertEquals("vnp_OrderInfo=Payment+for+invoice+123", qs);
     }
 
     @Test

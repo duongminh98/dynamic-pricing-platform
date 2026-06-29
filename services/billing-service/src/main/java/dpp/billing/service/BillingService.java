@@ -260,6 +260,15 @@ public class BillingService {
         return r;
     }
 
+
+    @Transactional(readOnly = true)
+    public PageResponse<AdjustmentResponse> adminListAdjustmentsPaged(AdjustmentType type, AdjustmentReason reason,
+                                                                      UUID policyId,
+                                                                      org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.domain.Page<Adjustment> page = adjustmentRepository.findFiltered(type, reason, policyId, pageable);
+        return PageResponse.from(page.map(this::toAdjustmentResponse));
+    }
+
     private InvoiceResponse toResponse(Invoice invoice) {
         InvoiceResponse resp = new InvoiceResponse();
         resp.setInvoiceId(invoice.getInvoiceId());

@@ -117,6 +117,31 @@ class MaterialChangeEndorsementTest {
     }
 
     @Test
+    void endorsementWithoutEffectiveDateDefaultsToNow() {
+        Policy policy = activePolicy();
+        policy.setPolicyEffectiveDate(OffsetDateTime.now().minusDays(1));
+        policy.setPolicyExpirationDate(OffsetDateTime.now().plusDays(364));
+
+        PricingClient pricing = mock(PricingClient.class);
+        when(pricing.rerate(eq("MOTOR_BASIC"), anyMap()))
+                .thenReturn(Map.of("final_premium_vnd", 2_200_000L));
+        EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
+        PolicyLifecycleService s = svc(policy, pricing, mock(ExposureSegmentRepository.class),
+                mock(PolicyDocumentRepository.class), mock(PolicyRepository.class), endRepo);
+
+        EndorsementRequest req = new EndorsementRequest();
+        req.setChange(Map.of("vehicle_value_vnd", 500_000_000L));
+
+        OffsetDateTime before = OffsetDateTime.now().minusSeconds(1);
+        EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
+        OffsetDateTime after = OffsetDateTime.now().plusSeconds(1);
+
+        assertFalse(result.getEffectiveDate().isBefore(before));
+        assertFalse(result.getEffectiveDate().isAfter(after));
+        assertEquals("PENDING_REVIEW", result.getStatus());
+    }
+
+    @Test
     void adminApproveAppliesEndorsementAndReRates() {
         Policy policy = activePolicy();
         PricingClient pricing = mock(PricingClient.class);

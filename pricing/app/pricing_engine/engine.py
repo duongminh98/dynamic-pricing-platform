@@ -39,6 +39,76 @@ PROFILE_RANGES = {
 }
 
 
+RISK_MONOTONE_BASELINES = {
+    "health": {
+        "smoker": False,
+        "chronic_disease": False,
+        "diabetes": False,
+        "blood_pressure_problem": False,
+        "hospitalized_last_12m": False,
+        "major_surgeries_count": 0,
+        "medical_visit_count_12m": 0,
+    },
+    "motorbike": {
+        "vehicle_age": 0,
+        "vehicle_value_vnd": 20_000_000,
+        "annual_mileage_km": 0,
+        "traffic_violation_count_12m": 0,
+        "anti_theft_device": True,
+    },
+    "car": {
+        "vehicle_age": 0,
+        "vehicle_value_vnd": 300_000_000,
+        "annual_mileage_km": 0,
+        "traffic_violation_count_12m": 0,
+        "driver_count": 1,
+        "anti_theft_device": True,
+    },
+    "home": {
+        "building_age": 0,
+        "floor_area_m2": 80,
+        "number_of_floors": 1,
+        "declared_property_value_vnd": 1_000_000_000,
+        "has_fire_alarm": True,
+        "has_sprinkler": True,
+        "security_system": True,
+        "fire_protection": True,
+    },
+    "accident": {
+        "commute_distance_km": 0,
+        "sport_activity_flag": False,
+    },
+    "travel": {
+        "trip_duration_days": 1,
+        "traveler_count": 1,
+        "trip_cost_vnd": 0,
+        "has_baggage_cover": False,
+        "has_trip_cancellation_cover": False,
+    },
+}
+
+RISK_ORDERED_BASELINES = {
+    "home": {
+        "flood_risk_zone": ("low", ["low", "medium", "high"]),
+    },
+    "accident": {
+        "occupation_class": ("low", ["low", "medium", "medium_high", "high"]),
+        "workplace_risk_level": ("low", ["low", "medium", "medium_high", "high"]),
+        "sport_risk_level": ("none", ["none", "low", "medium", "high"]),
+    },
+    "travel": {
+        "domestic_or_international": ("domestic", ["domestic", "international"]),
+    },
+}
+
+RISK_NUMERIC_CHECKPOINTS = {
+    "health": {
+        "major_surgeries_count": [0, 1, 3, 5],
+        "medical_visit_count_12m": [0, 2, 8, 12],
+    },
+}
+
+
 def _rate_version_for(line: str, model_version: str) -> str:
     """Deterministic Rate_Version id for the rating config in effect (R32.3).
     Derived from line + champion model_version so the same config yields the same
@@ -90,16 +160,100 @@ def _predict_pure_premium(selection: dict, feature_df) -> float:
     if family == "tw":
         # Tweedie: prediction is already loss per exposure-year (pure premium).
         return float(model.predict(feature_df)[0])
+    if family in ("freqsev", "freq_sev"):
+        frequency = float(model["freq"].predict(feature_df)[0])
+        severity = float(model["sev"].predict(feature_df)[0])
+        return max(0.0, frequency * severity)
     # Generic fallback: direct prediction.
-    #
-    # NOTE: the dedicated frequency x severity path lives in ``quote_freq_sev``,
-    # which loads the distinct freq and sev champion artifacts and multiplies
-    # their predictions. ``select_model`` only ever resolves a single champion
-    # model whose ``family`` is "tw" (or, defensively, "freq"/"sev"); it never
-    # yields a "freq_sev" family here. The previous "freq_sev" branch multiplied
-    # a single model by itself (model x model), which was dead and incorrect, so
-    # it has been removed (task 20.8c).
     return float(model.predict(feature_df)[0])
+
+
+def _line_attrs(profile: dict) -> dict:
+    return profile.get("line_attributes", {}) or {}
+
+def _attr_value(profile: dict, field: str):
+    attrs = _line_attrs(profile)
+    if field in attrs:
+        return attrs[field]
+    return profile.get(field)
+
+def _with_attr(profile: dict, field: str, value) -> dict:
+    safer = dict(profile)
+    attrs = dict(_line_attrs(profile))
+    if field in attrs or field not in safer:
+        attrs[field] = value
+        safer["line_attributes"] = attrs
+    else:
+        safer[field] = value
+    return safer
+
+def _as_bool(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+def _is_riskier_than_baseline(value, baseline) -> bool:
+    if value in (None, ""):
+        return False
+    if isinstance(baseline, bool):
+        return _as_bool(value) != baseline
+    try:
+        return float(value) > float(baseline)
+    except (TypeError, ValueError):
+        return False
+
+def _is_ordered_riskier(value, baseline, ordered_values: list[str]) -> bool:
+    if value in (None, "") or value not in ordered_values or baseline not in ordered_values:
+        return False
+    return ordered_values.index(value) > ordered_values.index(baseline)
+
+def _safer_profiles_for_guard(line: str, profile: dict) -> list[dict]:
+    safer_profiles = []
+    for field, baseline in RISK_MONOTONE_BASELINES.get(line, {}).items():
+        value = _attr_value(profile, field)
+        if _is_riskier_than_baseline(value, baseline):
+            safer_profiles.append(_with_attr(profile, field, baseline))
+    for field, checkpoints in RISK_NUMERIC_CHECKPOINTS.get(line, {}).items():
+        value = _attr_value(profile, field)
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            continue
+        lower_values = [checkpoint for checkpoint in checkpoints if checkpoint < numeric_value]
+        if lower_values:
+            safer_profiles.append(_with_attr(profile, field, max(lower_values)))
+    for field, (baseline, ordered_values) in RISK_ORDERED_BASELINES.get(line, {}).items():
+        value = _attr_value(profile, field)
+        if _is_ordered_riskier(value, baseline, ordered_values):
+            safer_profiles.append(_with_attr(profile, field, baseline))
+    return safer_profiles
+
+def _guard_key(line: str, profile: dict) -> tuple:
+    fields = (
+        set(RISK_MONOTONE_BASELINES.get(line, {}))
+        | set(RISK_ORDERED_BASELINES.get(line, {}))
+        | set(RISK_NUMERIC_CHECKPOINTS.get(line, {}))
+    )
+    return tuple((field, repr(_attr_value(profile, field))) for field in sorted(fields))
+
+
+def _guarded_pure_premium(line: str, product_id: str, profile: dict,
+                          selection: dict, feature_names: list[str], feature_df) -> float:
+    memo: dict[tuple, float] = {}
+
+    def guarded(current_profile: dict, current_df) -> float:
+        key = _guard_key(line, current_profile)
+        if key in memo:
+            return memo[key]
+        guarded_premium = _predict_pure_premium(selection, current_df)
+        memo[key] = guarded_premium
+        for safer_profile in _safer_profiles_for_guard(line, current_profile):
+            safer_df = build_features(line, product_id, safer_profile, feature_names)
+            guarded_premium = max(guarded_premium, guarded(safer_profile, safer_df))
+        memo[key] = guarded_premium
+        return guarded_premium
+
+    return guarded(profile, feature_df)
 
 
 def quote(db, product_id: str, profile: dict,
@@ -129,7 +283,7 @@ def quote(db, product_id: str, profile: dict,
 
     feature_df = build_features(line, product_id, profile, feature_names)
 
-    pure_premium = _predict_pure_premium(selection, feature_df)
+    pure_premium = _guarded_pure_premium(line, product_id, profile, selection, feature_names, feature_df)
 
     if loading_factor is None:
         loading_factor = get_loading_factor(line)

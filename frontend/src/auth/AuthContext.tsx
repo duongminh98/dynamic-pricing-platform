@@ -1,17 +1,23 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
-import { setToken, clearToken, getToken } from '../api/client';
+import { setToken, clearToken, getToken, getStoredRoles, setStoredRoles } from '../api/client';
+
+interface LoginResult {
+  access_token: string;
+  roles: string[];
+}
 
 interface AuthCtx {
   isLoggedIn: boolean;
   isAdmin: boolean;
+  isCustomer: boolean;
   roles: string[];
-  login: (t: string) => void;
+  login: (r: LoginResult) => void;
   logout: () => void;
 }
 const Ctx = createContext<AuthCtx>(null!);
 
-/** Decode realm_access.roles from a JWT without verifying the signature
- * (the gateway verifies it). Returns [] on any parse failure. */
+/** Decode realm_access.roles from the JWT as a fallback when the login
+ * response omits roles. Signature is verified at the gateway, not here. */
 function rolesFromToken(token: string | null): string[] {
   if (!token) return [];
   try {
@@ -25,12 +31,14 @@ function rolesFromToken(token: string | null): string[] {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [roles, setRoles] = useState<string[]>(rolesFromToken(getToken()));
+  const [roles, setRoles] = useState<string[]>(getStoredRoles());
   const [isLoggedIn, setLoggedIn] = useState(!!getToken());
 
-  const login = (t: string) => {
-    setToken(t);
-    setRoles(rolesFromToken(t));
+  const login = (r: LoginResult) => {
+    setToken(r.access_token);
+    const resolved = r.roles && r.roles.length ? r.roles : rolesFromToken(r.access_token);
+    setStoredRoles(resolved);
+    setRoles(resolved);
     setLoggedIn(true);
   };
   const logout = () => {
@@ -40,10 +48,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ isLoggedIn, isAdmin: roles.includes('Administrator'), roles, login, logout }}>
+    <Ctx.Provider
+      value={{
+        isLoggedIn,
+        isAdmin: roles.includes('Administrator'),
+        isCustomer: roles.includes('Customer'),
+        roles,
+        login,
+        logout,
+      }}
+    >
       {children}
     </Ctx.Provider>
   );
 }
 
-export function useAuth() { return useContext(Ctx); }
+export function useAuth() {
+  return useContext(Ctx);
+}

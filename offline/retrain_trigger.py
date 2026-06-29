@@ -64,7 +64,14 @@ MONOTONIC_EXEMPT_LINES = frozenset({"travel"})
 MONOTONE_COMMON = {
     "coverage_amount_vnd": 1,
     "deductible_vnd": -1,
+    "claim_count_12m_prior": 1,
     "claim_count_36m_prior": 1,
+    "claim_count_lifetime_prior": 1,
+    "total_incurred_36m_prior": 1,
+    "avg_incurred_36m_prior": 1,
+    "max_incurred_36m_prior": 1,
+    "days_since_last_claim_prior": -1,
+    "claim_severity_score_prior": 1,
 }
 MONOTONE_VEHICLE = {**MONOTONE_COMMON, "annual_mileage_km": 1}
 

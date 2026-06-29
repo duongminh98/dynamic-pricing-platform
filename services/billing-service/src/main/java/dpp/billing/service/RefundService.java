@@ -123,6 +123,23 @@ public class RefundService {
         }
     }
 
+    @Transactional
+    public void createCancellationRefund(UUID policyId, UUID customerId, long amountVnd) {
+        if (amountVnd <= 0) {
+            return;
+        }
+        RefundRequest refund = new RefundRequest();
+        refund.setRefundId(UUID.randomUUID());
+        refund.setPolicyId(policyId);
+        refund.setCustomerId(customerId);
+        refund.setAmountVnd(amountVnd);
+        refund.setStatus(RefundStatus.pending);
+        refund.setNote("Cancellation pro-rata refund");
+        refund.setRequestedAt(OffsetDateTime.now());
+        refundRepository.save(refund);
+        enqueueRefundEvent("RefundRequested", refund);
+    }
+
     private void enqueueRefundEvent(String type, RefundRequest refund) {
         try {
             java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();

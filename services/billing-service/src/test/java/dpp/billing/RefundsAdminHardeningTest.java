@@ -361,6 +361,44 @@ class RefundsAdminHardeningTest {
     // ── T13: RefundRejected event published on reject ──
 
     @Test
+    void t12b_cancellationRefundCreatesPendingRequestWithoutCredit() {
+        RefundRequestRepository refundRepo = mock(RefundRequestRepository.class);
+        PremiumCreditRepository creditRepo = mock(PremiumCreditRepository.class);
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+
+        UUID policyId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        when(refundRepo.save(any())).thenAnswer(a -> a.getArgument(0));
+
+        RefundService svc = refundServiceWith(refundRepo, creditRepo, outbox);
+        svc.createCancellationRefund(policyId, customerId, 6_739_891L);
+
+        verify(refundRepo, times(1)).save(argThat(r ->
+                r.getPolicyId().equals(policyId)
+                        && r.getCustomerId().equals(customerId)
+                        && r.getCreditId() == null
+                        && r.getAmountVnd() == 6_739_891L
+                        && r.getStatus() == RefundStatus.pending
+                        && "Cancellation pro-rata refund".equals(r.getNote())));
+        verify(outbox, times(1)).enqueue(eq("RefundRequested"), anyString());
+        verifyNoInteractions(creditRepo);
+    }
+
+    @Test
+    void t12c_cancellationRefundSkipsNonPositiveAmount() {
+        RefundRequestRepository refundRepo = mock(RefundRequestRepository.class);
+        PremiumCreditRepository creditRepo = mock(PremiumCreditRepository.class);
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+
+        RefundService svc = refundServiceWith(refundRepo, creditRepo, outbox);
+        svc.createCancellationRefund(UUID.randomUUID(), UUID.randomUUID(), 0L);
+
+        verify(refundRepo, never()).save(any());
+        verify(outbox, never()).enqueue(any(), anyString());
+        verifyNoInteractions(creditRepo);
+    }
+
+    @Test
     void t13_rejectRefundPublishesRefundRejectedEvent() {
         RefundRequestRepository refundRepo = mock(RefundRequestRepository.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);

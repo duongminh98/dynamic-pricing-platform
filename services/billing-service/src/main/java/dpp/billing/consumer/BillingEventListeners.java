@@ -52,11 +52,12 @@ public class BillingEventListeners {
         try {
             JsonNode n = objectMapper.readTree(message);
             UUID policyId = UUID.fromString(n.get("policy_id").asText());
-            adjustmentService.applyCancellation(eventId, policyId,
+            long cancellationRefundVnd = adjustmentService.applyCancellation(eventId, policyId,
                     n.get("final_premium_vnd").asLong(),
                     n.get("remaining_days").asLong(), n.get("term_days").asLong());
             String customerIdStr = n.has("customer_id") ? n.get("customer_id").asText() : null;
             if (customerIdStr != null) {
+                refundService.createCancellationRefund(policyId, UUID.fromString(customerIdStr), cancellationRefundVnd);
                 refundService.createRefundsForCancelledPolicy(policyId, UUID.fromString(customerIdStr));
             }
         } catch (Exception e) { throw new RuntimeException("Cancellation processing failed", e); }
@@ -67,10 +68,21 @@ public class BillingEventListeners {
                           @Header(name = "X-Event-Id", required = false) String eventId) {
         try {
             JsonNode n = objectMapper.readTree(message);
+            // Only the payment-required renewal carries a net due to invoice. The
+            // credit-covers-all renewal and the post-payment activation event omit
+            // payment_required (or set it false) and need no invoice.
+            if (!n.has("payment_required") || !n.get("payment_required").asBoolean()) {
+                return;
+            }
             CreateInvoiceRequest req = new CreateInvoiceRequest();
             req.setOrderId(UUID.fromString(n.get("order_id").asText()));
             req.setPolicyId(UUID.fromString(n.get("policy_id").asText()));
-            req.setAmountVnd(n.get("final_premium_vnd").asLong());
+            // Pass the gross renewed premium; createInvoice nets off customer-scoped
+            // credit once (idempotent on policy_id), producing net_amount_vnd.
+            req.setAmountVnd(n.get("renewed_premium_vnd").asLong());
+            if (n.has("customer_id") && !n.get("customer_id").isNull()) {
+                req.setCustomerId(UUID.fromString(n.get("customer_id").asText()));
+            }
             billingService.createInvoice(req);
         } catch (Exception e) { throw new RuntimeException("Renewal processing failed", e); }
     }

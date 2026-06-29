@@ -54,12 +54,12 @@ public class AdjustmentService {
     }
 
     @Transactional
-    public void applyCancellation(String eventId, UUID policyId, long finalPremiumVnd,
-                                  long remainingDays, long termDays) {
+    public long applyCancellation(String eventId, UUID policyId, long finalPremiumVnd,
+                                   long remainingDays, long termDays) {
         // R33.4: dedup on event_id within the same TX as the Adjustment insert. A
         // redelivered PolicyCancelled is a no-op (no duplicate refund).
         if (alreadyProcessed(eventId)) {
-            return;
+            return 0L;
         }
         double fraction = termDays > 0 ? remainingDays / (double) termDays : 0;
         fraction = Math.max(0.0, Math.min(1.0, fraction));
@@ -73,6 +73,7 @@ public class AdjustmentService {
         adj.setCreatedAt(OffsetDateTime.now());
         adjustmentRepository.save(adj);
         recordProcessed(eventId, CONSUMER_CANCELLATION);
+        return refund;
     }
 
     private boolean alreadyProcessed(String eventId) {

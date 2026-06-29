@@ -372,6 +372,31 @@ class RenewalCancellationHardeningTest {
         assertTrue(resp.getTermDays() > 0);
     }
 
+    @Test
+    void cancelWithoutDateDefaultsToNow() {
+        Policy policy = activePolicy();
+        ExposureSegment seg = baseSegment(policy);
+
+        PolicyRepository repo = mock(PolicyRepository.class);
+        when(repo.findById(policy.getPolicyId())).thenReturn(Optional.of(policy));
+        when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
+        when(segRepo.findByPolicyIdOrderByExposureSegmentSeqAsc(policy.getPolicyId()))
+                .thenReturn(List.of(seg));
+
+        PolicyLifecycleService svc = newService(repo, segRepo,
+                mock(PricingClient.class), mock(BillingClient.class), mock(OutboxPublisher.class));
+
+        OffsetDateTime before = OffsetDateTime.now().minusSeconds(1);
+        CancelResponse resp = svc.cancel(policy.getPolicyId(), new CancelRequest(), SUBJECT);
+        OffsetDateTime after = OffsetDateTime.now().plusSeconds(1);
+
+        assertFalse(resp.getCancelDate().isBefore(before));
+        assertFalse(resp.getCancelDate().isAfter(after));
+        assertEquals(PolicyStatus.cancelled, resp.getStatus());
+    }
+
     // ── I11: Admin cancel backdate → CANCEL_DATE_OUT_OF_RANGE ──
     @Test
     void i11_adminCancelBackdateThrows() {

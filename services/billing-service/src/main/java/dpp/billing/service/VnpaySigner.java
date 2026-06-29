@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
  * VNPAY HMAC-SHA512 signing utility (task 21.2, R33.2).
  *
  * <p>Builds the canonical querystring from sorted vnp_* parameters (excluding
- * vnp_SecureHash), URL-encodes values using RFC 3986 (UTF-8, spaces as %20),
+ * vnp_SecureHash), URL-encodes values using VNPAY's Java sample convention,
  * and signs with HMAC-SHA512. The same sort + encode logic is used for both
  * signing (createPaymentUrl) and verification (return/IPN) so they are
  * guaranteed consistent.</p>
@@ -25,7 +25,7 @@ public final class VnpaySigner {
     /**
      * Build the canonical sorted querystring (excluding vnp_SecureHash) from the
      * given parameters. Keys are sorted ascending; values are URL-encoded with
-     * UTF-8 using %20 for spaces (VNPAY convention).
+     * UTF-8 using {@link URLEncoder}, including spaces encoded as '+'.
      */
     public static String buildQueryString(Map<String, String> params) {
         TreeMap<String, String> sorted = new TreeMap<>();
@@ -70,9 +70,9 @@ public final class VnpaySigner {
         return computed.equalsIgnoreCase(secureHash);
     }
 
-    /** URL-encode with UTF-8, using %20 for spaces (not +). */
+    /** URL-encode with UTF-8 using the same convention as VNPAY's Java sample. */
     static String encode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     static String bytesToHex(byte[] bytes) {
