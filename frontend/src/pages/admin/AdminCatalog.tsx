@@ -8,6 +8,7 @@ import { TextField, NumberField, SelectField, Toggle } from '../../lib/fields';
 interface ProductSummary {
   product_id: string; line: string; product_name: string;
   coverage_amount_vnd: number; deductible_vnd: number;
+  base_premium_vnd: number; admin_fee_vnd: number;
 }
 interface RateVersion {
   rate_version_id: string; effective_at: string; created_by: string; is_current: boolean; created_at: string;
@@ -34,16 +35,15 @@ export default function AdminCatalog() {
 function ProductsTab() {
   const toast = useToast();
   const { data, error, loading, reload } = useApi<ProductSummary[]>('/products');
-  const [editing, setEditing] = useState<ProductSummary | 'new' | null>(null);
+  const [editing, setEditing] = useState<ProductSummary | null>(null);
 
   return (
     <div className="stack">
       <div className="row-between">
         <span className="muted">{data?.length ?? 0} sản phẩm đang hoạt động</span>
-        <button className="btn btn-primary btn-sm" onClick={() => setEditing('new')}>+ Sản phẩm mới</button>
       </div>
 
-      {editing && <ProductForm initial={editing === 'new' ? null : editing} onDone={() => { setEditing(null); reload(); toast.push('Đã lưu sản phẩm.'); }} onCancel={() => setEditing(null)} />}
+      {editing && <ProductForm initial={editing} onDone={() => { setEditing(null); reload(); toast.push('Đã lưu sản phẩm.'); }} onCancel={() => setEditing(null)} />}
 
       {loading && <Loading />}
       <ErrorBanner error={error} />
@@ -72,17 +72,17 @@ function ProductsTab() {
   );
 }
 
-function ProductForm({ initial, onDone, onCancel }: { initial: ProductSummary | null; onDone: () => void; onCancel: () => void }) {
+function ProductForm({ initial, onDone, onCancel }: { initial: ProductSummary; onDone: () => void; onCancel: () => void }) {
   const toast = useToast();
   const { run, busy, error } = useMutation();
   const [form, setForm] = useState(() => ({
-    product_id: initial?.product_id || '',
-    category: (initial?.line as string) || 'health',
-    product_name: initial?.product_name || '',
-    coverage_amount_vnd: (initial?.coverage_amount_vnd ?? '') as number | '',
-    deductible_vnd: (initial?.deductible_vnd ?? '') as number | '',
-    base_premium_vnd: '' as number | '',
-    admin_fee_vnd: '' as number | '',
+    product_id: initial.product_id,
+    category: initial.line as string,
+    product_name: initial.product_name,
+    coverage_amount_vnd: (initial.coverage_amount_vnd ?? '') as number | '',
+    deductible_vnd: (initial.deductible_vnd ?? '') as number | '',
+    base_premium_vnd: (initial.base_premium_vnd ?? '') as number | '',
+    admin_fee_vnd: (initial.admin_fee_vnd ?? '') as number | '',
     active: true,
   }));
   const set = (k: keyof typeof form) => (v: any) => setForm((f) => ({ ...f, [k]: v }));
@@ -90,8 +90,7 @@ function ProductForm({ initial, onDone, onCancel }: { initial: ProductSummary | 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      // PUT upserts by product_id (POST and PUT both upsert per the contract)
-      await run('/admin/products', { method: initial ? 'PUT' : 'POST', body: form });
+      await run('/admin/products', { method: 'PUT', body: form });
       onDone();
     } catch (e2) { toast.push((e2 as ApiError).message, 'err'); }
   };
@@ -100,8 +99,8 @@ function ProductForm({ initial, onDone, onCancel }: { initial: ProductSummary | 
     <form className="card stack" onSubmit={submit}>
       <ErrorBanner error={error} />
       <div className="form-grid">
-        <TextField label="Mã sản phẩm" value={form.product_id} onChange={set('product_id')} required hint="vd: HEALTH_BASIC" />
-        <SelectField label="Dòng" value={form.category} onChange={set('category')} options={LINES} labelFn={(l) => LINE_LABEL[l as Line]} required />
+        <TextField label="Mã sản phẩm" value={form.product_id} onChange={set('product_id')} required hint="vd: HEALTH_BASIC" disabled />
+        <SelectField label="Dòng" value={form.category} onChange={set('category')} options={LINES} labelFn={(l) => LINE_LABEL[l as Line]} required disabled />
         <TextField label="Tên sản phẩm" value={form.product_name} onChange={set('product_name')} required />
         <NumberField label="Số tiền bảo hiểm (₫)" value={form.coverage_amount_vnd} onChange={set('coverage_amount_vnd')} min={0} required />
         <NumberField label="Mức miễn thường (₫)" value={form.deductible_vnd} onChange={set('deductible_vnd')} min={0} required />

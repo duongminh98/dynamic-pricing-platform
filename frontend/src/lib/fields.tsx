@@ -27,8 +27,9 @@ interface TextProps extends BaseProps {
   type?: string;
   placeholder?: string;
   autoComplete?: string;
+  disabled?: boolean;
 }
-export function TextField({ value, onChange, type = 'text', placeholder, autoComplete, ...rest }: TextProps) {
+export function TextField({ value, onChange, type = 'text', placeholder, autoComplete, disabled, ...rest }: TextProps) {
   return (
     <FieldShell {...rest}>
       <input
@@ -37,6 +38,7 @@ export function TextField({ value, onChange, type = 'text', placeholder, autoCom
         value={value}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
       />
     </FieldShell>
@@ -72,11 +74,12 @@ interface SelectProps extends BaseProps {
   options: readonly string[];
   labelFn?: (o: string) => string;
   placeholder?: string;
+  disabled?: boolean;
 }
-export function SelectField({ value, onChange, options, labelFn, placeholder, ...rest }: SelectProps) {
+export function SelectField({ value, onChange, options, labelFn, placeholder, disabled, ...rest }: SelectProps) {
   return (
     <FieldShell {...rest}>
-      <select className={`select ${rest.error ? 'err' : ''}`} value={value} onChange={(e) => onChange(e.target.value)}>
+      <select className={`select ${rest.error ? 'err' : ''}`} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
         {placeholder !== undefined && <option value="">{placeholder}</option>}
         {options.map((o) => (
           <option key={o} value={o}>

@@ -125,6 +125,42 @@ class BillingHardeningTest {
     }
 
     @Test
+    void voidInvoiceStillSucceedsWhenOwnerLookupFails() {
+        UUID invoiceId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        OrderClient orderClient = mock(OrderClient.class);
+        Invoice inv = unpaidInvoice(invoiceId, orderId);
+        when(invRepo.findById(invoiceId)).thenReturn(Optional.of(inv));
+        when(invRepo.save(any())).thenAnswer(a -> a.getArgument(0));
+        when(orderClient.getOrderOwner(orderId))
+                .thenThrow(new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found", null));
+
+        BillingService svc = serviceWith(invRepo, outbox, orderClient);
+        InvoiceResponse resp = svc.voidInvoice(invoiceId);
+
+        assertEquals(InvoiceStatus.voided, resp.getStatus());
+        verify(outbox, times(1)).enqueue(eq("InvoiceVoided"), any());
+    }
+
+    @Test
+    void voidInvoiceOnAlreadyVoidedIsIdempotentNoReenqueue() {
+        UUID invoiceId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        when(invRepo.findById(invoiceId)).thenReturn(Optional.of(voidedInvoice(invoiceId, orderId)));
+
+        BillingService svc = serviceWith(invRepo, outbox, mock(OrderClient.class));
+        InvoiceResponse resp = svc.voidInvoice(invoiceId);
+
+        assertEquals(InvoiceStatus.voided, resp.getStatus());
+        verify(invRepo, never()).save(any());
+        verify(outbox, never()).enqueue(any(), any());
+    }
+
+    @Test
     void voidInvoiceOnPaidThrowsBadRequestNoEnqueue() {
         UUID invoiceId = UUID.randomUUID();
         UUID orderId = UUID.randomUUID();

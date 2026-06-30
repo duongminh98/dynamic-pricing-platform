@@ -1,7 +1,7 @@
 ﻿import { Fragment, useState } from 'react';
 import { ApiError } from '../../api/client';
 import { humanize, useApi, useMutation, vndLabel, dateTime } from '../../lib/format';
-import { viStatus } from '../../lib/labels';
+import { viFeature, viProduct, viStatus, viEnum } from '../../lib/labels';
 import { usePaged, Pager } from '../../lib/paged';
 import { LINES, LINE_LABEL, Line } from '../../lib/domain';
 import { Loading, ErrorBanner, EmptyState, StatusPill, Spinner, useToast } from '../../lib/ui';
@@ -14,6 +14,8 @@ interface OrderResponse {
   status: string; review_decision?: string | null; review_reason?: string | null;
   reviewed_by?: string | null; reviewed_at?: string | null; created_at: string; invoice_id: string | null;
 }
+
+type OrderWire = OrderResponse & Record<string, any>;
 
 const STATUSES = ['PENDING_REVIEW', 'PENDING_PAYMENT', 'COMPLETED', 'REJECTED', 'CANCELLED'];
 
@@ -95,19 +97,24 @@ export default function AdminOrders() {
             <tbody>
               {data.content.map((o) => (
                 <Fragment key={o.order_id}>
-                  <tr>
+                  <tr
+                    role="button"
+                    tabIndex={0}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => toggleDetails(o.order_id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleDetails(o.order_id); }}
+                  >
                     <td className="mono" style={{ fontSize: '0.78rem' }}>{o.order_id.slice(0, 8)}</td>
-                    <td className="mono">{o.product_id}</td>
+                    <td className="mono">{viProduct(o.product_id)}</td>
                     <td className="num">{vndLabel(o.final_premium_vnd)}</td>
                     <td><StatusPill status={o.status} /></td>
                     <td className="muted">{dateTime(o.created_at)}</td>
                     <td className="num">
                       <div className="row" style={{ justifyContent: 'flex-end' }}>
-                        <button className="btn btn-ghost btn-sm" onClick={() => toggleDetails(o.order_id)}>{viewing === o.order_id ? 'Hide Details' : 'Details'}</button>
                         {o.status === 'PENDING_REVIEW' && (
                           <>
-                            <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => approve(o.order_id)}>Approve</button>
-                            <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => { setRejecting(rejecting === o.order_id ? null : o.order_id); setViewing(null); }}>Reject</button>
+                            <button className="btn btn-primary btn-sm" disabled={busy} onClick={(e) => { e.stopPropagation(); approve(o.order_id); }}>Approve</button>
+                            <button className="btn btn-danger btn-sm" disabled={busy} onClick={(e) => { e.stopPropagation(); setRejecting(rejecting === o.order_id ? null : o.order_id); setViewing(null); }}>Reject</button>
                           </>
                         )}
                       </div>
@@ -142,8 +149,9 @@ function OrderDetailPanel({ orderId, busy, onApprove, onReject, onClose }: {
   orderId: string; busy: boolean; onApprove: (id: string) => void; onReject: (reason: string) => void; onClose: () => void;
 }) {
   const [rejecting, setRejecting] = useState(false);
-  const { data: order, error, loading } = useApi<OrderResponse>(`/admin/orders/${orderId}`, [orderId]);
-  const riskEntries = Object.entries(order?.risk_profile || {}).sort(([a], [b]) => a.localeCompare(b));
+  const { data: rawOrder, error, loading } = useApi<OrderWire>(`/admin/orders/${orderId}`, [orderId]);
+  const order = rawOrder ? normalizeOrder(rawOrder) : null;
+  const riskEntries = order ? riskProfileEntries(order.risk_profile) : [];
 
   return (
     <div className="stack" style={{ padding: 'var(--s3) 0' }}>
@@ -154,7 +162,7 @@ function OrderDetailPanel({ orderId, busy, onApprove, onReject, onClose }: {
           <div className="row-between">
             <div>
               <span className="mono faint" style={{ fontSize: '0.78rem' }}>{order.order_id}</span>
-              <h3 style={{ marginTop: 4 }}>{order.product_id}</h3>
+              <h3 style={{ marginTop: 4 }}>{viProduct(order.product_id)}</h3>
             </div>
             <StatusPill status={order.status} />
           </div>
@@ -177,7 +185,7 @@ function OrderDetailPanel({ orderId, busy, onApprove, onReject, onClose }: {
             {riskEntries.length === 0 && <p className="muted">No risk profile was stored for this order.</p>}
             {riskEntries.map(([key, value], idx) => (
               <div className="kv" key={key} style={idx === 0 ? { borderTop: 'none' } : undefined}>
-                <span className="kv-k">{humanize(key)}</span>
+                <span className="kv-k">{viFeature(key)}</span>
                 <span className="kv-v">{formatRiskValue(value)}</span>
               </div>
             ))}
@@ -203,11 +211,47 @@ function lineLabel(line: string | null | undefined): string {
   return line ? humanize(line) : '-';
 }
 
+function normalizeOrder(order: OrderWire): OrderResponse {
+  return {
+    order_id: order.order_id ?? order.orderId,
+    quote_id: order.quote_id ?? order.quoteId,
+    customer_id: order.customer_id ?? order.customerId,
+    product_id: order.product_id ?? order.productId,
+    final_premium_vnd: order.final_premium_vnd ?? order.finalPremiumVnd,
+    line: order.line,
+    trip_duration_days: order.trip_duration_days ?? order.tripDurationDays,
+    coverage_amount_vnd: order.coverage_amount_vnd ?? order.coverageAmountVnd,
+    deductible_vnd: order.deductible_vnd ?? order.deductibleVnd,
+    risk_profile: order.risk_profile ?? order.riskProfile ?? {},
+    status: order.status,
+    review_decision: order.review_decision ?? order.reviewDecision,
+    review_reason: order.review_reason ?? order.reviewReason,
+    reviewed_by: order.reviewed_by ?? order.reviewedBy,
+    reviewed_at: order.reviewed_at ?? order.reviewedAt,
+    created_at: order.created_at ?? order.createdAt,
+    invoice_id: order.invoice_id ?? order.invoiceId,
+  };
+}
+
+function riskProfileEntries(profile?: Record<string, unknown>): [string, unknown][] {
+  const flat: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(profile || {})) {
+    if (key === 'line_attributes' && value && typeof value === 'object' && !Array.isArray(value)) {
+      Object.assign(flat, value as Record<string, unknown>);
+    } else {
+      flat[key] = value;
+    }
+  }
+  return Object.entries(flat)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .sort(([a], [b]) => a.localeCompare(b));
+}
+
 function formatRiskValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '-';
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(4);
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (typeof value === 'string') return humanize(value);
+  if (typeof value === 'string') return viEnum(value);
   return JSON.stringify(value);
 }
 

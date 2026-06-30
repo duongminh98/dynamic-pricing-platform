@@ -44,10 +44,10 @@ def test_build_features_coverage_from_product_not_profile():
     profile = _valid_profile()
     profile["coverage_amount_vnd"] = 5_000_000_000  # client tries to override
 
-    with patch("app.pricing_engine.features.ensure_loaded"), \
-         patch("app.pricing_engine.features.get_product", return_value=prod), \
-         patch("app.pricing_engine.features.geo_by_province", {}), \
-         patch("app.pricing_engine.features.cost_indices_latest", {}):
+    with patch("app.pricing_engine.features.loader.ensure_loaded"), \
+         patch("app.pricing_engine.features.loader.get_product", return_value=prod), \
+         patch("app.pricing_engine.features.loader.geo_by_province", {}), \
+         patch("app.pricing_engine.features.loader.cost_indices_latest", {}):
         df = build_features("health", "HEALTH_BASIC", profile, ["coverage_amount_vnd"])
 
     assert int(df.iloc[0]["coverage_amount_vnd"]) == 100_000_000
@@ -60,10 +60,10 @@ def test_build_features_deductible_from_product_not_profile():
     profile = _valid_profile()
     profile["line_attributes"]["deductible_vnd"] = 100  # client tries to override
 
-    with patch("app.pricing_engine.features.ensure_loaded"), \
-         patch("app.pricing_engine.features.get_product", return_value=prod), \
-         patch("app.pricing_engine.features.geo_by_province", {}), \
-         patch("app.pricing_engine.features.cost_indices_latest", {}):
+    with patch("app.pricing_engine.features.loader.ensure_loaded"), \
+         patch("app.pricing_engine.features.loader.get_product", return_value=prod), \
+         patch("app.pricing_engine.features.loader.geo_by_province", {}), \
+         patch("app.pricing_engine.features.loader.cost_indices_latest", {}):
         df = build_features("car", "CAR_PHYSICAL_BASIC", profile, ["deductible_vnd"])
 
     assert int(df.iloc[0]["deductible_vnd"]) == 2_000_000
@@ -85,10 +85,10 @@ def test_build_features_client_vehicle_value_used():
     profile = _valid_profile()
     profile["line_attributes"]["vehicle_value_vnd"] = 750_000_000
 
-    with patch("app.pricing_engine.features.ensure_loaded"), \
-         patch("app.pricing_engine.features.get_product", return_value=prod), \
-         patch("app.pricing_engine.features.geo_by_province", {}), \
-         patch("app.pricing_engine.features.cost_indices_latest", {}):
+    with patch("app.pricing_engine.features.loader.ensure_loaded"), \
+         patch("app.pricing_engine.features.loader.get_product", return_value=prod), \
+         patch("app.pricing_engine.features.loader.geo_by_province", {}), \
+         patch("app.pricing_engine.features.loader.cost_indices_latest", {}):
         df = build_features("car", "CAR_TPL", profile, ["vehicle_value_vnd"])
 
     assert int(df.iloc[0]["vehicle_value_vnd"]) == 750_000_000
@@ -250,3 +250,4 @@ def test_product_authoritative_contains_expected_fields():
     assert "deductible_vnd" in PRODUCT_AUTHORITATIVE
     assert "base_premium_vnd" in PRODUCT_AUTHORITATIVE
     assert "admin_fee_vnd" in PRODUCT_AUTHORITATIVE
+

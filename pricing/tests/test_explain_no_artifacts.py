@@ -67,6 +67,33 @@ def test_extract_model_and_features_freqsev_composite_prefers_frequency_model():
     assert est is freq_model
     assert names == ["age", "claim_count_36m_prior"]
 
+def test_explain_freqsev_composite_returns_frequency_and_severity_components():
+    class LocalFakeLGBMRegressor:
+        feature_name_ = ["age", "coverage_amount_vnd", "deductible_vnd"]
+        def predict(self, df):
+            return np.array([500_000.0])
+
+    freq_model = LocalFakeLGBMRegressor()
+    freq_model.feature_name_ = ["age", "coverage_amount_vnd", "deductible_vnd"]
+    sev_model = LocalFakeLGBMRegressor()
+    sev_model.feature_name_ = ["age", "coverage_amount_vnd", "deductible_vnd"]
+    feature_df = pd.DataFrame({"age": [30], "coverage_amount_vnd": [100_000_000], "deductible_vnd": [0]})
+
+    mock_explainer = MagicMock()
+    mock_explainer.shap_values.return_value = np.array([[0.3, -0.5, 0.1]])
+
+    with patch("app.pricing_engine.explain._get_tree_explainer", return_value=mock_explainer), \
+         patch.dict(sys.modules, {"shap": sys.modules["shap"]}):
+        result = explain({"freq": freq_model, "sev": sev_model}, feature_df)
+
+    assert result["available"] is True
+    assert result["method"] == "freqsev_components"
+    assert result["items"]
+    assert result["components"]["frequency"]["available"] is True
+    assert result["components"]["severity"]["available"] is True
+    assert result["components"]["frequency"]["method"] == "freqsev_frequency_tree_shap"
+    assert result["components"]["severity"]["method"] == "freqsev_severity_tree_shap"
+
 def test_extract_model_and_features_pipeline():
     model = MagicMock()
     del model.feature_name_

@@ -12,6 +12,8 @@ public class ProductSummary {
     private String productName;
     private Long coverageAmountVnd;
     private Long deductibleVnd;
+    private Long basePremiumVnd;
+    private Long adminFeeVnd;
 }
 
 

@@ -75,7 +75,13 @@ export default function AdminCustomers() {
             <tbody>
               {data.content.map((c) => (
                 <Fragment key={c.customer_id}>
-                  <tr>
+                  <tr
+                    role="button"
+                    tabIndex={0}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setViewing(viewing === c.customer_id ? null : c.customer_id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setViewing(viewing === c.customer_id ? null : c.customer_id); }}
+                  >
                     <td>{c.email}</td>
                     <td className="muted">{c.province}</td>
                     <td className="muted">{viEnum(c.occupation)}</td>
@@ -83,15 +89,12 @@ export default function AdminCustomers() {
                     <td className="num">{c.failed_login_count}</td>
                     <td>{isLocked(c) ? <span className="pill pill-bad">Locked until {dateOnly(c.locked_until)}</span> : <span className="pill pill-ok">Active</span>}</td>
                     <td className="num">
-                      <button className="btn btn-ghost btn-sm" onClick={() => setViewing(viewing === c.customer_id ? null : c.customer_id)}>
-                        {viewing === c.customer_id ? 'Hide Details' : 'Details'}
-                      </button>
                       {isLocked(c) ? (
-                        <button className="btn btn-ghost btn-sm" disabled={busy && acting === c.customer_id} onClick={() => { setActing(c.customer_id); unlock(c.customer_id); }}>
+                        <button className="btn btn-ghost btn-sm" disabled={busy && acting === c.customer_id} onClick={(e) => { e.stopPropagation(); setActing(c.customer_id); unlock(c.customer_id); }}>
                           {busy && acting === c.customer_id ? <Spinner /> : 'Unlock'}
                         </button>
                       ) : (
-                        <button className="btn btn-danger btn-sm" disabled={busy && acting === c.customer_id} onClick={() => { setActing(c.customer_id); lock(c.customer_id); }}>
+                        <button className="btn btn-danger btn-sm" disabled={busy && acting === c.customer_id} onClick={(e) => { e.stopPropagation(); setActing(c.customer_id); lock(c.customer_id); }}>
                           {busy && acting === c.customer_id ? <Spinner /> : 'Lock 24h'}
                         </button>
                       )}

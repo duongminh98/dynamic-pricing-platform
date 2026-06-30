@@ -83,11 +83,10 @@ def _extract_model_and_features(model):
     return model, list(getattr(model, "feature_names_in_", []))
 
 
-def explain(model, feature_df: "pd.DataFrame") -> dict:
-    """Produce a SHAP-based explanation; degrade gracefully on any error."""
+def _explain_selected_model(model, feature_df: "pd.DataFrame", method_prefix: str | None = None) -> dict:
+    """Produce an explanation for one concrete estimator."""
     try:
-        selected_model, method_prefix = _select_explanation_model(model)
-        est, feature_names = _extract_model_and_features(selected_model)
+        est, feature_names = _extract_model_and_features(model)
         if feature_df is None or feature_df.empty:
             return _unavailable()
 
@@ -151,3 +150,36 @@ def explain(model, feature_df: "pd.DataFrame") -> dict:
         return {"available": True, "method": _method_name(method_prefix, method), "items": items[:10]}
     except Exception:
         return _unavailable()
+
+def _primary_component(components: dict[str, dict]) -> dict:
+    for name in ("frequency", "severity", "tweedie"):
+        component = components.get(name)
+        if component and component.get("available"):
+            return component
+    return _unavailable()
+
+def explain(model, feature_df: "pd.DataFrame") -> dict:
+    """Produce a SHAP-based explanation; degrade gracefully on any error.
+
+    Composite frequency-severity models return component explanations while
+    keeping the legacy top-level ``items`` shape for existing clients.
+    """
+    if isinstance(model, dict):
+        components: dict[str, dict] = {}
+        if model.get("freq") is not None:
+            components["frequency"] = _explain_selected_model(model["freq"], feature_df, "freqsev_frequency")
+        if model.get("sev") is not None:
+            components["severity"] = _explain_selected_model(model["sev"], feature_df, "freqsev_severity")
+        if model.get("tw") is not None:
+            components["tweedie"] = _explain_selected_model(model["tw"], feature_df, "tweedie")
+        primary = _primary_component(components)
+        available = any(component.get("available") for component in components.values())
+        return {
+            "available": available,
+            "method": "freqsev_components" if ("frequency" in components or "severity" in components) else primary.get("method", "unavailable"),
+            "items": primary.get("items", []),
+            "components": components,
+        }
+
+    selected_model, method_prefix = _select_explanation_model(model)
+    return _explain_selected_model(selected_model, feature_df, method_prefix)

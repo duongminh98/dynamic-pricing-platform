@@ -120,6 +120,8 @@ public class ProductService {
                 .productName(p.getProductName())
                 .coverageAmountVnd(p.getCoverageAmountVnd())
                 .deductibleVnd(p.getDeductibleVnd())
+                .basePremiumVnd(p.getBasePremiumVnd())
+                .adminFeeVnd(p.getAdminFeeVnd())
                 .build();
     }
 
@@ -144,5 +146,4 @@ public class ProductService {
                 .build();
     }
 }
-
 

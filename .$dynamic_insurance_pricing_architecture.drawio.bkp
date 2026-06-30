@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="30.2.6">
+  <diagram name="Dynamic Insurance Pricing Platform">
+    <mxGraphModel dx="1800" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="client_layer" value="Client Layer" style="swimlane;startSize=30;html=1;rounded=1;whiteSpace=wrap;fillColor=#f8f9fa;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="1720" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="api_layer" value="API Gateway &amp; Identity" style="swimlane;startSize=30;html=1;rounded=1;whiteSpace=wrap;fillColor=#fff8f0;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="200" width="1720" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="service_layer" value="Application Services" style="swimlane;startSize=30;html=1;rounded=1;whiteSpace=wrap;fillColor=#f7fbff;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="380" width="1720" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="data_layer" value="Data, AI Artifacts &amp; Async Infrastructure" style="swimlane;startSize=30;html=1;rounded=1;whiteSpace=wrap;fillColor=#f6fff4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="680" width="1720" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="external_layer" value="External Integrations &amp; Observability" style="swimlane;startSize=30;html=1;rounded=1;whiteSpace=wrap;fillColor=#fafafa;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="960" width="1720" height="150" as="geometry" />
+        </mxCell>
+
+        <mxCell id="users" value="Users&#xa;Customers / Staff / Admins" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="client_layer">
+          <mxGeometry x="180" y="50" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="react" value="React Web App&#xa;Portal &amp; dashboards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="client_layer">
+          <mxGeometry x="680" y="50" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="kong" value="Kong API Gateway&#xa;Routing / rate limits / API policy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="api_layer">
+          <mxGeometry x="660" y="55" width="250" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="keycloak" value="Keycloak&#xa;OIDC / JWT authentication" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="api_layer">
+          <mxGeometry x="1040" y="55" width="230" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="customer" value="Customer Service&#xa;Java / Spring Boot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="service_layer">
+          <mxGeometry x="60" y="55" width="190" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="product" value="Product Service&#xa;Java / Spring Boot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="service_layer">
+          <mxGeometry x="280" y="55" width="190" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pricing" value="Pricing Service&#xa;Python / FastAPI + AI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="service_layer">
+          <mxGeometry x="500" y="55" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="order_policy" value="Order &amp; Policy Service&#xa;Java / Spring Boot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="service_layer">
+          <mxGeometry x="730" y="55" width="210" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="billing" value="Billing &amp; Payment Service&#xa;Java / Spring Boot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="service_layer">
+          <mxGeometry x="970" y="55" width="210" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="claims" value="Claims Service&#xa;Java / Spring Boot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="service_layer">
+          <mxGeometry x="1210" y="55" width="190" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="notification" value="Notification Service&#xa;Java / Spring Boot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="service_layer">
+          <mxGeometry x="1430" y="55" width="210" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="rabbitmq" value="RabbitMQ&#xa;Async event bus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="service_layer">
+          <mxGeometry x="735" y="170" width="250" height="65" as="geometry" />
+        </mxCell>
+
+        <mxCell id="customer_db" value="Customer DB" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="data_layer">
+          <mxGeometry x="75" y="55" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="product_db" value="Product DB" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="data_layer">
+          <mxGeometry x="295" y="55" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pricing_db" value="Pricing DB" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="data_layer">
+          <mxGeometry x="520" y="55" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="order_db" value="Order &amp; Policy DB" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="data_layer">
+          <mxGeometry x="750" y="55" width="170" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="billing_db" value="Billing DB" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="data_layer">
+          <mxGeometry x="995" y="55" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="claims_db" value="Claims DB" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="data_layer">
+          <mxGeometry x="1225" y="55" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="notification_db" value="Notification DB" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="data_layer">
+          <mxGeometry x="1455" y="55" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ai_artifacts" value="AI Model Artifacts&#xa;pricing models / features" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="data_layer">
+          <mxGeometry x="435" y="155" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="offline_jobs" value="Offline Training &amp;&#xa;Drift Monitoring Jobs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="data_layer">
+          <mxGeometry x="675" y="155" width="230" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="vnpay" value="VNPAY&#xa;Payment gateway" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="external_layer">
+          <mxGeometry x="990" y="55" width="180" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="mailpit" value="Mailpit / SMTP&#xa;Email delivery" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="external_layer">
+          <mxGeometry x="1430" y="55" width="190" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="prometheus" value="Prometheus&#xa;metrics scraping" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="external_layer">
+          <mxGeometry x="350" y="55" width="190" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="grafana" value="Grafana&#xa;dashboards &amp; alerts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="external_layer">
+          <mxGeometry x="590" y="55" width="190" height="65" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_users_react" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=0;entryY=0.5;strokeWidth=2;" edge="1" parent="client_layer" source="users" target="react"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_react_kong" value="HTTPS APIs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeWidth=2;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="1" source="react" target="kong"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_kong_keycloak" value="JWT / OIDC validation" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=0;entryY=0.5;strokeWidth=2;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="api_layer" source="kong" target="keycloak"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_kong_services" value="REST APIs to services" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeWidth=2;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="1" source="kong" target="service_layer"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e_customer_db" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#82b366;" edge="1" parent="1" source="customer" target="customer_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_product_db" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#82b366;" edge="1" parent="1" source="product" target="product_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_pricing_db" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#82b366;" edge="1" parent="1" source="pricing" target="pricing_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_order_db" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#82b366;" edge="1" parent="1" source="order_policy" target="order_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_billing_db" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#82b366;" edge="1" parent="1" source="billing" target="billing_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_claims_db" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#82b366;" edge="1" parent="1" source="claims" target="claims_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_notification_db" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#82b366;" edge="1" parent="1" source="notification" target="notification_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e_customer_rabbit" value="events" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=1;exitY=0.8;entryX=0;entryY=0.5;dashed=1;strokeColor=#d6b656;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="service_layer" source="customer" target="rabbitmq"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_product_rabbit" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=1;exitY=0.8;entryX=0;entryY=0.4;dashed=1;strokeColor=#d6b656;" edge="1" parent="service_layer" source="product" target="rabbitmq"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_pricing_rabbit" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=1;exitY=0.8;entryX=0.15;entryY=0;dashed=1;strokeColor=#d6b656;" edge="1" parent="service_layer" source="pricing" target="rabbitmq"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_order_rabbit" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.4;entryY=0;dashed=1;strokeColor=#d6b656;" edge="1" parent="service_layer" source="order_policy" target="rabbitmq"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_billing_rabbit" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.6;entryY=0;dashed=1;strokeColor=#d6b656;" edge="1" parent="service_layer" source="billing" target="rabbitmq"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_claims_rabbit" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0;exitY=0.8;entryX=1;entryY=0.4;dashed=1;strokeColor=#d6b656;" edge="1" parent="service_layer" source="claims" target="rabbitmq"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_notification_rabbit" value="events" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0;exitY=0.8;entryX=1;entryY=0.5;dashed=1;strokeColor=#d6b656;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="service_layer" source="notification" target="rabbitmq"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e_pricing_artifacts" value="loads models" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#9673a6;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="1" source="pricing" target="ai_artifacts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_jobs_artifacts" value="train / drift check" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0;exitY=0.5;entryX=1;entryY=0.5;strokeColor=#9673a6;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="data_layer" source="offline_jobs" target="ai_artifacts"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e_billing_vnpay" value="payment requests / callbacks" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#666666;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="1" source="billing" target="vnpay"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_notification_mail" value="email" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#666666;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="1" source="notification" target="mailpit"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_prom_grafana" value="visualize" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=0;entryY=0.5;strokeColor=#b85450;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="external_layer" source="prometheus" target="grafana"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_prom_services" value="scrape metrics" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;exitX=0.5;exitY=0;entryX=0.2;entryY=1;dashed=1;strokeColor=#b85450;labelBackgroundColor=#ffffff;fontSize=11;" edge="1" parent="1" source="prometheus" target="service_layer"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

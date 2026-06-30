@@ -102,6 +102,22 @@ curl -X POST http://localhost:8080/realms/dynamic-pricing/protocol/openid-connec
 
 ## API Endpoints
 
+### Swagger UI and OpenAPI
+
+All backend services expose interactive API documentation and raw OpenAPI specifications for local development.
+
+| Service | Swagger UI | OpenAPI JSON |
+|---------|------------|--------------|
+| Customer Service | `http://localhost:8081/swagger-ui.html` | `http://localhost:8081/v3/api-docs` |
+| Product Service | `http://localhost:8082/swagger-ui.html` | `http://localhost:8082/v3/api-docs` |
+| Order Service | `http://localhost:8083/swagger-ui.html` | `http://localhost:8083/v3/api-docs` |
+| Claims Service | `http://localhost:8085/swagger-ui.html` | `http://localhost:8085/v3/api-docs` |
+| Billing Service | `http://localhost:8086/swagger-ui.html` | `http://localhost:8086/v3/api-docs` |
+| Notification Service | `http://localhost:8087/swagger-ui.html` | `http://localhost:8087/v3/api-docs` |
+| Pricing Service | `http://localhost:9001/docs` | `http://localhost:9001/openapi.json` |
+
+Spring Boot services use Springdoc (`/swagger-ui.html`, `/v3/api-docs`). The Pricing service uses FastAPI's built-in Swagger UI (`/docs`) and OpenAPI document (`/openapi.json`). When the full Docker stack is running, service access through Kong remains on `http://localhost:8000`; direct service documentation URLs are intended for local development and API inspection.
+
 ### Customer Service (8081)
 
 | Method | Path | Auth | Description |

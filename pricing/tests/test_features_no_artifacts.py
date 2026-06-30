@@ -72,10 +72,10 @@ def test_build_features_with_mocked_loader():
         "line_attributes": {"smoker": True},
     }
 
-    with patch("app.pricing_engine.features.ensure_loaded"), \
-         patch("app.pricing_engine.features.geo_by_province", {"Da Nang": {"traffic_density_score": 0.5}}), \
-         patch("app.pricing_engine.features.cost_indices_latest", {"medical_inflation_index": 0.03}), \
-         patch("app.pricing_engine.features.get_product", return_value={"coverage_amount_vnd": 100_000_000, "admin_fee_vnd": 10_000}):
+    with patch("app.pricing_engine.features.loader.ensure_loaded"), \
+         patch("app.pricing_engine.features.loader.geo_by_province", {"Da Nang": {"traffic_density_score": 0.5}}), \
+         patch("app.pricing_engine.features.loader.cost_indices_latest", {"medical_inflation_index": 0.03}), \
+         patch("app.pricing_engine.features.loader.get_product", return_value={"coverage_amount_vnd": 100_000_000, "admin_fee_vnd": 10_000}):
         df = build_features("health", "HEALTH_BASIC", profile, feature_names)
 
     assert list(df.columns) == feature_names
@@ -90,10 +90,10 @@ def test_build_features_fills_defaults():
     feature_names = ["age", "height_cm", "vehicle_value_vnd", "province"]
     profile = {"age": 40, "province": "Unknown", "line_attributes": {}}
 
-    with patch("app.pricing_engine.features.ensure_loaded"), \
-         patch("app.pricing_engine.features.geo_by_province", {}), \
-         patch("app.pricing_engine.features.cost_indices_latest", {}), \
-         patch("app.pricing_engine.features.get_product", return_value={}):
+    with patch("app.pricing_engine.features.loader.ensure_loaded"), \
+         patch("app.pricing_engine.features.loader.geo_by_province", {}), \
+         patch("app.pricing_engine.features.loader.cost_indices_latest", {}), \
+         patch("app.pricing_engine.features.loader.get_product", return_value={}):
         df = build_features("health", "HEALTH_BASIC", profile, feature_names)
 
     assert df.iloc[0]["age"] == 40
@@ -106,10 +106,10 @@ def test_build_features_unknown_field_gets_zero():
     feature_names = ["age", "unknown_field"]
     profile = {"age": 30, "line_attributes": {}}
 
-    with patch("app.pricing_engine.features.ensure_loaded"), \
-         patch("app.pricing_engine.features.geo_by_province", {}), \
-         patch("app.pricing_engine.features.cost_indices_latest", {}), \
-         patch("app.pricing_engine.features.get_product", return_value={}):
+    with patch("app.pricing_engine.features.loader.ensure_loaded"), \
+         patch("app.pricing_engine.features.loader.geo_by_province", {}), \
+         patch("app.pricing_engine.features.loader.cost_indices_latest", {}), \
+         patch("app.pricing_engine.features.loader.get_product", return_value={}):
         df = build_features("health", "HEALTH_BASIC", profile, feature_names)
 
     assert df.iloc[0]["unknown_field"] == 0
@@ -119,10 +119,10 @@ def test_build_features_product_id_override():
     feature_names = ["product_id", "age"]
     profile = {"age": 30, "line_attributes": {}}
 
-    with patch("app.pricing_engine.features.ensure_loaded"), \
-         patch("app.pricing_engine.features.geo_by_province", {}), \
-         patch("app.pricing_engine.features.cost_indices_latest", {}), \
-         patch("app.pricing_engine.features.get_product", return_value={}):
+    with patch("app.pricing_engine.features.loader.ensure_loaded"), \
+         patch("app.pricing_engine.features.loader.geo_by_province", {}), \
+         patch("app.pricing_engine.features.loader.cost_indices_latest", {}), \
+         patch("app.pricing_engine.features.loader.get_product", return_value={}):
         df = build_features("health", "HEALTH_BASIC", profile, feature_names)
 
     assert df.iloc[0]["product_id"] == "HEALTH_BASIC"
@@ -132,10 +132,10 @@ def test_build_features_casts_object_to_category():
     feature_names = ["gender", "age"]
     profile = {"age": 30, "gender": "Male", "line_attributes": {}}
 
-    with patch("app.pricing_engine.features.ensure_loaded"), \
-         patch("app.pricing_engine.features.geo_by_province", {}), \
-         patch("app.pricing_engine.features.cost_indices_latest", {}), \
-         patch("app.pricing_engine.features.get_product", return_value={}):
+    with patch("app.pricing_engine.features.loader.ensure_loaded"), \
+         patch("app.pricing_engine.features.loader.geo_by_province", {}), \
+         patch("app.pricing_engine.features.loader.cost_indices_latest", {}), \
+         patch("app.pricing_engine.features.loader.get_product", return_value={}):
         df = build_features("health", "HEALTH_BASIC", profile, feature_names)
 
     assert str(df["gender"].dtype) == "category"
@@ -145,11 +145,12 @@ def test_feature_set_for_audit_with_mocked_loader():
     feature_names = ["age", "gender"]
     profile = {"age": 30, "gender": "Male", "line_attributes": {}}
 
-    with patch("app.pricing_engine.features.ensure_loaded"), \
-         patch("app.pricing_engine.features.geo_by_province", {}), \
-         patch("app.pricing_engine.features.cost_indices_latest", {}), \
-         patch("app.pricing_engine.features.get_product", return_value={}):
+    with patch("app.pricing_engine.features.loader.ensure_loaded"), \
+         patch("app.pricing_engine.features.loader.geo_by_province", {}), \
+         patch("app.pricing_engine.features.loader.cost_indices_latest", {}), \
+         patch("app.pricing_engine.features.loader.get_product", return_value={}):
         result = feature_set_for_audit("health", "HEALTH_BASIC", profile, feature_names)
 
     assert result["age"] == 30
     assert result["gender"] == "Male"
+

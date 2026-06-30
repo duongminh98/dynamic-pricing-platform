@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .loader import ensure_loaded, geo_by_province, cost_indices_latest, get_product
+from . import loader
 
 # Default prior-claim history: no prior claims, sentinel "no claim" date.
 PRIOR_DEFAULTS = {
@@ -143,11 +143,11 @@ def build_features(line: str, product_id: str, profile: dict,
     always taken from the product catalog (server-authoritative) and cannot
     be overridden by client input.
     """
-    ensure_loaded()
+    loader.ensure_loaded()
     line_attrs = profile.get("line_attributes", {}) or {}
     province = profile.get("province", CATEGORICAL_DEFAULTS["province"])
-    geo = geo_by_province.get(province, {})
-    prod = get_product(product_id)
+    geo = loader.geo_by_province.get(province, {})
+    prod = loader.get_product(product_id)
 
     row: dict = {}
     for name in feature_names:
@@ -163,8 +163,8 @@ def build_features(line: str, product_id: str, profile: dict,
         elif name in geo:
             row[name] = geo[name]
         # 3. derived cost indices (reference = latest)
-        elif name in cost_indices_latest:
-            row[name] = cost_indices_latest[name]
+        elif name in loader.cost_indices_latest:
+            row[name] = loader.cost_indices_latest[name]
         # 4. prior-claim history defaults (point-in-time safe)
         elif name in PRIOR_DEFAULTS:
             row[name] = PRIOR_DEFAULTS[name]

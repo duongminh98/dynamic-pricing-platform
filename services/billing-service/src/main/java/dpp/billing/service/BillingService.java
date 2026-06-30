@@ -314,18 +314,26 @@ public class BillingService {
     public InvoiceResponse voidInvoice(UUID invoiceId) {
         Invoice invoice = invoiceRepository.findById(invoiceId)
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Invoice not found", null));
+        if (invoice.getStatus() == InvoiceStatus.voided) {
+            return toResponse(invoice);
+        }
         if (invoice.getStatus() == InvoiceStatus.paid) {
             throw new ServiceException(ErrorCode.BAD_REQUEST, "Cannot void a paid invoice", null);
+        }
+        if (invoice.getCreditAppliedVnd() > 0) {
+            creditService.reverseCreditsForInvoice(invoice.getInvoiceId());
         }
         invoice.setStatus(InvoiceStatus.voided);
         invoice = invoiceRepository.save(invoice);
 
-        UUID customerId = resolveInvoiceOwner(invoice);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("invoice_id", invoice.getInvoiceId());
         payload.put("order_id", invoice.getOrderId());
         payload.put("policy_id", invoice.getPolicyId());
-        payload.put("customer_id", customerId);
+        UUID customerId = tryResolveInvoiceOwner(invoice);
+        if (customerId != null) {
+            payload.put("customer_id", customerId);
+        }
         payload.put("amount_vnd", invoice.getAmountVnd());
         try {
             outboxPublisher.enqueue("InvoiceVoided", objectMapper.writeValueAsString(payload));
@@ -333,6 +341,14 @@ public class BillingService {
             throw new RuntimeException("Failed to enqueue InvoiceVoided event", e);
         }
         return toResponse(invoice);
+    }
+
+    private UUID tryResolveInvoiceOwner(Invoice invoice) {
+        try {
+            return resolveInvoiceOwner(invoice);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     @Transactional

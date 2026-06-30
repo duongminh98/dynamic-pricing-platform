@@ -84,7 +84,13 @@ export default function AdminPolicies() {
             <tbody>
               {data.content.map((p) => (
                 <Fragment key={p.policy_id}>
-                  <tr>
+                  <tr
+                    role="button"
+                    tabIndex={0}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => { setViewing(viewing === p.policy_id ? null : p.policy_id); setCancelling(null); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setViewing(viewing === p.policy_id ? null : p.policy_id); setCancelling(null); } }}
+                  >
                     <td className="mono" style={{ fontSize: '0.78rem' }}>{p.policy_id.slice(0, 8)}</td>
                     <td className="mono">{p.product_id}</td>
                     <td className="num">{vndLabel(p.final_premium_vnd)}</td>
@@ -92,11 +98,8 @@ export default function AdminPolicies() {
                     <td className="muted">{dateOnly(p.policy_expiration_date)}</td>
                     <td><StatusPill status={p.status} /></td>
                     <td className="num">
-                      <button className="btn btn-ghost btn-sm" onClick={() => { setViewing(viewing === p.policy_id ? null : p.policy_id); setCancelling(null); }}>
-                        {viewing === p.policy_id ? 'Hide Details' : 'Details'}
-                      </button>
                       {p.status === 'active' && (
-                        <button className="btn btn-danger btn-sm" onClick={() => setCancelling(cancelling === p.policy_id ? null : p.policy_id)}>Hủy</button>
+                        <button className="btn btn-danger btn-sm" onClick={(e) => { e.stopPropagation(); setCancelling(cancelling === p.policy_id ? null : p.policy_id); }}>Hủy</button>
                       )}
                     </td>
                   </tr>

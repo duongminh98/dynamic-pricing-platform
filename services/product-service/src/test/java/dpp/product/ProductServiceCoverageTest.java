@@ -48,6 +48,8 @@ class ProductServiceCoverageTest {
         assertEquals(1, result.size());
         assertEquals("HEALTH_BASIC", result.get(0).getProductId());
         assertEquals("health", result.get(0).getLine());
+        assertEquals(2_000_000L, result.get(0).getBasePremiumVnd());
+        assertEquals(500_000L, result.get(0).getAdminFeeVnd());
     }
 
     @Test

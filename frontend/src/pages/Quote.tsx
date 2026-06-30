@@ -14,12 +14,14 @@ interface BaseProfile {
   lines?: { line: string; line_attributes: Record<string, any> }[];
 }
 interface ExplItem { feature: string; label: string; direction: 'increase' | 'decrease'; magnitude: number; }
+interface Explanation { available: boolean; method?: string; items: ExplItem[]; components?: Record<string, Explanation>; }
 interface QuoteResult {
   quote_id: string; line: string; product_id: string;
   coverage_amount_vnd: number; deductible_vnd: number;
+  frequency?: number | null; severity?: number | null;
   pure_premium_vnd: number; final_premium_vnd: number; admin_fee_vnd: number;
   loading_factor: number; expires_at: string;
-  explanation: { available: boolean; method?: string; items: ExplItem[] };
+  explanation: Explanation;
   model_version: string;
 }
 
@@ -146,61 +148,76 @@ export default function Quote() {
 }
 
 function QuoteHero({ result, onOrder, ordering }: { result: QuoteResult; onOrder: () => void; ordering: boolean }) {
-  const items = result.explanation?.available ? [...result.explanation.items].sort((a, b) => b.magnitude - a.magnitude).slice(0, 10) : [];
-  const maxMag = items.reduce((m, it) => Math.max(m, it.magnitude), 0) || 1;
+  const frequencyExpl = result.explanation?.components?.frequency;
+  const severityExpl = result.explanation?.components?.severity;
+  const fallbackExpl = result.explanation?.components ? undefined : result.explanation;
 
   return (
     <div className="stack">
       <div className="price-hero">
         <div className="row-between">
-          <div className="price-label">Phí bảo hiểm của bạn</div>
+          <div className="price-label">Your premium</div>
           <span className="tag mono" style={{ background: 'rgba(255,255,255,.06)', color: '#9AA39A', borderColor: 'rgba(255,255,255,.1)' }}>{result.model_version}</span>
         </div>
-        <div className="price-amount">{vndLabel(result.final_premium_vnd).replace(' ₫', '')}<span className="cur">₫ / năm</span></div>
+        <div className="price-amount">{vndLabel(result.final_premium_vnd).replace(' ₫', '')}<span className="cur">₫ / year</span></div>
 
-        {/* the signature: decomposition bars */}
-        {items.length > 0 ? (
+        {frequencyExpl || severityExpl ? (
           <>
-            <div className="decomp">
-              {items.map((it) => (
-                <div className="decomp-row" key={it.feature}>
-                  <span className="decomp-feat">{viFeature(it.feature)}</span>
-                  <div className="decomp-track">
-                    <span className="decomp-mid" />
-                    <span
-                      className={'decomp-fill ' + (it.direction === 'increase' ? 'up' : 'down')}
-                      style={{ width: `${Math.max(4, (it.magnitude / maxMag) * 48)}%` }}
-                    />
-                  </div>
-                  <span className="decomp-mag">{it.direction === 'increase' ? '+' : '−'}{it.magnitude.toFixed(2)}</span>
-                </div>
-              ))}
-            </div>
+            {frequencyExpl && <ExplanationBlock title="Claim frequency drivers" explanation={frequencyExpl} />}
+            {severityExpl && <ExplanationBlock title="Claim severity drivers" explanation={severityExpl} />}
             <div className="decomp-legend">
-              <span><span className="legend-dot" style={{ background: 'var(--terra)' }} />Đẩy phí lên</span>
-              <span><span className="legend-dot" style={{ background: '#2FB89E' }} />Kéo phí xuống</span>
+              <span><span className="legend-dot" style={{ background: 'var(--terra)' }} />Increases premium</span>
+              <span><span className="legend-dot" style={{ background: '#2FB89E' }} />Decreases premium</span>
             </div>
           </>
+        ) : fallbackExpl ? (
+          <ExplanationBlock title="Quote drivers" explanation={fallbackExpl} />
         ) : (
-          <p style={{ color: '#7E887E', marginTop: 20 }}>Bản phân rã chi tiết không khả dụng cho báo giá này, nhưng mức phí vẫn hợp lệ.</p>
+          <p style={{ color: '#7E887E', marginTop: 20 }}>Detailed breakdown is unavailable for this quote, but the premium is still valid.</p>
         )}
       </div>
 
       <div className="card">
         <div className="stat-row">
-          <div className="stat"><span className="stat-l">Phí thuần (rủi ro)</span><span className="stat-n">{vndLabel(result.pure_premium_vnd)}</span></div>
-          <div className="stat"><span className="stat-l">Hệ số tải</span><span className="stat-n">×{result.loading_factor}</span></div>
-          <div className="stat"><span className="stat-l">Phí quản lý</span><span className="stat-n">{vndLabel(result.admin_fee_vnd)}</span></div>
+          <div className="stat"><span className="stat-l">Predicted claim frequency</span><span className="stat-n">{result.frequency == null ? '-' : result.frequency.toFixed(4)}</span></div>
+          <div className="stat"><span className="stat-l">Predicted severity per claim</span><span className="stat-n">{result.severity == null ? '-' : vndLabel(result.severity)}</span></div>
+          <div className="stat"><span className="stat-l">Pure risk premium</span><span className="stat-n">{vndLabel(result.pure_premium_vnd)}</span></div>
+          <div className="stat"><span className="stat-l">Loading factor</span><span className="stat-n">×{result.loading_factor}</span></div>
+          <div className="stat"><span className="stat-l">Admin fee</span><span className="stat-n">{vndLabel(result.admin_fee_vnd)}</span></div>
         </div>
         <hr className="divider" />
-        <div className="kv" style={{ borderTop: 'none' }}><span className="kv-k">Số tiền bảo hiểm</span><span className="kv-v">{vndLabel(result.coverage_amount_vnd)}</span></div>
-        <div className="kv"><span className="kv-k">Mức miễn thường</span><span className="kv-v">{vndLabel(result.deductible_vnd)}</span></div>
-        <p className="field-hint" style={{ marginTop: 12 }}>Báo giá có hiệu lực đến {new Date(result.expires_at).toLocaleDateString('vi-VN')}.</p>
+        <div className="kv" style={{ borderTop: 'none' }}><span className="kv-k">Coverage amount</span><span className="kv-v">{vndLabel(result.coverage_amount_vnd)}</span></div>
+        <div className="kv"><span className="kv-k">Deductible</span><span className="kv-v">{vndLabel(result.deductible_vnd)}</span></div>
+        <p className="field-hint" style={{ marginTop: 12 }}>Quote valid until {new Date(result.expires_at).toLocaleDateString('vi-VN')}.</p>
       </div>
 
       <button className="btn btn-primary btn-block" disabled={ordering} onClick={onOrder}>
-        {ordering ? <Spinner /> : 'Đặt mua với mức phí này →'}
+        {ordering ? <Spinner /> : 'Place order with this premium →'}
       </button>
+    </div>
+  );
+}
+
+function ExplanationBlock({ title, explanation }: { title: string; explanation: Explanation }) {
+  const items = explanation?.available ? [...(explanation.items || [])].sort((a, b) => b.magnitude - a.magnitude).slice(0, 6) : [];
+  const maxMag = items.reduce((m, it) => Math.max(m, it.magnitude), 0) || 1;
+  if (!items.length) return null;
+  return (
+    <div className="decomp" style={{ marginTop: 18 }}>
+      <p className="eyebrow" style={{ marginBottom: 10 }}>{title}</p>
+      {items.map((it) => (
+        <div className="decomp-row" key={`${title}-${it.feature}`}>
+          <span className="decomp-feat">{viFeature(it.feature)}</span>
+          <div className="decomp-track">
+            <span className="decomp-mid" />
+            <span
+              className={'decomp-fill ' + (it.direction === 'increase' ? 'up' : 'down')}
+              style={{ width: `${Math.max(4, (it.magnitude / maxMag) * 48)}%` }}
+            />
+          </div>
+          <span className="decomp-mag">{it.direction === 'increase' ? '+' : '-'}{it.magnitude.toFixed(2)}</span>
+        </div>
+      ))}
     </div>
   );
 }

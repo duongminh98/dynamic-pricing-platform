@@ -167,6 +167,18 @@ def _predict_pure_premium(selection: dict, feature_df) -> float:
     # Generic fallback: direct prediction.
     return float(model.predict(feature_df)[0])
 
+def _predict_frequency_severity(selection: dict, feature_df) -> tuple[float | None, float | None]:
+    model = selection["model"]
+    if selection["family"] not in ("freqsev", "freq_sev") or not isinstance(model, dict):
+        return None, None
+    freq_model = model.get("freq")
+    sev_model = model.get("sev")
+    if freq_model is None or sev_model is None:
+        return None, None
+    frequency = max(0.0, float(freq_model.predict(feature_df)[0]))
+    severity = max(0.0, float(sev_model.predict(feature_df)[0]))
+    return frequency, severity
+
 
 def _line_attrs(profile: dict) -> dict:
     return profile.get("line_attributes", {}) or {}
@@ -283,6 +295,7 @@ def quote(db, product_id: str, profile: dict,
 
     feature_df = build_features(line, product_id, profile, feature_names)
 
+    frequency, severity = _predict_frequency_severity(selection, feature_df)
     pure_premium = _guarded_pure_premium(line, product_id, profile, selection, feature_names, feature_df)
 
     if loading_factor is None:
@@ -312,8 +325,8 @@ def quote(db, product_id: str, profile: dict,
         "trip_duration_days": profile.get("trip_duration_days") if line == "travel" else None,
         "coverage_amount_vnd": coverage,
         "deductible_vnd": deductible,
-        "frequency": None,
-        "severity": None,
+        "frequency": frequency,
+        "severity": severity,
         "pure_premium_vnd": pure_int,
         "final_premium_vnd": final_int,
         "currency": "VND",
@@ -368,7 +381,7 @@ def quote_freq_sev(db, product_id: str, profile: dict,
     expires_at = created_at + datetime.timedelta(days=QUOTE_VALIDITY_DAYS)
     quote_id = str(uuid.uuid4())
     rate_version_id = str(uuid.uuid4())
-    explanation = explain(freq_model, feature_df)
+    explanation = explain({"freq": freq_model, "sev": sev_model}, feature_df)
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
     if db is not None and _quote_audit_enabled():
         from ..services.audit import record_audit
