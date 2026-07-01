@@ -1,0 +1,412 @@
+﻿"""Build retraining datasets from pricing-service read models.
+
+The output shape mirrors the existing offline pricing pipeline:
+- pricing_freq_<line>.csv: one row per policy exposure segment
+- pricing_sev_<line>.csv: one row per settled claim
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import hashlib
+import uuid
+import json
+import math
+import sys
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parent.parent
+PRICING_DIR = ROOT / "pricing"
+if str(PRICING_DIR) not in sys.path:
+    sys.path.insert(0, str(PRICING_DIR))
+
+from app.pricing_engine.feature_buckets import add_health_bucket_features
+from sqlalchemy import create_engine, text
+
+
+def _flatten(prefix: str, value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        column = f"{prefix}{key}" if prefix else str(key)
+        if isinstance(item, dict):
+            out.update(_flatten(f"{column}_", item))
+        else:
+            out[column] = item
+    return out
+
+
+def _load_table(engine, table_name: str) -> pd.DataFrame:
+    with engine.connect() as conn:
+        return pd.read_sql(text(f"SELECT * FROM {table_name}"), conn)
+
+
+def _schema_columns(kind: str, line: str) -> list[str] | None:
+    path = Path("data") / "synthetic_real_1m_history_lift_v2" / f"pricing_{kind}_{line}.csv"
+    if not path.exists():
+        return None
+    return list(pd.read_csv(path, nrows=0).columns)
+
+
+def _known_lines() -> list[str]:
+    base_dir = Path("data") / "synthetic_real_1m_history_lift_v2"
+    return sorted(
+        path.name.replace("pricing_freq_", "").replace(".csv", "")
+        for path in base_dir.glob("pricing_freq_*.csv")
+    )
+
+
+def _date_str(value: Any) -> str | None:
+    if value in (None, "") or pd.isna(value):
+        return None
+    parsed = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.date().isoformat()
+
+
+def _year(value: Any) -> int | None:
+    if value in (None, "") or pd.isna(value):
+        return None
+    parsed = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return int(parsed.year)
+
+
+def _severity_level(value: Any) -> str | None:
+    try:
+        incurred = float(value or 0)
+    except (TypeError, ValueError):
+        return None
+    if incurred >= 50_000_000:
+        return "high"
+    if incurred >= 10_000_000:
+        return "medium"
+    return "low"
+
+
+def _add_line_feature_engineering(row: dict[str, Any], line: str) -> dict[str, Any]:
+    if line == "health":
+        return add_health_bucket_features(row)
+    return row
+
+def _is_present(value: Any) -> bool:
+    if value is None:
+        return False
+    try:
+        return not pd.isna(value)
+    except (TypeError, ValueError):
+        return True
+
+def _exposure_feature_row(exposure: pd.Series) -> dict[str, Any]:
+    """Return one exposure row with quote-time features as authoritative input.
+
+    Policy events carry a risk snapshot, but retraining must reproduce exactly
+    what the pricing model saw at quote time whenever a quote feature snapshot is
+    available. Pandas merge suffixes colliding quote features with ``_quote``;
+    those values intentionally override policy/exposure values.
+    """
+    row = exposure.to_dict()
+    row.update(_flatten("", exposure.get("risk_snapshot")))
+    for key, value in exposure.items():
+        if key.startswith("quote_feature__") and _is_present(value):
+            row[key.removeprefix("quote_feature__")] = value
+        if key.endswith("_quote") and _is_present(value):
+            row[key[:-6]] = value
+        elif key not in row and _is_present(value):
+            row[key] = value
+    return row
+
+
+def _align_to_training_schema(df: pd.DataFrame, kind: str, line: str) -> pd.DataFrame:
+    columns = _schema_columns(kind, line)
+    if columns is None:
+        return df
+    aligned = df.copy()
+    for column in columns:
+        if column not in aligned.columns:
+            aligned[column] = pd.NA
+    return aligned[columns]
+
+
+def _write_metadata(output_dir: Path, dataset_version_id: str | None = None) -> Path:
+    metadata = {
+        "source": "pricing_db_read_models",
+        "dataset_version": dataset_version_id,
+        "grain": {
+            "frequency": "one row per policy exposure segment",
+            "severity": "one row per settled claim",
+        },
+        "target_columns": {
+            "frequency": "target_frequency",
+            "severity": "incurred_amount",
+            "tweedie": "loss_per_exposure",
+        },
+    }
+    metadata_path = output_dir / "pricing_modeling_metadata.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    return metadata_path
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+def _row_count(path: Path) -> int:
+    if path.suffix != ".csv":
+        return 1
+    try:
+        return max(0, sum(1 for _ in open(path, encoding="utf-8")) - 1)
+    except FileNotFoundError:
+        return 0
+
+def _file_manifest(paths: list[Path], output_dir: Path) -> list[dict[str, Any]]:
+    files = []
+    for path in sorted(paths, key=lambda p: p.name):
+        name = path.name
+        parts = name.replace(".csv", "").split("_")
+        kind = "metadata" if name.endswith("metadata.json") else parts[1] if len(parts) >= 3 else "manifest"
+        line = None if kind in ("metadata", "manifest") else parts[2]
+        files.append({
+            "line": line,
+            "kind": kind,
+            "path": str(path.relative_to(output_dir)),
+            "artifact_uri": str(path),
+            "row_count": _row_count(path),
+            "checksum_sha256": _sha256_file(path),
+        })
+    return files
+
+def _write_manifest(dataset_version_id: str, output_dir: Path, written: list[Path], counts: dict[str, int], started_at: datetime.datetime, completed_at: datetime.datetime, created_by: str) -> tuple[Path, dict[str, Any]]:
+    files = _file_manifest(written, output_dir)
+    combined = hashlib.sha256()
+    for item in files:
+        combined.update(item["checksum_sha256"].encode("utf-8"))
+    manifest = {
+        "dataset_version_id": dataset_version_id,
+        "source_type": "pricing_db_read_models",
+        "source_tables": ["policy_exposure", "claim_outcome", "quote_feature_snapshot"],
+        "source_window": {"window_start": None, "window_end": None},
+        "created_at": completed_at.isoformat(),
+        "created_by": created_by,
+        "artifact_uri": str(output_dir),
+        "files": files,
+        "counts": counts,
+        "data_hash": combined.hexdigest(),
+    }
+    path = output_dir / "manifest.json"
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return path, manifest
+
+def _register_dataset(database_url: str, manifest_path: Path, manifest: dict[str, Any], started_at: datetime.datetime, completed_at: datetime.datetime) -> None:
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO training_dataset_version
+                (dataset_version_id, source_type, artifact_uri, manifest_uri, data_hash,
+                 export_started_at, export_completed_at, status, frequency_rows, severity_rows,
+                 exposure_rows, settled_claim_rows, quote_snapshot_rows, created_by, created_at)
+                VALUES
+                (:dataset_version_id, :source_type, :artifact_uri, :manifest_uri, :data_hash,
+                 :export_started_at, :export_completed_at, 'EXPORTED', :frequency_rows, :severity_rows,
+                 :exposure_rows, :settled_claim_rows, :quote_snapshot_rows, :created_by, :created_at)
+                ON CONFLICT (dataset_version_id) DO UPDATE SET
+                  artifact_uri = EXCLUDED.artifact_uri,
+                  manifest_uri = EXCLUDED.manifest_uri,
+                  data_hash = EXCLUDED.data_hash,
+                  export_completed_at = EXCLUDED.export_completed_at,
+                  frequency_rows = EXCLUDED.frequency_rows,
+                  severity_rows = EXCLUDED.severity_rows,
+                  exposure_rows = EXCLUDED.exposure_rows,
+                  settled_claim_rows = EXCLUDED.settled_claim_rows,
+                  quote_snapshot_rows = EXCLUDED.quote_snapshot_rows
+            """), {
+                "dataset_version_id": manifest["dataset_version_id"],
+                "source_type": manifest["source_type"],
+                "artifact_uri": manifest["artifact_uri"],
+                "manifest_uri": str(manifest_path),
+                "data_hash": manifest["data_hash"],
+                "export_started_at": started_at,
+                "export_completed_at": completed_at,
+                "frequency_rows": manifest["counts"]["frequency_rows"],
+                "severity_rows": manifest["counts"]["severity_rows"],
+                "exposure_rows": manifest["counts"]["exposure_rows"],
+                "settled_claim_rows": manifest["counts"]["settled_claim_rows"],
+                "quote_snapshot_rows": manifest["counts"]["quote_snapshot_rows"],
+                "created_by": manifest["created_by"],
+                "created_at": completed_at,
+            })
+            conn.execute(text("DELETE FROM training_dataset_file WHERE dataset_version_id = :id"), {"id": manifest["dataset_version_id"]})
+            for item in manifest["files"] + [{"line": None, "kind": "manifest", "artifact_uri": str(manifest_path), "row_count": 1, "checksum_sha256": _sha256_file(manifest_path)}]:
+                conn.execute(text("""
+                    INSERT INTO training_dataset_file
+                    (file_id, dataset_version_id, line, kind, artifact_uri, row_count, checksum_sha256, created_at)
+                    VALUES (:file_id, :dataset_version_id, :line, :kind, :artifact_uri, :row_count, :checksum_sha256, :created_at)
+                """), {
+                    "file_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{manifest['dataset_version_id']}:{item['artifact_uri']}")),
+                    "dataset_version_id": manifest["dataset_version_id"],
+                    "line": item["line"],
+                    "kind": item["kind"],
+                    "artifact_uri": item["artifact_uri"],
+                    "row_count": item["row_count"],
+                    "checksum_sha256": item["checksum_sha256"],
+                    "created_at": completed_at,
+                })
+    finally:
+        engine.dispose()
+
+
+def build_datasets(database_url: str, output_dir: Path, dataset_version_id: str | None = None) -> list[Path]:
+    engine = create_engine(database_url)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        exposures = _load_table(engine, "policy_exposure")
+        claims = _load_table(engine, "claim_outcome")
+        snapshots = _load_table(engine, "quote_feature_snapshot")
+
+        written: list[Path] = []
+        if exposures.empty:
+            for line in _known_lines():
+                for kind in ("freq", "sev"):
+                    columns = _schema_columns(kind, line)
+                    if columns is None:
+                        continue
+                    path = output_dir / f"pricing_{kind}_{line}.csv"
+                    pd.DataFrame(columns=columns).to_csv(path, index=False)
+                    written.append(path)
+            written.append(_write_metadata(output_dir, dataset_version_id))
+            return written
+
+        if not snapshots.empty:
+            snapshot_features = pd.DataFrame([
+                {"quote_id": row["quote_id"], **_flatten("quote_feature__", row.get("feature_set"))}
+                for _, row in snapshots.iterrows()
+            ])
+            exposures = exposures.merge(snapshot_features, on="quote_id", how="left", suffixes=("", "_quote"))
+
+        settled_claims = claims[claims["settled_at"].notna()].copy() if not claims.empty else claims
+        for line, line_exposures in exposures.groupby("line"):
+            line_claims = settled_claims[settled_claims["line"] == line].copy() if not settled_claims.empty else pd.DataFrame()
+            rows = []
+            for _, exposure in line_exposures.iterrows():
+                exposure_claims = pd.DataFrame()
+                if not line_claims.empty:
+                    occurrence = pd.to_datetime(line_claims["occurrence_date"], utc=True, errors="coerce")
+                    start = pd.to_datetime(exposure["segment_start"], utc=True)
+                    end = pd.to_datetime(exposure["segment_end"], utc=True)
+                    exposure_claims = line_claims[
+                        (line_claims["policy_id"] == exposure["policy_id"])
+                        & (line_claims["exposure_segment_seq"] == exposure["exposure_segment_seq"])
+                        & (occurrence >= start)
+                        & (occurrence < end)
+                    ]
+                row = _exposure_feature_row(exposure)
+                row = _add_line_feature_engineering(row, line)
+                row["policy_effective_date"] = _date_str(exposure.get("segment_start"))
+                row["policy_expiration_date"] = _date_str(exposure.get("segment_end"))
+                row["policy_year"] = _year(exposure.get("segment_start"))
+                claim_count = int(len(exposure_claims))
+                total_loss = int(exposure_claims["incurred_amount_vnd"].fillna(exposure_claims.get("actual_loss_vnd", 0)).sum()) if claim_count else 0
+                earned = float(exposure.get("earned_exposure_years") or 0.0)
+                row["claim_count"] = claim_count
+                row["claim_flag"] = 1 if claim_count > 0 else 0
+                row["total_incurred_amount_vnd"] = total_loss
+                row["target_frequency"] = claim_count / earned if earned > 0 else 0.0
+                row["offset_log_exposure"] = 0.0 if earned <= 0 else math.log(earned)
+                row["loss_per_exposure"] = total_loss / earned if earned > 0 else 0.0
+                rows.append(row)
+
+            freq_df = _align_to_training_schema(pd.DataFrame(rows), "freq", line)
+            freq_path = output_dir / f"pricing_freq_{line}.csv"
+            freq_df.to_csv(freq_path, index=False)
+            written.append(freq_path)
+
+            sev_rows = []
+            for _, claim in line_claims.iterrows():
+                matching_exposure = line_exposures[
+                    (line_exposures["policy_id"] == claim["policy_id"])
+                    & (line_exposures["exposure_segment_seq"] == claim["exposure_segment_seq"])
+                ]
+                base = _exposure_feature_row(matching_exposure.iloc[0]) if not matching_exposure.empty else {}
+                base["policy_year"] = _year(base.get("segment_start"))
+                row = {**base, **claim.to_dict()}
+                row = _add_line_feature_engineering(row, line)
+                row["report_date"] = _date_str(claim.get("reported_at") or claim.get("report_date"))
+                row["occurrence_date"] = _date_str(claim.get("occurrence_date"))
+                row["incurred_amount"] = claim.get("incurred_amount_vnd") or claim.get("actual_loss_vnd") or 0
+                row["paid_amount"] = claim.get("paid_amount_vnd") or claim.get("actual_loss_vnd") or 0
+                row["severity_level"] = _severity_level(row["incurred_amount"])
+                sev_rows.append(row)
+            sev_path = output_dir / f"pricing_sev_{line}.csv"
+            _align_to_training_schema(pd.DataFrame(sev_rows), "sev", line).to_csv(sev_path, index=False)
+            written.append(sev_path)
+
+        exported_lines = set(exposures["line"].dropna().unique())
+        for line in [line for line in _known_lines() if line not in exported_lines]:
+            for kind in ("freq", "sev"):
+                columns = _schema_columns(kind, line)
+                if columns is None:
+                    continue
+                path = output_dir / f"pricing_{kind}_{line}.csv"
+                pd.DataFrame(columns=columns).to_csv(path, index=False)
+                written.append(path)
+
+        written.append(_write_metadata(output_dir, dataset_version_id))
+        return written
+    finally:
+        engine.dispose()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--database-url", required=True)
+    parser.add_argument("--output-dir", default="data/pricing_read_model_export")
+    parser.add_argument("--dataset-version-id", default=None)
+    parser.add_argument("--register-registry", action="store_true")
+    parser.add_argument("--created-by", default="offline-exporter")
+    args = parser.parse_args()
+    started_at = datetime.datetime.now(datetime.timezone.utc)
+    dataset_version_id = args.dataset_version_id or str(uuid.uuid4())
+    written = build_datasets(args.database_url, Path(args.output_dir), dataset_version_id)
+    completed_at = datetime.datetime.now(datetime.timezone.utc)
+    counts = {
+        "frequency_rows": sum(_row_count(path) for path in written if path.name.startswith("pricing_freq_")),
+        "severity_rows": sum(_row_count(path) for path in written if path.name.startswith("pricing_sev_")),
+        "exposure_rows": 0,
+        "settled_claim_rows": 0,
+        "quote_snapshot_rows": 0,
+    }
+    try:
+        engine = create_engine(args.database_url)
+        with engine.connect() as conn:
+            counts["exposure_rows"] = conn.execute(text("SELECT COUNT(*) FROM policy_exposure")).scalar_one()
+            counts["settled_claim_rows"] = conn.execute(text("SELECT COUNT(*) FROM claim_outcome WHERE settled_at IS NOT NULL")).scalar_one()
+            counts["quote_snapshot_rows"] = conn.execute(text("SELECT COUNT(*) FROM quote_feature_snapshot")).scalar_one()
+    finally:
+        engine.dispose()
+    manifest_path, manifest = _write_manifest(dataset_version_id, Path(args.output_dir), written, counts, started_at, completed_at, args.created_by)
+    written.append(manifest_path)
+    if args.register_registry:
+        _register_dataset(args.database_url, manifest_path, manifest, started_at, completed_at)
+    for path in written:
+        print(path)
+
+
+if __name__ == "__main__":
+    main()
+
+

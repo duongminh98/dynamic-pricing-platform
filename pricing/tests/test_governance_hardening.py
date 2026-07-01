@@ -28,7 +28,12 @@ def make_token(roles, sub="admin-user-123"):
 
 
 def auth_header(roles, sub="admin-user-123"):
-    return {"Authorization": "Bearer " + make_token(roles, sub)}
+    return {
+        "X-Authenticated-User-Sub": sub,
+        "X-Authenticated-User-Roles": ",".join(roles),
+        "X-Authenticated-User-Issuer": "http://localhost:8080/realms/dynamic-pricing",
+        "X-Authenticated-Client-Id": "mini-app",
+    }
 
 
 @pytest.fixture
@@ -63,6 +68,10 @@ def _insert_model(db, line="health", algorithm="LightGBM", gini=0.75, monotonic=
         trained_at=datetime.datetime.now(datetime.timezone.utc),
         dataset_desc="test dataset",
         monotonic_applied=monotonic,
+        family="tw",
+        status="CANDIDATE",
+        quality_gates={"comparison_passed": True, "smoothness_passed": True},
+        comparison_report_uri="reports/comparison.json",
     )
     db.add(mv)
     db.commit()
@@ -259,3 +268,46 @@ async def test_t11_models_each_line_one_champion(app, db_session):
     assert len(champions) == 2
     champion_lines = {m["line"] for m in champions}
     assert champion_lines == {"health", "car"}
+
+@pytest.mark.asyncio
+async def test_t12_promote_rejects_non_candidate_status(app, db_session):
+    old = _insert_model(db_session, line="health", gini=0.70)
+    _insert_champion(db_session, "health", old.model_version_id)
+    new = _insert_model(db_session, line="health", gini=0.80)
+    new.status = "REJECTED"
+    db_session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/admin/champion/promote",
+            json={"line": "health", "model_version_id": new.model_version_id},
+            headers=auth_header(["Administrator"]),
+        )
+    assert resp.status_code == 200
+    assert resp.json()["promoted"] is False
+    assert resp.json()["reason"] == "NOT_CANDIDATE_STATUS"
+
+@pytest.mark.asyncio
+async def test_t13_reject_candidate_leaves_champion_unchanged(app, db_session):
+    old = _insert_model(db_session, line="health", gini=0.70)
+    _insert_champion(db_session, "health", old.model_version_id)
+    candidate = _insert_model(db_session, line="health", gini=0.80)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/admin/models/reject",
+            json={"line": "health", "model_version_id": candidate.model_version_id},
+            headers=auth_header(["Administrator"], sub="admin-rejector"),
+        )
+    assert resp.status_code == 200
+    assert resp.json()["rejected"] is True
+    assert db_session.get(ModelVersion, candidate.model_version_id).status == "REJECTED"
+    current = db_session.query(ChampionAssignment).filter(
+        ChampionAssignment.line == "health",
+        ChampionAssignment.is_current.is_(True),
+    ).first()
+    assert current.model_version_id == old.model_version_id
+    audit = db_session.query(AuditTrail).filter(AuditTrail.event_type == "MODEL_CANDIDATE_REJECTED").first()
+    assert audit.actor == "admin-rejector"

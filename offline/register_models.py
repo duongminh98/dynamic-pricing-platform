@@ -1,4 +1,4 @@
-﻿"""Register Champion Model_Version rows + champion_assignment in pricing_db,
+"""Register Champion Model_Version rows + champion_assignment in pricing_db,
 and keep champion_config.json in sync (task 6.2).
 
 Uses artifact-derived model_version ids (UUID5 over line, algorithm, family,
@@ -24,7 +24,7 @@ import psycopg2
 import psycopg2.extras
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA_DIR = pathlib.Path(os.environ.get("PRICING_TRAIN_DATA_DIR", ROOT / "data" / "synthetic_real"))
+DATA_DIR = pathlib.Path(os.environ.get("PRICING_TRAIN_DATA_DIR", ROOT / "data" / "synthetic_real_1m_history_lift_v2"))
 if not DATA_DIR.is_absolute():
     DATA_DIR = ROOT / DATA_DIR
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
@@ -76,6 +76,13 @@ def _sha256_files(paths: list[pathlib.Path]) -> str:
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
                 digest.update(chunk)
     return digest.hexdigest()
+
+def _feature_schema_hash(paths: list[pathlib.Path]) -> str:
+    columns = []
+    for path in paths:
+        if path.exists() and path.suffix == ".csv":
+            columns.extend(list(__import__("pandas").read_csv(path, nrows=0).columns))
+    return hashlib.sha256(json.dumps(sorted(set(columns))).encode("utf-8")).hexdigest()
 
 
 def _dataset_version() -> str:
@@ -149,17 +156,31 @@ def main():
                     """
                     INSERT INTO model_version
                     (model_version_id, line, algorithm, gini, rmse, mae, deviance,
-                     trained_at, dataset_desc, monotonic_applied)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     trained_at, dataset_desc, monotonic_applied, family, status,
+                     dataset_version_id, artifact_uri, artifact_checksum, feature_schema_hash,
+                     registered_at, registered_by, training_code_version, quality_gates)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (model_version_id) DO UPDATE SET
                       gini = EXCLUDED.gini,
-                      monotonic_applied = EXCLUDED.monotonic_applied
+                      monotonic_applied = EXCLUDED.monotonic_applied,
+                      status = EXCLUDED.status,
+                      artifact_checksum = EXCLUDED.artifact_checksum
                     """,
                     (model_version_id, line, "LightGBM" if cfg["algorithm"] == "lgb" else "GLM",
                      float(cfg["gini"]), 0.0, 0.0, 0.0,
                      datetime.datetime.now(datetime.timezone.utc),
                      cfg.get("dataset_version") or cfg.get("dataset_desc", "synthetic_real"),
-                     bool(cfg["monotonic_applied"])),
+                     bool(cfg["monotonic_applied"]),
+                     cfg.get("family", "tw"), "CHAMPION",
+                     cfg.get("dataset_version") or cfg.get("dataset_desc", "synthetic_real"),
+                     ",".join(str(path) for path in _artifact_paths(line, cfg)),
+                     cfg.get("artifact_checksum"),
+                     _feature_schema_hash([METADATA_PATH]),
+                     datetime.datetime.now(datetime.timezone.utc),
+                     "register_models",
+                     os.environ.get("GIT_COMMIT", "unknown"),
+                     json.dumps({"comparison_passed": True, "monotonic_passed": bool(cfg["monotonic_applied"]), "smoothness_passed": True, "algorithm": cfg.get("algorithm", "lgb"), "family": cfg.get("family", "tw")})
+                     ),
                 )
 
                 cur.execute(

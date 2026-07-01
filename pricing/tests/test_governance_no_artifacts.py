@@ -24,6 +24,9 @@ def _mock_model(model_version_id="mv1", line="health", gini=0.8, algorithm="lgb"
     m.deviance = 200.0
     m.algorithm = algorithm
     m.monotonic_applied = monotonic_applied
+    m.status = "CANDIDATE"
+    m.quality_gates = {"comparison_passed": True, "smoothness_passed": True}
+    m.comparison_report_uri = "reports/comparison.json"
     return m
 
 

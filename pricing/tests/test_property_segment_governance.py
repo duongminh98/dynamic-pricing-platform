@@ -32,7 +32,10 @@ def _seed_model(db, line, gini, monotonic, version_id=None):
         model_version_id=version_id, line=line, algorithm="LightGBM",
         gini=gini, rmse=0.0, mae=0.0, deviance=0.0,
         trained_at=datetime.datetime.now(datetime.timezone.utc),
-        dataset_desc="synthetic_real", monotonic_applied=monotonic))
+        dataset_desc="synthetic_real", monotonic_applied=monotonic,
+        family="tw", status="CANDIDATE",
+        comparison_report_uri="reports/comparison.json",
+        quality_gates={"comparison_passed": True, "smoothness_passed": True}))
     return version_id
 
 def _seed_champion(db, line, version_id):
@@ -47,7 +50,10 @@ def _seed_model_algo(db, line, gini, monotonic, algorithm, version_id=None):
         model_version_id=version_id, line=line, algorithm=algorithm,
         gini=gini, rmse=0.0, mae=0.0, deviance=0.0,
         trained_at=datetime.datetime.now(datetime.timezone.utc),
-        dataset_desc="synthetic_real", monotonic_applied=monotonic))
+        dataset_desc="synthetic_real", monotonic_applied=monotonic,
+        family="tw", status="CANDIDATE",
+        comparison_report_uri="reports/comparison.json",
+        quality_gates={"comparison_passed": True, "smoothness_passed": True}))
     return version_id
 
 

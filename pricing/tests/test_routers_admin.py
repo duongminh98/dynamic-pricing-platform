@@ -26,7 +26,12 @@ def make_token(roles):
 
 
 def auth_header(roles):
-    return {"Authorization": "Bearer " + make_token(roles)}
+    return {
+        "X-Authenticated-User-Sub": "admin-user-123",
+        "X-Authenticated-User-Roles": ",".join(roles),
+        "X-Authenticated-User-Issuer": "http://localhost:8080/realms/dynamic-pricing",
+        "X-Authenticated-Client-Id": "mini-app",
+    }
 
 
 @pytest.fixture
@@ -61,6 +66,10 @@ def _insert_model(db, line="health", algorithm="LightGBM", gini=0.75, monotonic=
         trained_at=datetime.datetime.now(datetime.timezone.utc),
         dataset_desc="test dataset",
         monotonic_applied=monotonic,
+        family="tw",
+        status="CANDIDATE",
+        comparison_report_uri="reports/comparison.json",
+        quality_gates={"comparison_passed": True, "smoothness_passed": True},
     )
     db.add(mv)
     db.commit()

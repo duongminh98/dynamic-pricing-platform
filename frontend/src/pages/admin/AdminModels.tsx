@@ -8,6 +8,8 @@ interface ModelVersion {
   model_version_id: string; line: string; algorithm: string;
   gini: number; rmse: number; mae: number; deviance: number;
   trained_at: string; dataset_desc: string; monotonic_applied: boolean; is_champion: boolean;
+  family?: string; status?: string; dataset_version_id?: string; artifact_checksum?: string;
+  training_code_version?: string; quality_gates?: Record<string, any>;
 }
 interface DriftMetric { value: number; threshold: number; needs_recalibration: boolean; status?: string; bins_evaluated?: number; }
 interface Drift { line: string; needs_recalibration: boolean; metrics: Record<string, DriftMetric>; }
@@ -27,9 +29,9 @@ export default function AdminModels() {
         ))}
       </div>
 
-      <DriftPanel line={line} />
       <ModelsPanel line={line} />
       <ReportsPanel line={line} />
+      <DriftPanel line={line} />
     </div>
   );
 }
@@ -101,6 +103,14 @@ function ModelsPanel({ line }: { line: Line }) {
       reload();
     } catch (e) { toast.push((e as ApiError).message, 'err'); }
   };
+  const reject = async (id: string) => {
+    try {
+      const r = await run<{ rejected: boolean; reason?: string }>('/admin/models/reject', { method: 'POST', body: { line, model_version_id: id } });
+      if (r.rejected) toast.push(`Rejected candidate: ${id}`);
+      else toast.push(`Reject skipped: ${r.reason}`, 'warn');
+      reload();
+    } catch (e) { toast.push((e as ApiError).message, 'err'); }
+  };
   const rollback = async () => {
     try {
       const r = await run<{ rolled_back: boolean; champion: string }>('/admin/champion/rollback', { method: 'POST', body: { line } });
@@ -116,28 +126,32 @@ function ModelsPanel({ line }: { line: Line }) {
   return (
     <div className="card stack">
       <div className="row-between">
-        <h3 style={{ fontSize: 'var(--step-1)' }}>Phiên bản mô hình · {LINE_LABEL[line]}</h3>
+        <h3 style={{ fontSize: 'var(--step-1)' }}>Model lifecycle · {LINE_LABEL[line]}</h3>
         <button className="btn btn-ghost btn-sm" disabled={busy} onClick={rollback}>↺ Rollback champion</button>
       </div>
-      <p className="muted" style={{ marginTop: -8 }}>Thăng hạng bị chặn nếu Gini không cải thiện hoặc chưa áp ràng buộc monotonic (BR-23). 200 không đồng nghĩa đã thăng hạng.</p>
+      <p className="muted" style={{ marginTop: -8 }}>Review candidate lineage, offline gates, compare report. Drift stays diagnostics only.</p>
       {loading && <Loading />}
       <ErrorBanner error={error} />
       {data && data.length === 0 && <EmptyState title="Chưa có phiên bản mô hình cho dòng này" />}
       {data && data.length > 0 && (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Phiên bản</th><th>Thuật toán</th><th>Gini</th><th>RMSE</th><th>Monotonic</th><th>Champion</th><th></th></tr></thead>
+            <thead><tr><th>Version</th><th>Family</th><th>Status</th><th>Dataset</th><th>Gini</th><th>RMSE</th><th>Monotonic</th><th>Compare</th><th>Checksum</th><th></th></tr></thead>
             <tbody>
               {data.map((m) => (
                 <tr key={m.model_version_id}>
                   <td className="mono" style={{ fontSize: '0.78rem' }}>{m.model_version_id}<div className="faint" style={{ fontSize: '0.7rem' }}>{dateTime(m.trained_at)}</div></td>
-                  <td>{m.algorithm}</td>
+                  <td>{m.algorithm}<div className="faint">{m.family || 'tw'}</div></td>
+                  <td>{m.is_champion ? <span className="pill pill-ok">champion</span> : <span className="pill pill-muted">{m.status || 'unknown'}</span>}</td>
+                  <td className="mono" style={{ fontSize: '0.72rem' }}>{m.dataset_version_id || m.dataset_desc}</td>
                   <td className="num">{m.gini?.toFixed(3)}</td>
                   <td className="num">{m.rmse}</td>
                   <td>{m.monotonic_applied ? <span className="pill pill-ok">applied</span> : <span className="pill pill-muted">not applied</span>}</td>
-                  <td>{m.is_champion && <span className="pill pill-ok">champion</span>}</td>
+                  <td>{m.quality_gates?.comparison_passed ? <span className="pill pill-ok">pass</span> : <span className="pill pill-muted">n/a</span>}</td>
+                  <td className="mono" style={{ fontSize: '0.72rem' }}>{m.artifact_checksum ? m.artifact_checksum.slice(0, 12) : '—'}</td>
                   <td className="num">
                     {!m.is_champion && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => promote(m.model_version_id)}>Thăng hạng</button>}
+                    {!m.is_champion && m.status === 'CANDIDATE' && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => reject(m.model_version_id)}>Reject</button>}
                   </td>
                 </tr>
               ))}

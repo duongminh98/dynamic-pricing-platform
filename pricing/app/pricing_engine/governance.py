@@ -46,11 +46,31 @@ def _current_champion(db: Session, line: str) -> ModelVersion | None:
 
 def promote_champion(db: Session, line: str, challenger_version_id: str,
                      actor: str = "admin") -> dict:
-    """Promote a challenger only if Gini beats champion AND monotonic applied."""
+    """Promote a candidate only if offline gates and metrics pass."""
     challenger = _get_model(db, challenger_version_id)
     if challenger.line != line:
         raise ServiceException(ErrorCode.BAD_REQUEST,
                                details={"line": line, "reason": "line mismatch"})
+    if (challenger.status or "CANDIDATE") != "CANDIDATE":
+        _audit(db, line, "CHAMPION_PROMOTE_REJECTED",
+               {"reason": "not_candidate", "challenger": challenger_version_id, "status": challenger.status},
+               actor)
+        return {"promoted": False, "reason": "NOT_CANDIDATE_STATUS",
+                "champion": _current_champion(db, line).model_version_id if _current_champion(db, line) else None}
+
+    gates = challenger.quality_gates or {}
+    if not gates.get("comparison_passed", False):
+        _audit(db, line, "CHAMPION_PROMOTE_REJECTED",
+               {"reason": "comparison_failed", "challenger": challenger_version_id},
+               actor)
+        return {"promoted": False, "reason": "COMPARISON_NOT_PASSED",
+                "champion": _current_champion(db, line).model_version_id if _current_champion(db, line) else None}
+    if not gates.get("smoothness_passed", True):
+        _audit(db, line, "CHAMPION_PROMOTE_REJECTED",
+               {"reason": "smoothness_failed", "challenger": challenger_version_id},
+               actor)
+        return {"promoted": False, "reason": "SMOOTHNESS_GATE_FAILED",
+                "champion": _current_champion(db, line).model_version_id if _current_champion(db, line) else None}
 
     current = _current_champion(db, line)
     challenger_metric = getattr(challenger, PRIMARY_METRIC, 0.0) or 0.0
@@ -90,16 +110,39 @@ def promote_champion(db: Session, line: str, challenger_version_id: str,
                               model_version_id=challenger_version_id,
                               is_current=True,
                               created_at=datetime.datetime.now(datetime.timezone.utc)))
+    challenger.status = "CHAMPION"
+    if current is not None:
+        current.status = "ARCHIVED"
     detail = {"line": line,
               "action": "promote",
               "old": current.model_version_id if current else None,
               "new": challenger_version_id,
               "challenger_gini": challenger_metric,
-              "champion_gini": current_metric}
+              "champion_gini": current_metric,
+              "comparison_report_uri": challenger.comparison_report_uri,
+              "quality_gates": gates}
     _audit(db, line, "CHAMPION_CHANGE", detail, actor)
     _publish_event(db, "ChampionPromoted", detail)
     db.commit()
     return {"promoted": True, "champion": challenger_version_id}
+
+def reject_candidate(db: Session, line: str, model_version_id: str, actor: str = "admin") -> dict:
+    candidate = _get_model(db, model_version_id)
+    if candidate.line != line:
+        raise ServiceException(ErrorCode.BAD_REQUEST,
+                               details={"line": line, "reason": "line mismatch"})
+    if (candidate.status or "CANDIDATE") != "CANDIDATE":
+        return {"rejected": False, "reason": "NOT_CANDIDATE_STATUS", "status": candidate.status}
+    candidate.status = "REJECTED"
+    detail = {
+        "line": line,
+        "action": "reject",
+        "model_version_id": model_version_id,
+        "comparison_report_uri": candidate.comparison_report_uri,
+    }
+    _audit(db, line, "MODEL_CANDIDATE_REJECTED", detail, actor)
+    db.commit()
+    return {"rejected": True, "model_version_id": model_version_id}
 
 
 def rollback_champion(db: Session, line: str, actor: str = "admin") -> dict:
@@ -128,6 +171,11 @@ def rollback_champion(db: Session, line: str, actor: str = "admin") -> dict:
                               model_version_id=previous.model_version_id,
                               is_current=True,
                               created_at=datetime.datetime.now(datetime.timezone.utc)))
+    prev_model = _get_model(db, previous.model_version_id)
+    prev_model.status = "CHAMPION"
+    if current is not None:
+        curr_model = _get_model(db, current.model_version_id)
+        curr_model.status = "ARCHIVED"
     detail = {"line": line,
               "action": "rollback",
               "old": current.model_version_id if current else None,

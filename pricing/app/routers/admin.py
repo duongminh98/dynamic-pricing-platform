@@ -17,6 +17,10 @@ class PromoteRequest(BaseModel):
 class RollbackRequest(BaseModel):
     line: str
 
+class RejectCandidateRequest(BaseModel):
+    line: str
+    model_version_id: str
+
 def _model_to_dict(mv: ModelVersion, is_champion: bool) -> dict:
     return {
         "model_version_id": mv.model_version_id,
@@ -29,6 +33,19 @@ def _model_to_dict(mv: ModelVersion, is_champion: bool) -> dict:
         "trained_at": mv.trained_at.isoformat() if mv.trained_at else None,
         "dataset_desc": mv.dataset_desc,
         "monotonic_applied": mv.monotonic_applied,
+        "family": mv.family,
+        "status": mv.status,
+        "dataset_version_id": mv.dataset_version_id,
+        "artifact_uri": mv.artifact_uri,
+        "artifact_checksum": mv.artifact_checksum,
+        "feature_schema_hash": mv.feature_schema_hash,
+        "comparison_report_uri": mv.comparison_report_uri,
+        "validation_report_uri": mv.validation_report_uri,
+        "fairness_report_uri": mv.fairness_report_uri,
+        "registered_at": mv.registered_at.isoformat() if mv.registered_at else None,
+        "registered_by": mv.registered_by,
+        "training_code_version": mv.training_code_version,
+        "quality_gates": mv.quality_gates,
         "is_champion": is_champion,
     }
 
@@ -56,6 +73,21 @@ async def promote_champion(request: PromoteRequest, db: Session = Depends(get_db
         if not result["promoted"]:
             resp["reason"] = result.get("reason")
         return resp
+    except ServiceException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail={"error_code": "INTERNAL_ERROR", "message": str(e)})
+
+@router.post("/models/reject")
+async def reject_candidate(request: RejectCandidateRequest, db: Session = Depends(get_db), claims=Depends(require_administrator)):
+    from ..pricing_engine import governance
+    from common.errors import ServiceException
+    actor = claims.get("sub", "admin")
+    try:
+        result = governance.reject_candidate(db, request.line, request.model_version_id, actor=actor)
+        return {"status": "success", **result}
     except ServiceException:
         db.rollback()
         raise

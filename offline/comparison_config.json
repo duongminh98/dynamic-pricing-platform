@@ -1,0 +1,8 @@
+{
+  "primary_metric": "gini",
+  "gini_improvement_threshold": 0.01,
+  "max_deviance_ratio": 1.02,
+  "max_calibration_error_ratio": 1.05,
+  "max_p95_abs_premium_delta_pct": 20.0,
+  "max_over30_premium_delta_rate_pct": 2.0
+}
