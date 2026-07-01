@@ -32,16 +32,18 @@ plugins:
         - Authorization
         - Content-Type
         - X-Correlation-Id
+        - X-Authenticated-User-Sub
+        - X-Authenticated-User-Roles
+        - X-Authenticated-User-Issuer
+        - X-Authenticated-Client-Id
       exposed_headers:
         - X-Correlation-Id
       credentials: true
       max_age: 3600
       preflight_continue: false
-  # NOTE: JWT verification is NOT global. Public bootstrap routes (POST /customers/register,
-  # POST /customers/login, GET /products*) must be reachable without a token (design 3.1/3.2,
-  # R1.1/R1.5/R3.8). Java services self-validate JWT via Spring resource server; the Python
-  # pricing service does not, so the `jwt` plugin is attached per-service below only to services
-  # whose every route is protected (order, claims, notification, pricing).
+  # JWT verification is centralized at Kong. Public bootstrap/catalog routes stay
+  # unauthenticated; every protected route below attaches the JWT policy and then
+  # injects trusted identity headers for upstream services.
 
 consumers:
   - username: keycloak-realm
@@ -81,12 +83,58 @@ services:
     write_timeout: 30000
     retries: 0
     routes:
-      - name: customer-routes
+      - name: customer-public-routes
         paths:
-          - /customers
+          - /customers/register
+          - /customers/login
+        strip_path: false
+        preserve_host: false
+      - name: customer-protected-routes
+        paths:
+          - /customers/me
+          - /customers/me/
           - /admin/customers
         strip_path: false
         preserve_host: false
+
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+              run_on_preflight: false
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - X-Authenticated-User-Sub
+                  - X-Authenticated-User-Roles
+                  - X-Authenticated-User-Issuer
+                  - X-Authenticated-Client-Id
+          - name: post-function
+            config:
+              access:
+                - |
+                  local token = kong.ctx.shared.authenticated_jwt_token
+                  if token then
+                    local payload = token:match("^[^.]+%.([^.]+)%.") or ""
+                    payload = payload:gsub("-", "+"):gsub("_", "/")
+                    payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
+                    local claims_json = ngx.decode_base64(payload) or "{}"
+                    local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
+                    local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
+                    local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
+                    local roles = {}
+                    for role in roles_block:gmatch('"([^"]+)"') do
+                      roles[#roles + 1] = role
+                    end
+                    kong.service.request.set_header("X-Authenticated-User-Sub", sub)
+                    kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
+                    kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
+                    kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                  end
 
   - name: product-service
     protocol: http
@@ -97,14 +145,57 @@ services:
     write_timeout: 30000
     retries: 0
     routes:
-      - name: product-routes
+      - name: product-public-routes
         paths:
           - /products
+        strip_path: false
+        preserve_host: false
+      - name: product-admin-routes
+        paths:
           - /admin/products
           - /admin/loading-factors
           - /admin/rate-versions
         strip_path: false
         preserve_host: false
+
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+              run_on_preflight: false
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - X-Authenticated-User-Sub
+                  - X-Authenticated-User-Roles
+                  - X-Authenticated-User-Issuer
+                  - X-Authenticated-Client-Id
+          - name: post-function
+            config:
+              access:
+                - |
+                  local token = kong.ctx.shared.authenticated_jwt_token
+                  if token then
+                    local payload = token:match("^[^.]+%.([^.]+)%.") or ""
+                    payload = payload:gsub("-", "+"):gsub("_", "/")
+                    payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
+                    local claims_json = ngx.decode_base64(payload) or "{}"
+                    local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
+                    local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
+                    local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
+                    local roles = {}
+                    for role in roles_block:gmatch('"([^"]+)"') do
+                      roles[#roles + 1] = role
+                    end
+                    kong.service.request.set_header("X-Authenticated-User-Sub", sub)
+                    kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
+                    kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
+                    kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                  end
 
   - name: order-service
     protocol: http
@@ -114,13 +205,6 @@ services:
     read_timeout: 30000
     write_timeout: 30000
     retries: 0
-    plugins:
-      - name: jwt
-        config:
-          key_claim_name: iss
-          claims_to_verify:
-            - exp
-          run_on_preflight: false
     routes:
       - name: order-routes
         paths:
@@ -132,6 +216,45 @@ services:
         strip_path: false
         preserve_host: false
 
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+              run_on_preflight: false
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - X-Authenticated-User-Sub
+                  - X-Authenticated-User-Roles
+                  - X-Authenticated-User-Issuer
+                  - X-Authenticated-Client-Id
+          - name: post-function
+            config:
+              access:
+                - |
+                  local token = kong.ctx.shared.authenticated_jwt_token
+                  if token then
+                    local payload = token:match("^[^.]+%.([^.]+)%.") or ""
+                    payload = payload:gsub("-", "+"):gsub("_", "/")
+                    payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
+                    local claims_json = ngx.decode_base64(payload) or "{}"
+                    local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
+                    local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
+                    local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
+                    local roles = {}
+                    for role in roles_block:gmatch('"([^"]+)"') do
+                      roles[#roles + 1] = role
+                    end
+                    kong.service.request.set_header("X-Authenticated-User-Sub", sub)
+                    kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
+                    kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
+                    kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                  end
+
   - name: claims-service
     protocol: http
     host: claims-service-upstream
@@ -140,13 +263,6 @@ services:
     read_timeout: 30000
     write_timeout: 30000
     retries: 0
-    plugins:
-      - name: jwt
-        config:
-          key_claim_name: iss
-          claims_to_verify:
-            - exp
-          run_on_preflight: false
     routes:
       - name: claims-routes
         paths:
@@ -154,6 +270,45 @@ services:
           - /admin/claims
         strip_path: false
         preserve_host: false
+
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+              run_on_preflight: false
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - X-Authenticated-User-Sub
+                  - X-Authenticated-User-Roles
+                  - X-Authenticated-User-Issuer
+                  - X-Authenticated-Client-Id
+          - name: post-function
+            config:
+              access:
+                - |
+                  local token = kong.ctx.shared.authenticated_jwt_token
+                  if token then
+                    local payload = token:match("^[^.]+%.([^.]+)%.") or ""
+                    payload = payload:gsub("-", "+"):gsub("_", "/")
+                    payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
+                    local claims_json = ngx.decode_base64(payload) or "{}"
+                    local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
+                    local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
+                    local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
+                    local roles = {}
+                    for role in roles_block:gmatch('"([^"]+)"') do
+                      roles[#roles + 1] = role
+                    end
+                    kong.service.request.set_header("X-Authenticated-User-Sub", sub)
+                    kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
+                    kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
+                    kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                  end
 
   - name: billing-service
     protocol: http
@@ -164,13 +319,58 @@ services:
     write_timeout: 30000
     retries: 0
     routes:
-      - name: billing-routes
+      - name: billing-public-callback-routes
+        paths:
+          - /billing/vnpay/return
+          - /billing/vnpay/ipn
+        strip_path: false
+        preserve_host: false
+      - name: billing-protected-routes
         paths:
           - /billing
           - /admin/billing
           - /admin/refunds
         strip_path: false
         preserve_host: false
+
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+              run_on_preflight: false
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - X-Authenticated-User-Sub
+                  - X-Authenticated-User-Roles
+                  - X-Authenticated-User-Issuer
+                  - X-Authenticated-Client-Id
+          - name: post-function
+            config:
+              access:
+                - |
+                  local token = kong.ctx.shared.authenticated_jwt_token
+                  if token then
+                    local payload = token:match("^[^.]+%.([^.]+)%.") or ""
+                    payload = payload:gsub("-", "+"):gsub("_", "/")
+                    payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
+                    local claims_json = ngx.decode_base64(payload) or "{}"
+                    local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
+                    local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
+                    local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
+                    local roles = {}
+                    for role in roles_block:gmatch('"([^"]+)"') do
+                      roles[#roles + 1] = role
+                    end
+                    kong.service.request.set_header("X-Authenticated-User-Sub", sub)
+                    kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
+                    kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
+                    kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                  end
 
   - name: notification-service
     protocol: http
@@ -180,19 +380,51 @@ services:
     read_timeout: 30000
     write_timeout: 30000
     retries: 0
-    plugins:
-      - name: jwt
-        config:
-          key_claim_name: iss
-          claims_to_verify:
-            - exp
-          run_on_preflight: false
     routes:
       - name: notification-routes
         paths:
           - /notifications
         strip_path: false
         preserve_host: false
+
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+              run_on_preflight: false
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - X-Authenticated-User-Sub
+                  - X-Authenticated-User-Roles
+                  - X-Authenticated-User-Issuer
+                  - X-Authenticated-Client-Id
+          - name: post-function
+            config:
+              access:
+                - |
+                  local token = kong.ctx.shared.authenticated_jwt_token
+                  if token then
+                    local payload = token:match("^[^.]+%.([^.]+)%.") or ""
+                    payload = payload:gsub("-", "+"):gsub("_", "/")
+                    payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
+                    local claims_json = ngx.decode_base64(payload) or "{}"
+                    local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
+                    local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
+                    local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
+                    local roles = {}
+                    for role in roles_block:gmatch('"([^"]+)"') do
+                      roles[#roles + 1] = role
+                    end
+                    kong.service.request.set_header("X-Authenticated-User-Sub", sub)
+                    kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
+                    kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
+                    kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                  end
 
   - name: pricing-service
     protocol: http
@@ -202,20 +434,53 @@ services:
     read_timeout: 30000
     write_timeout: 30000
     retries: 0
-    plugins:
-      - name: jwt
-        config:
-          key_claim_name: iss
-          claims_to_verify:
-            - exp
-          run_on_preflight: false
     routes:
       - name: pricing-routes
         paths:
           - /pricing
           - /admin/champion
+          - /admin/models
         strip_path: false
         preserve_host: false
+
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+              run_on_preflight: false
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - X-Authenticated-User-Sub
+                  - X-Authenticated-User-Roles
+                  - X-Authenticated-User-Issuer
+                  - X-Authenticated-Client-Id
+          - name: post-function
+            config:
+              access:
+                - |
+                  local token = kong.ctx.shared.authenticated_jwt_token
+                  if token then
+                    local payload = token:match("^[^.]+%.([^.]+)%.") or ""
+                    payload = payload:gsub("-", "+"):gsub("_", "/")
+                    payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
+                    local claims_json = ngx.decode_base64(payload) or "{}"
+                    local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
+                    local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
+                    local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
+                    local roles = {}
+                    for role in roles_block:gmatch('"([^"]+)"') do
+                      roles[#roles + 1] = role
+                    end
+                    kong.service.request.set_header("X-Authenticated-User-Sub", sub)
+                    kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
+                    kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
+                    kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                  end
 
 upstreams:
   - name: customer-service-upstream
