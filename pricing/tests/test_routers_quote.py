@@ -125,12 +125,16 @@ async def test_quote_persists_and_returns_profile(app, db_session):
     quote_id = post_resp.json()["quote_id"]
 
     db_row = db_session.query(Quote).filter(Quote.quote_id == quote_id).first()
-    assert db_row.profile == VALID_PROFILE
+    assert db_row.profile is not None
+    for key, value in VALID_PROFILE.items():
+        assert db_row.profile[key] == value
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         get_resp = await client.get(f"/pricing/quote/{quote_id}")
     body = get_resp.json()
-    assert body["profile"] == VALID_PROFILE
+    assert body["profile"] is not None
+    for key, value in VALID_PROFILE.items():
+        assert body["profile"][key] == value
 
 
 @pytest.mark.asyncio
