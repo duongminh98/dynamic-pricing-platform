@@ -1,4 +1,4 @@
-"""Compare a candidate artifact to the current champion on the same holdout dataset.
+﻿"""Compare a candidate artifact to the current champion on the same holdout dataset.
 
 Writes ``comparison_report.json`` with metrics, premium delta guardrails, and
 an overall pass/fail according to ``offline/comparison_config.json``.
@@ -26,7 +26,8 @@ if str(ROOT) not in sys.path:
 if str(PRICING_DIR) not in sys.path:
     sys.path.insert(0, str(PRICING_DIR))
 
-from offline.train_pricing_models import METADATA, MIN_EXPOSURE, prepare_features, normalized_gini
+from offline.object_storage import materialize
+from offline.train_pricing_models import MIN_EXPOSURE, prepare_features, normalized_gini
 from app.database import SessionLocal, ModelVersion
 
 
@@ -39,9 +40,22 @@ def _artifact_path(base_dir: pathlib.Path, line: str, algorithm: str, family: st
     return base_dir / f"{line}__{algorithm}_{family}.joblib"
 
 
-def _load_model(path: pathlib.Path):
+def _infer_candidate_family(base_dir: pathlib.Path, line: str) -> tuple[str, str]:
+    if _artifact_path(base_dir, line, "lgb", "tw").exists():
+        return "lgb", "tw"
+    if _artifact_path(base_dir, line, "lgb", "freq").exists() and _artifact_path(base_dir, line, "lgb", "sev").exists():
+        return "lgb", "freqsev"
+    if _artifact_path(base_dir, line, "glm", "tw").exists():
+        return "glm", "tw"
+    if _artifact_path(base_dir, line, "glm", "freq").exists() and _artifact_path(base_dir, line, "glm", "sev").exists():
+        return "glm", "freqsev"
+    raise FileNotFoundError(f"No candidate artifacts found for {line} in {base_dir}")
+
+
+def _load_model(path_or_uri: pathlib.Path | str):
+    path = materialize(path_or_uri)
     if not path.exists():
-        raise FileNotFoundError(f"Missing artifact: {path}")
+        raise FileNotFoundError(f"Missing artifact: {path_or_uri}")
     return joblib.load(path)
 
 
@@ -71,6 +85,24 @@ def _predict_pure_premium(base_dir: pathlib.Path, line: str, algorithm: str, fam
         severity = np.maximum(0.0, _predict_family(sev_model, freq_df))
         return frequency * severity
     model = _load_model(_artifact_path(base_dir, line, algorithm, family))
+    return np.maximum(0.0, _predict_family(model, freq_df))
+
+
+def _predict_pure_premium_from_uris(artifact_uri: str, line: str, algorithm: str, family: str, freq_df: pd.DataFrame) -> np.ndarray:
+    uris = [item.strip() for item in str(artifact_uri or "").split(",") if item.strip()]
+    if family in ("freqsev", "freq_sev"):
+        freq_uri = next((uri for uri in uris if pathlib.Path(uri).name.endswith("_freq.joblib")), None)
+        sev_uri = next((uri for uri in uris if pathlib.Path(uri).name.endswith("_sev.joblib")), None)
+        if not freq_uri or not sev_uri:
+            raise FileNotFoundError(f"Missing freq/sev artifact URIs for {line}: {artifact_uri}")
+        freq_model = _load_model(freq_uri)
+        sev_model = _load_model(sev_uri)
+        frequency = np.maximum(0.0, _predict_family(freq_model, freq_df))
+        severity = np.maximum(0.0, _predict_family(sev_model, freq_df))
+        return frequency * severity
+    if not uris:
+        raise FileNotFoundError(f"Missing artifact URI for {line}")
+    model = _load_model(uris[0])
     return np.maximum(0.0, _predict_family(model, freq_df))
 
 
@@ -140,7 +172,7 @@ def _premium_delta(candidate: np.ndarray, champion: np.ndarray) -> dict[str, flo
     }
 
 
-def _champion_metadata(model_version_id: str) -> tuple[str, str, dict[str, Any]]:
+def _champion_metadata(model_version_id: str) -> tuple[str, str, dict[str, Any], str | None]:
     session = SessionLocal()
     try:
         row = session.query(ModelVersion).filter(ModelVersion.model_version_id == model_version_id).first()
@@ -149,7 +181,7 @@ def _champion_metadata(model_version_id: str) -> tuple[str, str, dict[str, Any]]
         quality_gates = row.quality_gates if isinstance(row.quality_gates, dict) else {}
         family = row.family or quality_gates.get("family") or "tw"
         algorithm = quality_gates.get("algorithm") or ("lgb" if str(row.algorithm).lower().startswith("light") else "glm")
-        return algorithm, family, quality_gates
+        return algorithm, family, quality_gates, row.artifact_uri
     finally:
         session.close()
 
@@ -158,9 +190,13 @@ def compare(line: str, dataset_dir: pathlib.Path, candidate_artifact_dir: pathli
     config = load_config()
     freq_df, _sev_df = _load_dataset(dataset_dir, line)
     actual, exposure = _targets(freq_df)
-    candidate_pred = _predict_pure_premium(candidate_artifact_dir, line, "lgb", "tw", freq_df)
-    champion_algorithm, champion_family, champion_quality = _champion_metadata(champion_model_version_id)
-    champion_pred = _predict_pure_premium(MODELS_DIR, line, champion_algorithm, champion_family, freq_df)
+    candidate_algorithm, candidate_family = _infer_candidate_family(candidate_artifact_dir, line)
+    candidate_pred = _predict_pure_premium(candidate_artifact_dir, line, candidate_algorithm, candidate_family, freq_df)
+    champion_algorithm, champion_family, champion_quality, champion_artifact_uri = _champion_metadata(champion_model_version_id)
+    if champion_artifact_uri:
+        champion_pred = _predict_pure_premium_from_uris(champion_artifact_uri, line, champion_algorithm, champion_family, freq_df)
+    else:
+        champion_pred = _predict_pure_premium(MODELS_DIR, line, champion_algorithm, champion_family, freq_df)
 
     candidate_metrics = {
         "gini": normalized_gini(actual, candidate_pred, sample_weight=exposure),
@@ -190,7 +226,7 @@ def compare(line: str, dataset_dir: pathlib.Path, candidate_artifact_dir: pathli
         "line": line,
         "champion_model_version_id": champion_model_version_id,
         "champion": {"algorithm": champion_algorithm, "family": champion_family, "quality_gates": champion_quality, "metrics": champion_metrics},
-        "candidate": {"algorithm": "lgb", "family": "tw", "metrics": candidate_metrics},
+        "candidate": {"algorithm": candidate_algorithm, "family": candidate_family, "metrics": candidate_metrics},
         "premium_delta": premium_delta,
         "thresholds": config,
         "passed": bool(passed),

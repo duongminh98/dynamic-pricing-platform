@@ -1,4 +1,4 @@
-﻿"""Build retraining datasets from pricing-service read models.
+"""Build retraining datasets from pricing-service read models.
 
 The output shape mirrors the existing offline pricing pipeline:
 - pricing_freq_<line>.csv: one row per policy exposure segment
@@ -20,11 +20,13 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 PRICING_DIR = ROOT / "pricing"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 if str(PRICING_DIR) not in sys.path:
     sys.path.insert(0, str(PRICING_DIR))
-
 from app.pricing_engine.feature_buckets import add_health_bucket_features
 from sqlalchemy import create_engine, text
+from offline.object_storage import upload_directory, upload_file
 
 
 def _flatten(prefix: str, value: Any) -> dict[str, Any]:
@@ -189,7 +191,7 @@ def _row_count(path: Path) -> int:
     except FileNotFoundError:
         return 0
 
-def _file_manifest(paths: list[Path], output_dir: Path) -> list[dict[str, Any]]:
+def _file_manifest(paths: list[Path], output_dir: Path, object_uri_by_path: dict[Path, str] | None = None) -> list[dict[str, Any]]:
     files = []
     for path in sorted(paths, key=lambda p: p.name):
         name = path.name
@@ -200,14 +202,20 @@ def _file_manifest(paths: list[Path], output_dir: Path) -> list[dict[str, Any]]:
             "line": line,
             "kind": kind,
             "path": str(path.relative_to(output_dir)),
-            "artifact_uri": str(path),
+            "artifact_uri": (object_uri_by_path or {}).get(path, str(path)),
             "row_count": _row_count(path),
             "checksum_sha256": _sha256_file(path),
         })
     return files
 
-def _write_manifest(dataset_version_id: str, output_dir: Path, written: list[Path], counts: dict[str, int], started_at: datetime.datetime, completed_at: datetime.datetime, created_by: str, source_window: dict[str, str | None] | None = None) -> tuple[Path, dict[str, Any]]:
-    files = _file_manifest(written, output_dir)
+def _write_manifest(dataset_version_id: str, output_dir: Path, written: list[Path], counts: dict[str, int], started_at: datetime.datetime, completed_at: datetime.datetime, created_by: str, source_window: dict[str, str | None] | None = None, object_storage_uri: str | None = None) -> tuple[Path, dict[str, Any]]:
+    object_uri_by_path: dict[Path, str] = {}
+    dataset_artifact_uri = str(output_dir)
+    if object_storage_uri:
+        uploaded = upload_directory(output_dir, object_storage_uri)
+        object_uri_by_path = {path: uri for path, uri in uploaded}
+        dataset_artifact_uri = object_storage_uri.rstrip("/")
+    files = _file_manifest(written, output_dir, object_uri_by_path)
     combined = hashlib.sha256()
     for item in files:
         combined.update(item["checksum_sha256"].encode("utf-8"))
@@ -218,13 +226,21 @@ def _write_manifest(dataset_version_id: str, output_dir: Path, written: list[Pat
         "source_window": source_window or {"window_start": None, "window_end": None},
         "created_at": completed_at.isoformat(),
         "created_by": created_by,
-        "artifact_uri": str(output_dir),
+        "artifact_uri": dataset_artifact_uri,
         "files": files,
         "counts": counts,
         "data_hash": combined.hexdigest(),
     }
     path = output_dir / "manifest.json"
     path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    if object_storage_uri:
+        manifest_uri = f"{object_storage_uri.rstrip('/')}/manifest.json"
+        upload_file(path, manifest_uri)
+        manifest["manifest_uri"] = manifest_uri
+        path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        upload_file(path, manifest_uri)
+    else:
+        manifest["manifest_uri"] = str(path)
     return path, manifest
 
 def _register_dataset(database_url: str, manifest_path: Path, manifest: dict[str, Any], started_at: datetime.datetime, completed_at: datetime.datetime) -> None:
@@ -257,7 +273,7 @@ def _register_dataset(database_url: str, manifest_path: Path, manifest: dict[str
                 "dataset_version_id": manifest["dataset_version_id"],
                 "source_type": manifest["source_type"],
                 "artifact_uri": manifest["artifact_uri"],
-                "manifest_uri": str(manifest_path),
+                "manifest_uri": manifest.get("manifest_uri", str(manifest_path)),
                 "data_hash": manifest["data_hash"],
                 "window_start": pd.to_datetime(manifest["source_window"].get("window_start"), utc=True).to_pydatetime() if manifest["source_window"].get("window_start") else None,
                 "window_end": pd.to_datetime(manifest["source_window"].get("window_end"), utc=True).to_pydatetime() if manifest["source_window"].get("window_end") else None,
@@ -272,7 +288,7 @@ def _register_dataset(database_url: str, manifest_path: Path, manifest: dict[str
                 "created_at": completed_at,
             })
             conn.execute(text("DELETE FROM training_dataset_file WHERE dataset_version_id = :id"), {"id": manifest["dataset_version_id"]})
-            for item in manifest["files"] + [{"line": None, "kind": "manifest", "artifact_uri": str(manifest_path), "row_count": 1, "checksum_sha256": _sha256_file(manifest_path)}]:
+            for item in manifest["files"] + [{"line": None, "kind": "manifest", "artifact_uri": manifest.get("manifest_uri", str(manifest_path)), "row_count": 1, "checksum_sha256": _sha256_file(manifest_path)}]:
                 conn.execute(text("""
                     INSERT INTO training_dataset_file
                     (file_id, dataset_version_id, line, kind, artifact_uri, row_count, checksum_sha256, created_at)
@@ -400,6 +416,7 @@ def main() -> None:
     parser.add_argument("--dataset-version-id", default=None)
     parser.add_argument("--register-registry", action="store_true")
     parser.add_argument("--created-by", default="offline-exporter")
+    parser.add_argument("--object-storage-uri", default=None, help="Optional s3://bucket/prefix URI for immutable dataset artifacts.")
     args = parser.parse_args()
     started_at = datetime.datetime.now(datetime.timezone.utc)
     dataset_version_id = args.dataset_version_id or str(uuid.uuid4())
@@ -425,7 +442,7 @@ def main() -> None:
             source_window = _window_from_frames(exposures, claims, snapshots)
     finally:
         engine.dispose()
-    manifest_path, manifest = _write_manifest(dataset_version_id, Path(args.output_dir), written, counts, started_at, completed_at, args.created_by, source_window)
+    manifest_path, manifest = _write_manifest(dataset_version_id, Path(args.output_dir), written, counts, started_at, completed_at, args.created_by, source_window, args.object_storage_uri)
     written.append(manifest_path)
     if args.register_registry:
         _register_dataset(args.database_url, manifest_path, manifest, started_at, completed_at)
@@ -435,5 +452,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
 
 

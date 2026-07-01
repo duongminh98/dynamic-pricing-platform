@@ -12,18 +12,12 @@ import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PRICING_DIR = ROOT / "pricing"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 if str(PRICING_DIR) not in sys.path:
     sys.path.insert(0, str(PRICING_DIR))
-
 from app.database import SessionLocal, AuditTrail, ModelVersion, TrainingDatasetVersion
-
-
-def _sha256(path: pathlib.Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+from offline.object_storage import materialize
 
 
 def _sha256_many(paths: list[pathlib.Path]) -> str:
@@ -36,8 +30,8 @@ def _sha256_many(paths: list[pathlib.Path]) -> str:
     return digest.hexdigest()
 
 
-def _artifact_paths(raw: str) -> list[pathlib.Path]:
-    return [pathlib.Path(item.strip()) for item in raw.split(",") if item.strip()]
+def _artifact_uris(raw: str) -> list[str]:
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 def _git_head() -> str:
@@ -51,8 +45,9 @@ def _load_json(path: pathlib.Path) -> dict:
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
 
-def _candidate_id(line: str, dataset_version_id: str, artifact_checksum: str, comparison_path: pathlib.Path) -> str:
-    key = f"candidate:{line}:{dataset_version_id}:{artifact_checksum}:{comparison_path}"
+
+def _candidate_id(line: str, dataset_version_id: str, artifact_checksum: str, comparison_report_uri: str) -> str:
+    key = f"candidate:{line}:{dataset_version_id}:{artifact_checksum}:{comparison_report_uri}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
 
 
@@ -63,10 +58,11 @@ def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str,
         if dataset is None:
             raise ValueError(f"Unknown dataset version: {dataset_version_id}")
 
-        artifact_paths = _artifact_paths(artifact_uri)
-        comparison_path = pathlib.Path(comparison_report_uri)
-        validation_path = pathlib.Path(validation_report_uri)
-        fairness_path = pathlib.Path(fairness_report_uri) if fairness_report_uri else None
+        artifact_uris = _artifact_uris(artifact_uri)
+        artifact_paths = [materialize(uri) for uri in artifact_uris]
+        comparison_path = materialize(comparison_report_uri)
+        validation_path = materialize(validation_report_uri)
+        fairness_path = materialize(fairness_report_uri) if fairness_report_uri else None
         if not artifact_paths:
             raise FileNotFoundError("No artifact paths provided")
         for required in [*artifact_paths, comparison_path, validation_path]:
@@ -96,7 +92,7 @@ def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str,
 
         artifact_checksum = _sha256_many(artifact_paths)
         now = datetime.datetime.now(datetime.timezone.utc)
-        model_version_id = _candidate_id(line, dataset_version_id, artifact_checksum, comparison_path)
+        model_version_id = _candidate_id(line, dataset_version_id, artifact_checksum, comparison_report_uri)
         existing = session.query(ModelVersion).filter(ModelVersion.model_version_id == model_version_id).first()
         if existing is not None and existing.status not in (None, "CANDIDATE"):
             raise ValueError(f"Candidate already exists with non-candidate status: {existing.status}")
@@ -109,9 +105,9 @@ def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str,
         model.artifact_uri = artifact_uri
         model.artifact_checksum = artifact_checksum
         model.feature_schema_hash = hashlib.sha256(json.dumps(validation_report.get("feature_columns", []), sort_keys=True).encode("utf-8")).hexdigest()
-        model.comparison_report_uri = str(comparison_path)
-        model.validation_report_uri = str(validation_path)
-        model.fairness_report_uri = str(fairness_path) if fairness_path else None
+        model.comparison_report_uri = comparison_report_uri
+        model.validation_report_uri = validation_report_uri
+        model.fairness_report_uri = fairness_report_uri if fairness_report_uri else None
         model.registered_at = now
         model.registered_by = registered_by
         model.training_code_version = _git_head()
@@ -133,7 +129,7 @@ def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str,
                 "line": line,
                 "model_version_id": model_version_id,
                 "dataset_version_id": dataset_version_id,
-                "comparison_report_uri": str(comparison_path),
+                "comparison_report_uri": comparison_report_uri,
             },
             created_at=now,
         ))
@@ -171,3 +167,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

@@ -1,4 +1,4 @@
-"""Champion promotion / rollback governance (Property 24, BR-23).
+﻿"""Champion promotion / rollback governance (Property 24, BR-23).
 
 A challenger is promoted to champion IF AND ONLY IF it beats the current
 champion on the configured primary metric (Gini) AND its artifact satisfies
@@ -100,6 +100,8 @@ def promote_champion(db: Session, line: str, challenger_version_id: str,
         return {"promoted": False, "reason": "GINI_NOT_IMPROVED",
                 "champion": current.model_version_id if current else None}
 
+    loader.validate_model_artifact(challenger.line, challenger.algorithm, challenger.family or gates.get("family", "tw"), challenger.artifact_uri)
+
     # Flip previous assignment off (append-only: INSERT new, set old is_current=False).
     db.query(ChampionAssignment).filter(
         ChampionAssignment.line == line,
@@ -124,6 +126,7 @@ def promote_champion(db: Session, line: str, challenger_version_id: str,
     _audit(db, line, "CHAMPION_CHANGE", detail, actor)
     _publish_event(db, "ChampionPromoted", detail)
     db.commit()
+    loader.refresh_artifacts()
     return {"promoted": True, "champion": challenger_version_id}
 
 def reject_candidate(db: Session, line: str, model_version_id: str, actor: str = "admin") -> dict:
@@ -161,6 +164,9 @@ def rollback_champion(db: Session, line: str, actor: str = "admin") -> dict:
     if previous is None:
         raise ServiceException(ErrorCode.BAD_REQUEST,
                                details={"line": line, "reason": "no previous champion"})
+    prev_model = _get_model(db, previous.model_version_id)
+    loader.validate_model_artifact(prev_model.line, prev_model.algorithm, prev_model.family or "tw", prev_model.artifact_uri)
+
     # Append-only: flip current off, INSERT a new current row pointing to the prior model.
     db.query(ChampionAssignment).filter(
         ChampionAssignment.line == line,
@@ -171,7 +177,6 @@ def rollback_champion(db: Session, line: str, actor: str = "admin") -> dict:
                               model_version_id=previous.model_version_id,
                               is_current=True,
                               created_at=datetime.datetime.now(datetime.timezone.utc)))
-    prev_model = _get_model(db, previous.model_version_id)
     prev_model.status = "CHAMPION"
     if current is not None:
         curr_model = _get_model(db, current.model_version_id)
@@ -183,6 +188,7 @@ def rollback_champion(db: Session, line: str, actor: str = "admin") -> dict:
     _audit(db, line, "CHAMPION_CHANGE", detail, actor)
     _publish_event(db, "ChampionRolledBack", detail)
     db.commit()
+    loader.refresh_artifacts()
     return {"rolled_back": True, "champion": previous.model_version_id}
 
 
@@ -208,3 +214,5 @@ def _publish_event(db: Session, event_type: str, detail: dict) -> None:
         status="NEW",
         created_at=datetime.datetime.now(datetime.timezone.utc),
     ))
+
+

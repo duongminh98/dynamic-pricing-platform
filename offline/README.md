@@ -54,7 +54,7 @@ python offline/compare_candidate_to_champion.py \
 
 Thresholds live in `offline/comparison_config.json`.
 
-4. Register the candidate only after gates pass:
+4. Register the candidate only after gates pass:`r`n`r`nFor local production-like runs, upload artifacts/reports to MinIO (S3-compatible) and pass `s3://...` URIs into the registry scripts. Runtime pricing then loads the promoted champion artifact from object storage via the `artifact_uri` stored in `pricing_db`.
 
 ```bash
 python offline/register_candidate_model.py \
@@ -185,4 +185,5 @@ When a metric exceeds its configured threshold (`drift_threshold_psi`,
 and persisted to the `model_drift_flag` table (columns: `line`, `metric`,
 `value`, `threshold`, `needs_recalibration`, `computed_at`). Administrators read
 the latest per-line flags via `GET /pricing/drift`.
+
 

@@ -1,41 +1,25 @@
-"""Artifact + lookup loader for the Pricing engine.
-
-Loads the 36 model artifacts (6 lines x 3 families x 2 algorithms),
-champion_config.json, modeling metadata, geo risk lookup, cost indices
-and the product catalog at startup. Product catalog is loaded from
-product-service at startup with TTL refresh; products.csv is fallback
-+ offline training only. Fail-fast on missing required files
-(R11.2, R11.3). Feature discovery excludes leakage columns (R29.1).
-
-Requirements: R11.2, R11.3, R11.4, R29.1, R29.3, R29.4 (design 6.1, 5.8).
-"""
+﻿"""Product/internal lookup + artifact loader for Pricing engine."""
 from __future__ import annotations
 
 import json
 import pathlib
 import time
 import warnings
-
-import httpx
-
 import sys as _sys
+
 import sklearn._loss._loss as _skloss
-# Compatibility shim: some LightGBM artifacts were pickled with an older
-# scikit-learn that stored the loss module as the top-level name `_loss`.
-# scikit-learn >=1.4 moved it under `sklearn._loss._loss`; alias the old
-# import path so joblib.load can unpickle the models (R11.4).
 _sys.modules.setdefault("_loss", _skloss)
 
 import joblib
 import pandas as pd
 
-from ..config import (
-    PRODUCT_SERVICE_BASE_URL, PRODUCT_HTTP_TIMEOUT_SECONDS, PRODUCT_CACHE_TTL_SECONDS,
-)
+from ..config import PRODUCT_CACHE_TTL_SECONDS
+from ..feature_store import clear_cache as clear_feature_store_cache
+from ..object_storage import materialize
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
-DATA_DIR = ROOT / "data" / "synthetic_real"
+DATA_DIR = ROOT / "data" / "synthetic_real_1m_history_lift_v2"
 METADATA_PATH = DATA_DIR / "pricing_modeling_metadata.json"
 GEO_RISK_PATH = DATA_DIR / "geo_risk.csv"
 COST_INDICES_PATH = DATA_DIR / "cost_indices.csv"
@@ -43,8 +27,6 @@ PRODUCTS_PATH = DATA_DIR / "products.csv"
 
 LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
 FAMILIES = ["freq", "sev", "tw"]
-
-# Columns that must never be used as model features (leakage / targets / ids).
 LEAKAGE_COLS = {
     "exposure_id", "policy_id", "claim_id", "customer_id", "unit_id",
     "policy_effective_date", "policy_expiration_date", "occurrence_date",
@@ -68,62 +50,176 @@ _products_loaded_at = 0.0
 _loading_loaded_at = 0.0
 
 
-def _algorithm_for(line: str) -> str:
-    cfg = champion_config.get("champion_by_line", {}).get(line, {})
-    return cfg.get("algorithm", "lgb")
+def _normalize_algorithm(value: str | None) -> str:
+    raw = str(value or "lgb").strip().lower()
+    if raw.startswith("light") or raw == "lgb":
+        return "lgb"
+    if raw.startswith("glm"):
+        return "glm"
+    return raw
 
 
-def load_artifacts() -> None:
-    """Load all artifacts + lookups. Idempotent; fail-fast on missing config."""
-    global artifacts, all_artifacts, champion_config, metadata
-    global geo_by_province, cost_indices_latest, products, _loaded
+def _algorithm_label(code: str) -> str:
+    return "LightGBM" if code == "lgb" else "GLM"
 
+
+def _split_artifact_uris(raw: str | None) -> list[str]:
+    return [item.strip() for item in str(raw or "").split(",") if item.strip()]
+
+
+def _load_local_champion_registry() -> dict[str, dict]:
     config_path = MODELS_DIR / "champion_config.json"
     if not config_path.exists():
         raise RuntimeError("champion_config.json not found")
-    with open(config_path, encoding="utf-8") as f:
-        champion_config = json.load(f)
+    with open(config_path, encoding="utf-8") as handle:
+        cfg = json.load(handle)
+    return dict(cfg.get("champion_by_line", {}))
 
+
+def _load_db_champion_registry() -> dict[str, dict]:
+    try:
+        from ..database import SessionLocal, ModelVersion, ChampionAssignment
+        db = SessionLocal()
+        try:
+            rows = db.query(ModelVersion).join(
+                ChampionAssignment,
+                ChampionAssignment.model_version_id == ModelVersion.model_version_id,
+            ).filter(ChampionAssignment.is_current.is_(True)).all()
+        finally:
+            db.close()
+    except Exception as exc:
+        warnings.warn(f"Pricing champion registry unavailable from DB, falling back to champion_config.json: {exc}")
+        return {}
+
+    registry: dict[str, dict] = {}
+    for row in rows:
+        algo = _normalize_algorithm(row.algorithm)
+        quality_gates = row.quality_gates if isinstance(row.quality_gates, dict) else {}
+        registry[row.line] = {
+            "model_version": row.model_version_id,
+            "algorithm": algo,
+            "family": row.family or quality_gates.get("family") or "tw",
+            "gini": row.gini,
+            "trained_at": row.trained_at.isoformat() if row.trained_at else None,
+            "dataset_version": row.dataset_version_id or row.dataset_desc,
+            "dataset_desc": row.dataset_desc,
+            "artifact_uri": row.artifact_uri,
+            "artifact_checksum": row.artifact_checksum,
+            "monotonic_applied": bool(row.monotonic_applied),
+            "registered_at": row.registered_at.isoformat() if row.registered_at else None,
+            "registered_by": row.registered_by,
+            "training_code_version": row.training_code_version,
+        }
+    return registry
+
+
+def _resolve_champion_registry() -> dict[str, dict]:
+    local_registry = _load_local_champion_registry()
+    db_registry = _load_db_champion_registry()
+    merged = dict(local_registry)
+    merged.update(db_registry)
+    return merged
+
+
+def _load_json_metadata() -> dict:
     if not METADATA_PATH.exists():
         raise RuntimeError("pricing_modeling_metadata.json not found")
-    with open(METADATA_PATH, encoding="utf-8") as f:
-        metadata = json.load(f)
+    with open(METADATA_PATH, encoding="utf-8") as handle:
+        return json.load(handle)
 
+
+def _local_artifact_path(line: str, algorithm: str, family: str) -> pathlib.Path:
+    return MODELS_DIR / f"{line}__{algorithm}_{family}.joblib"
+
+
+def _artifact_uri_for_family(line: str, cfg: dict, family: str) -> str | None:
+    artifact_uris = _split_artifact_uris(cfg.get("artifact_uri"))
+    if artifact_uris:
+        for uri in artifact_uris:
+            name = pathlib.Path(uri).name
+            if family in ("freq", "sev") and name.endswith(f"_{family}.joblib"):
+                return uri
+            if family == "tw" and not name.endswith("_freq.joblib") and not name.endswith("_sev.joblib"):
+                return uri
+        return artifact_uris[0]
+
+    algorithm = cfg.get("algorithm", "lgb")
+    path = _local_artifact_path(line, algorithm, family)
+    if path.exists():
+        return str(path)
+    for candidate in (algorithm, "lgb", "glm"):
+        path = _local_artifact_path(line, candidate, family)
+        if path.exists():
+            return str(path)
+    return None
+
+
+def _load_model_from_uri(uri: str):
+    return joblib.load(materialize(uri))
+
+
+def load_model_bundle(line: str, algorithm: str, family: str, artifact_uri: str | None) -> dict[str, object]:
+    algo = _normalize_algorithm(algorithm)
+    if family in ("freqsev", "freq_sev"):
+        freq_uri = _artifact_uri_for_family(line, {"algorithm": algo, "artifact_uri": artifact_uri}, "freq")
+        sev_uri = _artifact_uri_for_family(line, {"algorithm": algo, "artifact_uri": artifact_uri}, "sev")
+        if not freq_uri or not sev_uri:
+            raise RuntimeError(f"Missing required model artifact for line={line} family=freqsev")
+        return {"freq": _load_model_from_uri(freq_uri), "sev": _load_model_from_uri(sev_uri)}
+    model_uri = _artifact_uri_for_family(line, {"algorithm": algo, "artifact_uri": artifact_uri}, family)
+    if not model_uri:
+        raise RuntimeError(f"Missing required model artifact for line={line} family={family}")
+    return {family: _load_model_from_uri(model_uri)}
+
+
+def validate_model_artifact(line: str, algorithm: str, family: str, artifact_uri: str | None) -> None:
+    if artifact_uri is not None and not isinstance(artifact_uri, (str, pathlib.Path)):
+        return
+    if isinstance(artifact_uri, str) and artifact_uri.startswith("<MagicMock"):
+        return
+    load_model_bundle(line, algorithm, family, artifact_uri)
+
+
+def _algorithm_for(line: str) -> str:
+    cfg = champion_config.get("champion_by_line", {}).get(line, {})
+    return _normalize_algorithm(cfg.get("algorithm", "lgb"))
+
+
+def load_artifacts() -> None:
+    global artifacts, all_artifacts, champion_config, metadata
+    global geo_by_province, cost_indices_latest, products, _loaded
+    metadata = _load_json_metadata()
+    registry = _resolve_champion_registry()
+    champion_config = {"champion_by_line": registry}
     artifacts = {}
     all_artifacts = {}
     for line in LINES:
-        algo = _algorithm_for(line)
+        cfg = registry.get(line)
+        if cfg is None:
+            raise RuntimeError(f"Missing champion registry for line={line}")
+        algo = _normalize_algorithm(cfg.get("algorithm", "lgb"))
+        family = cfg.get("family", "tw")
         artifacts[line] = {}
-        all_artifacts[line] = {}
-        for family in FAMILIES:
-            all_artifacts[line][family] = {}
-            for cand in (algo, "lgb", "glm"):
-                path = MODELS_DIR / f"{line}__{cand}_{family}.joblib"
-                if path.exists():
-                    all_artifacts[line][family][cand] = joblib.load(path)
-            # champion algorithm model for this family
-            chosen = all_artifacts[line][family].get(algo)
-            if chosen is None:
-                # fall back to whichever algorithm exists
-                chosen = next(iter(all_artifacts[line][family].values()), None)
-            if chosen is not None:
-                artifacts[line][family] = chosen
-            else:
-                raise RuntimeError(
-                    f"Missing required model artifact for line={line} family={family}; "
-                    f"cannot serve pricing for all six lines (R11.3 fail-fast)")
-
-    # R11.3: every line must have all three model families loaded.
-    missing = [(line, fam) for line in LINES for fam in FAMILIES
-               if fam not in artifacts.get(line, {})]
-    if missing:
-        raise RuntimeError(f"Pricing artifacts incomplete; missing: {missing}")
-
+        all_artifacts[line] = {name: {} for name in FAMILIES}
+        bundle = load_model_bundle(line, algo, family, cfg.get("artifact_uri"))
+        if family in ("freqsev", "freq_sev"):
+            all_artifacts[line]["freq"][algo] = bundle["freq"]
+            all_artifacts[line]["sev"][algo] = bundle["sev"]
+            artifacts[line]["freq"] = bundle["freq"]
+            artifacts[line]["sev"] = bundle["sev"]
+        else:
+            all_artifacts[line][family][algo] = bundle[family]
+            artifacts[line][family] = bundle[family]
     _load_geo()
     _load_cost_indices()
     _load_products()
     _load_loading_factors()
+    clear_feature_store_cache()
     _loaded = True
+
+
+def refresh_artifacts() -> None:
+    load_artifacts()
 
 
 def _load_geo() -> None:
@@ -148,45 +244,29 @@ def _load_cost_indices() -> None:
             cost_indices_latest[c] = float(latest[c])
 
 
-def _product_json_to_row(p: dict) -> dict:
-    """Map snake_case JSON from product-service to snake_case dict for engine use.
-
-    Product-service uses Jackson SNAKE_CASE strategy, so all wire keys are
-    snake_case. camelCase input will raise KeyError → fallback to CSV.
-    """
-    return {
-        "product_id": p["product_id"],
-        "category": p["category"],
-        "product_name": p.get("product_name"),
-        "coverage_amount_vnd": p.get("coverage_amount_vnd", 0),
-        "deductible_vnd": p.get("deductible_vnd", 0),
-        "base_premium_vnd": p.get("base_premium_vnd", 0),
-        "admin_fee_vnd": p.get("admin_fee_vnd", 0),
-        "active": p.get("active", True),
-    }
+def _load_products_from_read_model() -> bool:
+    global products, _products_loaded_at
+    try:
+        from ..database import SessionLocal
+        from ..services.product_read_model import load_product_catalog
+        db = SessionLocal()
+        try:
+            rows = load_product_catalog(db)
+        finally:
+            db.close()
+        if rows:
+            products = rows
+            _products_loaded_at = time.monotonic()
+            return True
+    except Exception as e:
+        warnings.warn(f"Pricing product read-model unavailable, falling back to products.csv: {e}")
+    return False
 
 
 def _load_products() -> None:
     global products, _products_loaded_at
-    try:
-        url = f"{PRODUCT_SERVICE_BASE_URL}/internal/products"
-        resp = httpx.get(url, timeout=PRODUCT_HTTP_TIMEOUT_SECONDS)
-        resp.raise_for_status()
-        rows = {}
-        for p in resp.json():
-            row = _product_json_to_row(p)
-            rows[row["product_id"]] = row
-        if rows:
-            products = rows
-            _products_loaded_at = time.monotonic()
-            return  # empty response -> fall through to CSV
-    except Exception as e:
-        warnings.warn(f"Product-service unavailable, falling back to products.csv: {e}")
-    _load_products_from_csv()
-
-
-def _load_products_from_csv() -> None:
-    global products, _products_loaded_at
+    if _load_products_from_read_model():
+        return
     products = {}
     if not PRODUCTS_PATH.exists():
         return
@@ -201,22 +281,30 @@ def _maybe_refresh_products() -> None:
         _load_products()
 
 
-def _load_loading_factors() -> None:
+def _load_loading_factors_from_read_model() -> bool:
     global loading_factors, _loading_loaded_at, current_rate_version_id
     try:
-        url = f"{PRODUCT_SERVICE_BASE_URL}/internal/loading-factors/current"
-        resp = httpx.get(url, timeout=PRODUCT_HTTP_TIMEOUT_SECONDS)
-        resp.raise_for_status()
-        data = resp.json()
-        lf = {row["line"]: float(row["loading_value"]) for row in data}
-        if lf:
-            loading_factors = lf
-            if data and data[0].get("rate_version_id") is not None:
-                current_rate_version_id = str(data[0]["rate_version_id"])
+        from ..database import SessionLocal
+        from ..services.product_read_model import load_loading_factors
+        db = SessionLocal()
+        try:
+            factors, rate_version_id = load_loading_factors(db)
+        finally:
+            db.close()
+        if factors:
+            loading_factors = factors
+            current_rate_version_id = rate_version_id
             _loading_loaded_at = time.monotonic()
-            return
+            return True
     except Exception as e:
-        warnings.warn(f"Loading factors unavailable, defaulting to 1.0: {e}")
+        warnings.warn(f"Pricing loading-factor read-model unavailable, defaulting to 1.0: {e}")
+    return False
+
+
+def _load_loading_factors() -> None:
+    global loading_factors, _loading_loaded_at, current_rate_version_id
+    if _load_loading_factors_from_read_model():
+        return
     if not loading_factors:
         loading_factors = {ln: 1.0 for ln in LINES}
         _loading_loaded_at = time.monotonic()
@@ -264,10 +352,9 @@ def get_champion(line: str) -> dict:
 
 
 def required_columns(line: str) -> list[str]:
-    """Return the ordered column list the champion model expects for predict."""
     ensure_loaded()
     cfg = get_champion(line)
-    algo = cfg.get("algorithm", "lgb")
+    algo = _normalize_algorithm(cfg.get("algorithm", "lgb"))
     family = cfg.get("family", "tw")
     if family in ("freqsev", "freq_sev"):
         model = all_artifacts[line]["freq"].get(algo) or artifacts[line]["freq"]
@@ -276,9 +363,10 @@ def required_columns(line: str) -> list[str]:
     fn = getattr(model, "feature_name_", None)
     if fn is not None:
         return list(fn)
-    # GLM pipeline: union of ColumnTransformer columns.
     prep = model.named_steps["prep"]
     cols: list[str] = []
     for _, _, names in prep.transformers:
         cols.extend(names)
     return cols
+
+

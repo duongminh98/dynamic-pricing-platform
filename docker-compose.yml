@@ -1,4 +1,4 @@
-name: ${COMPOSE_PROJECT_NAME:-dynamic-pricing-platform}
+﻿name: ${COMPOSE_PROJECT_NAME:-dynamic-pricing-platform}
 
 x-postgres-healthcheck: &postgres-healthcheck
   test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
@@ -14,7 +14,6 @@ x-java-env: &java-env
   RABBITMQ_PORT: 5672
   RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-platform_user}
   RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-change-me}
-  KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-dynamic-pricing}/protocol/openid-connect/certs
   KEYCLOAK_AUTH_SERVER_URL: http://keycloak:8080
   KEYCLOAK_REALM: ${KEYCLOAK_REALM:-dynamic-pricing}
 
@@ -131,6 +130,28 @@ services:
     networks:
       - dpp-network
     healthcheck: *postgres-healthcheck
+
+
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-05-24T17-08-30Z}
+    container_name: dpp-minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - dpp-network
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   rabbitmq:
     image: ${RABBITMQ_IMAGE:-rabbitmq:3.13-management-alpine}
@@ -319,8 +340,8 @@ services:
       <<: *java-env
       CUSTOMER_DB_HOST: postgres-customer
       CUSTOMER_DB_PORT: 5432
-    ports:
-      - "${CUSTOMER_SERVICE_PORT:-8081}:8080"
+    expose:
+      - "8080"
     depends_on:
       postgres-customer:
         condition: service_healthy
@@ -347,8 +368,8 @@ services:
       <<: *java-env
       PRODUCT_DB_HOST: postgres-product
       PRODUCT_DB_PORT: 5432
-    ports:
-      - "${PRODUCT_SERVICE_PORT:-8082}:8080"
+    expose:
+      - "8080"
     depends_on:
       postgres-product:
         condition: service_healthy
@@ -377,8 +398,8 @@ services:
       ORDER_DB_PORT: 5432
       PRICING_BASE_URL: http://pricing-service-1:8000
       BILLING_BASE_URL: http://billing-service-1:8080
-    ports:
-      - "${ORDER_SERVICE_PORT:-8083}:8080"
+    expose:
+      - "8080"
     depends_on:
       postgres-order:
         condition: service_healthy
@@ -407,8 +428,8 @@ services:
       CLAIMS_DB_PORT: 5432
       ORDER_BASE_URL: http://order-service-1:8080
       PRODUCT_BASE_URL: http://product-service-1:8080
-    ports:
-      - "${CLAIMS_SERVICE_PORT:-8087}:8080"
+    expose:
+      - "8080"
     depends_on:
       postgres-claims:
         condition: service_healthy
@@ -443,8 +464,8 @@ services:
       VNP_RETURN_URL: ${VNP_RETURN_URL:-http://localhost:3001/payment-result}
       VNP_VERSION: ${VNP_VERSION:-2.1.0}
       VNP_LOCALE: ${VNP_LOCALE:-vn}
-    ports:
-      - "${BILLING_SERVICE_PORT:-8086}:8080"
+    expose:
+      - "8080"
     depends_on:
       postgres-billing:
         condition: service_healthy
@@ -476,8 +497,8 @@ services:
       MAIL_FROM: noreply@dynamic-pricing.local
       NOTIFICATION_EMAIL_ENABLED: "true"
       CUSTOMER_BASE_URL: http://customer-service-1:8080
-    ports:
-      - "${NOTIFICATION_SERVICE_PORT:-8088}:8080"
+    expose:
+      - "8080"
     depends_on:
       postgres-notification:
         condition: service_healthy
@@ -510,15 +531,21 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-platform_user}
       RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-change-me}
-    ports:
-      - "${PRICING_SERVICE_PORT:-8090}:8000"
+      OBJECT_STORAGE_ENDPOINT_URL: http://minio:9000
+      OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
+    expose:
+      - "8000"
     volumes:
       - ./reports/modeling/models:/reports/modeling/models:ro
-      - ./data/synthetic_real:/data/synthetic_real:ro
+      - ./data/synthetic_real_1m_history_lift_v2:/data/synthetic_real_1m_history_lift_v2:ro
     depends_on:
       postgres-pricing:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      minio:
         condition: service_healthy
       product-service-1:
         condition: service_started
@@ -568,3 +595,6 @@ volumes:
   keycloak_data:
   prometheus_data:
   grafana_data:
+  minio_data:
+
+
