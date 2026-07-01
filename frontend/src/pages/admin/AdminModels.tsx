@@ -136,7 +136,7 @@ function ModelsPanel({ line }: { line: Line }) {
       {data && data.length > 0 && (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Version</th><th>Family</th><th>Status</th><th>Dataset</th><th>Gini</th><th>RMSE</th><th>Monotonic</th><th>Compare</th><th>Checksum</th><th></th></tr></thead>
+            <thead><tr><th>Version</th><th>Family</th><th>Status</th><th>Dataset</th><th>Gini</th><th>MAE</th><th>RMSE</th><th>Deviance</th><th>Gates</th><th>Checksum</th><th></th></tr></thead>
             <tbody>
               {data.map((m) => (
                 <tr key={m.model_version_id}>
@@ -145,9 +145,14 @@ function ModelsPanel({ line }: { line: Line }) {
                   <td>{m.is_champion ? <span className="pill pill-ok">champion</span> : <span className="pill pill-muted">{m.status || 'unknown'}</span>}</td>
                   <td className="mono" style={{ fontSize: '0.72rem' }}>{m.dataset_version_id || m.dataset_desc}</td>
                   <td className="num">{m.gini?.toFixed(3)}</td>
+                  <td className="num">{m.mae}</td>
                   <td className="num">{m.rmse}</td>
-                  <td>{m.monotonic_applied ? <span className="pill pill-ok">applied</span> : <span className="pill pill-muted">not applied</span>}</td>
-                  <td>{m.quality_gates?.comparison_passed ? <span className="pill pill-ok">pass</span> : <span className="pill pill-muted">n/a</span>}</td>
+                  <td className="num">{m.deviance}</td>
+                  <td>
+                    {m.monotonic_applied ? <span className="pill pill-ok">mono</span> : <span className="pill pill-muted">mono</span>}
+                    {m.quality_gates?.smoothness_passed ? <span className="pill pill-ok">smooth</span> : <span className="pill pill-muted">smooth</span>}
+                    {m.quality_gates?.comparison_passed ? <span className="pill pill-ok">compare</span> : <span className="pill pill-muted">compare</span>}
+                  </td>
                   <td className="mono" style={{ fontSize: '0.72rem' }}>{m.artifact_checksum ? m.artifact_checksum.slice(0, 12) : '—'}</td>
                   <td className="num">
                     {!m.is_champion && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => promote(m.model_version_id)}>Thăng hạng</button>}

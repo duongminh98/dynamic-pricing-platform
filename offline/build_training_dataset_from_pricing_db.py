@@ -157,6 +157,23 @@ def _write_metadata(output_dir: Path, dataset_version_id: str | None = None) -> 
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     return metadata_path
 
+def _window_from_frames(exposures: pd.DataFrame, claims: pd.DataFrame, snapshots: pd.DataFrame) -> dict[str, str | None]:
+    values = []
+    for frame, columns in (
+        (exposures, ("segment_start", "segment_end", "recorded_at")),
+        (claims, ("occurrence_date", "reported_at", "settled_at", "recorded_at")),
+        (snapshots, ("created_at",)),
+    ):
+        if frame.empty:
+            continue
+        for column in columns:
+            if column in frame.columns:
+                series = pd.to_datetime(frame[column], utc=True, errors="coerce").dropna()
+                values.extend(series.tolist())
+    if not values:
+        return {"window_start": None, "window_end": None}
+    return {"window_start": min(values).isoformat(), "window_end": max(values).isoformat()}
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -189,7 +206,7 @@ def _file_manifest(paths: list[Path], output_dir: Path) -> list[dict[str, Any]]:
         })
     return files
 
-def _write_manifest(dataset_version_id: str, output_dir: Path, written: list[Path], counts: dict[str, int], started_at: datetime.datetime, completed_at: datetime.datetime, created_by: str) -> tuple[Path, dict[str, Any]]:
+def _write_manifest(dataset_version_id: str, output_dir: Path, written: list[Path], counts: dict[str, int], started_at: datetime.datetime, completed_at: datetime.datetime, created_by: str, source_window: dict[str, str | None] | None = None) -> tuple[Path, dict[str, Any]]:
     files = _file_manifest(written, output_dir)
     combined = hashlib.sha256()
     for item in files:
@@ -198,7 +215,7 @@ def _write_manifest(dataset_version_id: str, output_dir: Path, written: list[Pat
         "dataset_version_id": dataset_version_id,
         "source_type": "pricing_db_read_models",
         "source_tables": ["policy_exposure", "claim_outcome", "quote_feature_snapshot"],
-        "source_window": {"window_start": None, "window_end": None},
+        "source_window": source_window or {"window_start": None, "window_end": None},
         "created_at": completed_at.isoformat(),
         "created_by": created_by,
         "artifact_uri": str(output_dir),
@@ -217,16 +234,19 @@ def _register_dataset(database_url: str, manifest_path: Path, manifest: dict[str
             conn.execute(text("""
                 INSERT INTO training_dataset_version
                 (dataset_version_id, source_type, artifact_uri, manifest_uri, data_hash,
-                 export_started_at, export_completed_at, status, frequency_rows, severity_rows,
+                 window_start, window_end, export_started_at, export_completed_at, status, frequency_rows, severity_rows,
                  exposure_rows, settled_claim_rows, quote_snapshot_rows, created_by, created_at)
                 VALUES
                 (:dataset_version_id, :source_type, :artifact_uri, :manifest_uri, :data_hash,
+                 :window_start, :window_end,
                  :export_started_at, :export_completed_at, 'EXPORTED', :frequency_rows, :severity_rows,
                  :exposure_rows, :settled_claim_rows, :quote_snapshot_rows, :created_by, :created_at)
                 ON CONFLICT (dataset_version_id) DO UPDATE SET
                   artifact_uri = EXCLUDED.artifact_uri,
                   manifest_uri = EXCLUDED.manifest_uri,
                   data_hash = EXCLUDED.data_hash,
+                  window_start = EXCLUDED.window_start,
+                  window_end = EXCLUDED.window_end,
                   export_completed_at = EXCLUDED.export_completed_at,
                   frequency_rows = EXCLUDED.frequency_rows,
                   severity_rows = EXCLUDED.severity_rows,
@@ -239,6 +259,8 @@ def _register_dataset(database_url: str, manifest_path: Path, manifest: dict[str
                 "artifact_uri": manifest["artifact_uri"],
                 "manifest_uri": str(manifest_path),
                 "data_hash": manifest["data_hash"],
+                "window_start": pd.to_datetime(manifest["source_window"].get("window_start"), utc=True).to_pydatetime() if manifest["source_window"].get("window_start") else None,
+                "window_end": pd.to_datetime(manifest["source_window"].get("window_end"), utc=True).to_pydatetime() if manifest["source_window"].get("window_end") else None,
                 "export_started_at": started_at,
                 "export_completed_at": completed_at,
                 "frequency_rows": manifest["counts"]["frequency_rows"],
@@ -390,15 +412,20 @@ def main() -> None:
         "settled_claim_rows": 0,
         "quote_snapshot_rows": 0,
     }
+    source_window = {"window_start": None, "window_end": None}
     try:
         engine = create_engine(args.database_url)
         with engine.connect() as conn:
             counts["exposure_rows"] = conn.execute(text("SELECT COUNT(*) FROM policy_exposure")).scalar_one()
             counts["settled_claim_rows"] = conn.execute(text("SELECT COUNT(*) FROM claim_outcome WHERE settled_at IS NOT NULL")).scalar_one()
             counts["quote_snapshot_rows"] = conn.execute(text("SELECT COUNT(*) FROM quote_feature_snapshot")).scalar_one()
+            exposures = pd.read_sql(text("SELECT segment_start, segment_end, recorded_at FROM policy_exposure"), conn)
+            claims = pd.read_sql(text("SELECT occurrence_date, reported_at, settled_at, recorded_at FROM claim_outcome"), conn)
+            snapshots = pd.read_sql(text("SELECT created_at FROM quote_feature_snapshot"), conn)
+            source_window = _window_from_frames(exposures, claims, snapshots)
     finally:
         engine.dispose()
-    manifest_path, manifest = _write_manifest(dataset_version_id, Path(args.output_dir), written, counts, started_at, completed_at, args.created_by)
+    manifest_path, manifest = _write_manifest(dataset_version_id, Path(args.output_dir), written, counts, started_at, completed_at, args.created_by, source_window)
     written.append(manifest_path)
     if args.register_registry:
         _register_dataset(args.database_url, manifest_path, manifest, started_at, completed_at)

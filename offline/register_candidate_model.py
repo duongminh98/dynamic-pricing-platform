@@ -26,6 +26,20 @@ def _sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def _sha256_many(paths: list[pathlib.Path]) -> str:
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode("utf-8"))
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _artifact_paths(raw: str) -> list[pathlib.Path]:
+    return [pathlib.Path(item.strip()) for item in raw.split(",") if item.strip()]
+
+
 def _git_head() -> str:
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
@@ -37,6 +51,10 @@ def _load_json(path: pathlib.Path) -> dict:
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
 
+def _candidate_id(line: str, dataset_version_id: str, artifact_checksum: str, comparison_path: pathlib.Path) -> str:
+    key = f"candidate:{line}:{dataset_version_id}:{artifact_checksum}:{comparison_path}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
+
 
 def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str, comparison_report_uri: str, validation_report_uri: str, fairness_report_uri: str | None, monotonic_passed: bool, smoothness_passed: bool, registered_by: str) -> dict:
     session = SessionLocal()
@@ -45,11 +63,13 @@ def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str,
         if dataset is None:
             raise ValueError(f"Unknown dataset version: {dataset_version_id}")
 
-        artifact_path = pathlib.Path(artifact_uri)
+        artifact_paths = _artifact_paths(artifact_uri)
         comparison_path = pathlib.Path(comparison_report_uri)
         validation_path = pathlib.Path(validation_report_uri)
         fairness_path = pathlib.Path(fairness_report_uri) if fairness_report_uri else None
-        for required in [artifact_path, comparison_path, validation_path]:
+        if not artifact_paths:
+            raise FileNotFoundError("No artifact paths provided")
+        for required in [*artifact_paths, comparison_path, validation_path]:
             if not required.exists():
                 raise FileNotFoundError(required)
         if fairness_path and not fairness_path.exists():
@@ -74,34 +94,37 @@ def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str,
         if not quality_gates["smoothness_passed"]:
             raise ValueError("Smoothness gate failed")
 
+        artifact_checksum = _sha256_many(artifact_paths)
         now = datetime.datetime.now(datetime.timezone.utc)
-        model_version_id = str(uuid.uuid4())
-        model = ModelVersion(
-            model_version_id=model_version_id,
-            line=line,
-            algorithm="LightGBM" if quality_gates["algorithm"] == "lgb" else "GLM",
-            family=quality_gates["family"],
-            status="CANDIDATE",
-            dataset_version_id=dataset_version_id,
-            artifact_uri=str(artifact_path),
-            artifact_checksum=_sha256(artifact_path),
-            feature_schema_hash=hashlib.sha256(json.dumps(validation_report.get("feature_columns", []), sort_keys=True).encode("utf-8")).hexdigest(),
-            comparison_report_uri=str(comparison_path),
-            validation_report_uri=str(validation_path),
-            fairness_report_uri=str(fairness_path) if fairness_path else None,
-            registered_at=now,
-            registered_by=registered_by,
-            training_code_version=_git_head(),
-            quality_gates=quality_gates,
-            gini=float(comparison_report["candidate"]["metrics"]["gini"]),
-            rmse=float(comparison_report["candidate"]["metrics"]["rmse"]),
-            mae=float(comparison_report["candidate"]["metrics"]["mae"]),
-            deviance=float(comparison_report["candidate"]["metrics"]["deviance"]),
-            trained_at=now,
-            dataset_desc=dataset_version_id,
-            monotonic_applied=bool(monotonic_passed),
-        )
-        session.add(model)
+        model_version_id = _candidate_id(line, dataset_version_id, artifact_checksum, comparison_path)
+        existing = session.query(ModelVersion).filter(ModelVersion.model_version_id == model_version_id).first()
+        if existing is not None and existing.status not in (None, "CANDIDATE"):
+            raise ValueError(f"Candidate already exists with non-candidate status: {existing.status}")
+        model = existing or ModelVersion(model_version_id=model_version_id)
+        model.line = line
+        model.algorithm = "LightGBM" if quality_gates["algorithm"] == "lgb" else "GLM"
+        model.family = quality_gates["family"]
+        model.status = "CANDIDATE"
+        model.dataset_version_id = dataset_version_id
+        model.artifact_uri = artifact_uri
+        model.artifact_checksum = artifact_checksum
+        model.feature_schema_hash = hashlib.sha256(json.dumps(validation_report.get("feature_columns", []), sort_keys=True).encode("utf-8")).hexdigest()
+        model.comparison_report_uri = str(comparison_path)
+        model.validation_report_uri = str(validation_path)
+        model.fairness_report_uri = str(fairness_path) if fairness_path else None
+        model.registered_at = now
+        model.registered_by = registered_by
+        model.training_code_version = _git_head()
+        model.quality_gates = quality_gates
+        model.gini = float(comparison_report["candidate"]["metrics"]["gini"])
+        model.rmse = float(comparison_report["candidate"]["metrics"]["rmse"])
+        model.mae = float(comparison_report["candidate"]["metrics"]["mae"])
+        model.deviance = float(comparison_report["candidate"]["metrics"]["deviance"])
+        model.trained_at = now
+        model.dataset_desc = dataset_version_id
+        model.monotonic_applied = bool(monotonic_passed)
+        if existing is None:
+            session.add(model)
         session.add(AuditTrail(
             audit_id=str(uuid.uuid4()),
             event_type="MODEL_CANDIDATE_REGISTERED",

@@ -2,14 +2,22 @@ import datetime
 import json
 import uuid
 from pathlib import Path
+import sys
 
 import pandas as pd
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+ROOT = Path(__file__).resolve().parents[2]
+PRICING_DIR = ROOT / "pricing"
+if str(PRICING_DIR) not in sys.path:
+    sys.path.insert(0, str(PRICING_DIR))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from app.database import Base, ModelVersion, TrainingDatasetVersion
-from offline.build_training_dataset_from_pricing_db import _write_manifest
+from offline.build_training_dataset_from_pricing_db import _write_manifest, _window_from_frames
 from offline.compare_candidate_to_champion import _premium_delta
 from offline.register_candidate_model import register_candidate
 
@@ -35,6 +43,15 @@ def test_manifest_contains_checksums_and_rows(tmp_path: Path):
     assert len(manifest["files"]) == 3
     assert all(item["checksum_sha256"] for item in manifest["files"])
     assert manifest["counts"]["frequency_rows"] == 2
+
+
+def test_source_window_uses_exported_read_model_dates():
+    exposures = pd.DataFrame([{"segment_start": "2026-01-01T00:00:00Z", "segment_end": "2026-12-31T00:00:00Z"}])
+    claims = pd.DataFrame([{"settled_at": "2026-06-01T00:00:00Z"}])
+    snapshots = pd.DataFrame([{"created_at": "2026-02-01T00:00:00Z"}])
+    window = _window_from_frames(exposures, claims, snapshots)
+    assert window["window_start"].startswith("2026-01-01")
+    assert window["window_end"].startswith("2026-12-31")
 
 
 def test_premium_delta_guardrail_stats_deterministic():
@@ -102,6 +119,48 @@ def test_register_candidate_rejects_missing_dataset(tmp_path: Path):
         )
 
 
+def test_register_candidate_rejects_missing_artifact(lifecycle_db):
+    _session, tmp_path = lifecycle_db
+    comparison = tmp_path / "comparison.json"
+    comparison.write_text(json.dumps({"passed": True, "candidate": {"algorithm": "lgb", "family": "tw", "metrics": {"gini": 0.8, "rmse": 1.0, "mae": 0.5, "deviance": 1.1}}}), encoding="utf-8")
+    validation = tmp_path / "validation.json"
+    validation.write_text(json.dumps({"feature_columns": ["a"]}), encoding="utf-8")
+    with pytest.raises(FileNotFoundError):
+        register_candidate(
+            line="car",
+            dataset_version_id="ds-1",
+            artifact_uri=str(tmp_path / "missing.joblib"),
+            comparison_report_uri=str(comparison),
+            validation_report_uri=str(validation),
+            fairness_report_uri=None,
+            monotonic_passed=True,
+            smoothness_passed=True,
+            registered_by="tester",
+        )
+
+
+def test_register_candidate_rejects_failed_comparison(lifecycle_db):
+    _session, tmp_path = lifecycle_db
+    artifact = tmp_path / "car__lgb_tw.joblib"
+    artifact.write_bytes(b"artifact")
+    comparison = tmp_path / "comparison.json"
+    comparison.write_text(json.dumps({"passed": False, "candidate": {"algorithm": "lgb", "family": "tw", "metrics": {"gini": 0.8, "rmse": 1.0, "mae": 0.5, "deviance": 1.1}}}), encoding="utf-8")
+    validation = tmp_path / "validation.json"
+    validation.write_text(json.dumps({"feature_columns": ["a"]}), encoding="utf-8")
+    with pytest.raises(ValueError):
+        register_candidate(
+            line="car",
+            dataset_version_id="ds-1",
+            artifact_uri=str(artifact),
+            comparison_report_uri=str(comparison),
+            validation_report_uri=str(validation),
+            fairness_report_uri=None,
+            monotonic_passed=True,
+            smoothness_passed=True,
+            registered_by="tester",
+        )
+
+
 def test_register_candidate_writes_enriched_model(lifecycle_db):
     _session, tmp_path = lifecycle_db
     artifact = tmp_path / "car__lgb_tw.joblib"
@@ -133,3 +192,16 @@ def test_register_candidate_writes_enriched_model(lifecycle_db):
         assert row.quality_gates["comparison_passed"] is True
     finally:
         session.close()
+
+
+def test_register_candidate_is_idempotent_for_same_inputs(lifecycle_db):
+    _session, tmp_path = lifecycle_db
+    artifact = tmp_path / "car__lgb_tw.joblib"
+    artifact.write_bytes(b"artifact")
+    comparison = tmp_path / "comparison.json"
+    comparison.write_text(json.dumps({"passed": True, "candidate": {"algorithm": "lgb", "family": "tw", "metrics": {"gini": 0.8, "rmse": 1.0, "mae": 0.5, "deviance": 1.1}}}), encoding="utf-8")
+    validation = tmp_path / "validation.json"
+    validation.write_text(json.dumps({"feature_columns": ["a", "b"]}), encoding="utf-8")
+    first = register_candidate(line="car", dataset_version_id="ds-1", artifact_uri=str(artifact), comparison_report_uri=str(comparison), validation_report_uri=str(validation), fairness_report_uri=None, monotonic_passed=True, smoothness_passed=True, registered_by="tester")
+    second = register_candidate(line="car", dataset_version_id="ds-1", artifact_uri=str(artifact), comparison_report_uri=str(comparison), validation_report_uri=str(validation), fairness_report_uri=None, monotonic_passed=True, smoothness_passed=True, registered_by="tester")
+    assert first["candidate_model_version"] == second["candidate_model_version"]
