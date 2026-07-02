@@ -195,4 +195,29 @@ class BillingEventListenersTest {
         assertThrows(RuntimeException.class, () -> listener.onEndorsementPendingPayment("bad", null));
         verify(billingService, never()).createInvoice(any());
     }
+
+    @Test
+    void onEndorsementInvoiceVoidRequestedVoidsInvoice() {
+        AdjustmentService adjustmentService = mock(AdjustmentService.class);
+        BillingService billingService = mock(BillingService.class);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
+
+        UUID endorsementRequestId = UUID.randomUUID();
+        String message = "{\"endorsement_request_id\":\"" + endorsementRequestId + "\"}";
+
+        listener.onEndorsementInvoiceVoidRequested(message, UUID.randomUUID().toString());
+
+        verify(billingService, times(1)).voidInvoiceByEndorsementRequestId(endorsementRequestId);
+    }
+
+    @Test
+    void onEndorsementInvoiceVoidRequestedThrowsOnBadMessage() {
+        AdjustmentService adjustmentService = mock(AdjustmentService.class);
+        BillingService billingService = mock(BillingService.class);
+        BillingEventListeners listener = new BillingEventListeners(adjustmentService, billingService, mock(CreditService.class), mock(RefundService.class));
+
+        assertThrows(RuntimeException.class, () -> listener.onEndorsementInvoiceVoidRequested("bad", null));
+        verify(billingService, never()).voidInvoiceByEndorsementRequestId(any());
+    }
 }
+

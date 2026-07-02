@@ -65,15 +65,6 @@ public class BillingClient {
         }
     }
 
-    public void voidInvoiceByEndorsement(UUID endorsementRequestId) {
-        String url = baseUrl + "/internal/invoices/void-by-endorsement?endorsement_request_id=" + endorsementRequestId;
-        try {
-            restTemplate.postForObject(url, null, Void.class);
-        } catch (Exception e) {
-            throw new ServiceException(ErrorCode.INTERNAL_ERROR, "Failed to void invoice: " + e.getMessage(), null);
-        }
-    }
-
     public Map<String, Object> applyCreditAndQuote(UUID customerId, long amountVnd) {
         String url = baseUrl + "/internal/credits/apply-and-quote?customer_id=" + customerId + "&amount_vnd=" + amountVnd;
         try {

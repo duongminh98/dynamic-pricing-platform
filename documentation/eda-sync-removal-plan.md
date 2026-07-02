@@ -186,12 +186,22 @@ Remove order-service synchronous invoice void calls into billing-service.
 
 - `order-service -> billing-service /internal/invoices/void-by-endorsement`
 
-### Work
+### Status
 
-- Introduce a command-style event such as `EndorsementInvoiceVoidRequested`.
-- Let billing-service consume the event and perform the void locally.
-- Emit result events such as `InvoiceVoided` or `InvoiceVoidRejected`.
-- Track invoice/endorsement reconciliation state in order-service.
+Implemented pending final operational rollout/backfill strategy.
+
+### Event-driven replacement
+
+- Order service emits command-style `EndorsementInvoiceVoidRequested` events when an endorsement invoice must be voided.
+- Billing service consumes `EndorsementInvoiceVoidRequested` from `endorsement.invoice.void.requested.billing.queue`.
+- Billing voids unpaid matching endorsement invoices locally and emits `InvoiceVoided` for each voided invoice.
+- Order no longer calls billing-service `/internal/invoices/void-by-endorsement` in runtime endorsement flows.
+
+### Verification requirements
+
+- Unit tests for order-service and billing-service pass.
+- Grep shows no order-service runtime call to `/internal/invoices/void-by-endorsement`.
+- Docker live event flow creates an endorsement invoice, cancels/voids via order-service, verifies billing consumes `EndorsementInvoiceVoidRequested`, invoice becomes `voided`, `InvoiceVoided` is published, and queues drain.
 
 ### Risk
 
@@ -339,4 +349,5 @@ Remove order-service synchronous rerating calls into pricing-service.
   - dual-run period if needed
   - observability checks
 - Treat money flows and policy-state transitions as the highest integrity domains.
+
 

@@ -35,4 +35,8 @@ public class RabbitConfig {
 
     @Bean public Queue endorsementPendingPaymentQueue() { return billingQueue("endorsement.pending.payment.billing.queue", "EndorsementPendingPayment"); }
     @Bean public Binding endorsementPendingPaymentBinding() { return BindingBuilder.bind(endorsementPendingPaymentQueue()).to(eventsExchange()).with("EndorsementPendingPayment"); }
+
+    @Bean public Queue endorsementInvoiceVoidRequestedQueue() { return billingQueue("endorsement.invoice.void.requested.billing.queue", "EndorsementInvoiceVoidRequested"); }
+    @Bean public Binding endorsementInvoiceVoidRequestedBinding() { return BindingBuilder.bind(endorsementInvoiceVoidRequestedQueue()).to(eventsExchange()).with("EndorsementInvoiceVoidRequested"); }
 }
+

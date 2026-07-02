@@ -97,7 +97,7 @@ public class PolicyLifecycleService {
      *
      * <p>Every endorsement is a Material_Change: it is persisted as a
      * PENDING_REVIEW endorsement request that only an Administrator can
-     * approve/reject — the customer can never self-approve.
+     * approve/reject - the customer can never self-approve.
      */
     /**
      * Preview an endorsement: re-rate without saving anything. Returns the current
@@ -183,7 +183,7 @@ public class PolicyLifecycleService {
         Map<String, Object> change = resolveChangeSet(request);
         validateChangeKeys(change, policy.getProductId());
 
-        // A4: Block concurrent endorsement — at most one in-progress per policy.
+        // A4: Block concurrent endorsement - at most one in-progress per policy.
         List<EndorsementRequestEntity> existing = endorsementRequestRepository.findByPolicyIdOrderByCreatedAtDesc(policyId);
         for (EndorsementRequestEntity e : existing) {
             if (e.getStatus() == EndorsementStatus.PENDING_REVIEW
@@ -248,7 +248,7 @@ public class PolicyLifecycleService {
                 difference, proRated, eff, pending.getCreatedAt());
     }
 
-    // ── Admin review of Material_Change endorsements (R23.9 / design §4.2) ──
+    // -- Admin review of Material_Change endorsements (R23.9 / design section 4.2) --
 
     @Transactional(readOnly = true)
     public List<PolicyResponse> adminListAllPolicies() {
@@ -341,7 +341,7 @@ public class PolicyLifecycleService {
         if (cancelDate == null) {
             cancelDate = now;
         }
-        // E1: Block backdate — cancel_date must be >= now and within [effective, expiration].
+        // E1: Block backdate - cancel_date must be >= now and within [effective, expiration].
         if (cancelDate.isBefore(now) || cancelDate.isAfter(policy.getPolicyExpirationDate())
                 || cancelDate.isBefore(policy.getPolicyEffectiveDate())) {
             throw new ServiceException(ErrorCode.CANCEL_DATE_OUT_OF_RANGE);
@@ -373,6 +373,9 @@ public class PolicyLifecycleService {
         }
         enqueueEvent("PolicyCancelled", policyId, Map.of(
                 "customer_id", policy.getCustomerId().toString(),
+                "product_id", policy.getProductId(),
+                "line", policy.getLine() != null ? policy.getLine() : resolveLineFromProductId(policy.getProductId()),
+                "status", policy.getStatus().name(),
                 "cancel_date", cancelDate.toString(),
                 "final_premium_vnd", policy.getFinalPremiumVnd(),
                 "remaining_days", remainingDays,
@@ -469,11 +472,8 @@ public class PolicyLifecycleService {
 
         boolean invoiceVoided = false;
         if (req.getStatus() == EndorsementStatus.APPROVED_PENDING_PAYMENT && req.getInvoiceId() != null) {
-            try {
-                billingClient.voidInvoiceByEndorsement(endorsementRequestId);
-                invoiceVoided = true;
-            } catch (Exception ignored) {
-            }
+            requestEndorsementInvoiceVoid(policy, req);
+            invoiceVoided = true;
         }
 
         OffsetDateTime cancelledAt = OffsetDateTime.now();
@@ -525,7 +525,7 @@ public class PolicyLifecycleService {
             long additionalCharge = Math.round((quotedPremium - currentPremium) * fraction);
 
             // Net-off quote: apply available credits first via billing service (quote only, no persistence).
-            // Used solely for the waive decision (netDue < MIN_SETTLE_AMOUNT → waive).
+            // Used solely for the waive decision (netDue < MIN_SETTLE_AMOUNT -> waive).
             // The actual credit application happens in billing when the invoice is created.
             Map<String, Object> creditResp = billingClient.applyCreditAndQuote(
                     policy.getCustomerId(), additionalCharge);
@@ -579,7 +579,7 @@ public class PolicyLifecycleService {
         return toEndorsementResponse(req);
     }
 
-    /** Called when an adjustment invoice is paid — applies the held endorsement. */
+    /** Called when an adjustment invoice is paid - applies the held endorsement. */
     @Transactional
     public void applyPendingEndorsement(UUID endorsementRequestId) {
         EndorsementRequestEntity req = endorsementRequestRepository.findById(endorsementRequestId)
@@ -612,12 +612,9 @@ public class PolicyLifecycleService {
         Policy policy = policyRepository.findById(req.getPolicyId())
                 .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null));
 
-        // Void old invoice if it exists (unpaid invoices only; paid ones are left alone).
+        // Void old invoice asynchronously if it exists (unpaid invoices only; paid ones are left alone).
         if (req.getInvoiceId() != null) {
-            try {
-                billingClient.voidInvoiceByEndorsement(endorsementRequestId);
-            } catch (Exception ignored) {
-            }
+            requestEndorsementInvoiceVoid(policy, req);
         }
 
         // Recalculate additional charge (same pro-rata logic as approveEndorsement).
@@ -690,6 +687,9 @@ public class PolicyLifecycleService {
         long remainingDays = ChronoUnit.DAYS.between(cancelDate, policy.getPolicyExpirationDate());
         enqueueEvent("PolicyCancelled", policy.getPolicyId(), Map.of(
                 "customer_id", policy.getCustomerId().toString(),
+                "product_id", policy.getProductId(),
+                "line", policy.getLine() != null ? policy.getLine() : resolveLineFromProductId(policy.getProductId()),
+                "status", policy.getStatus().name(),
                 "cancel_date", cancelDate.toString(),
                 "final_premium_vnd", policy.getFinalPremiumVnd(),
                 "remaining_days", remainingDays,
@@ -725,9 +725,9 @@ public class PolicyLifecycleService {
             if (req.getDueDate() != null && req.getDueDate().isBefore(now)) {
                 req.setStatus(EndorsementStatus.VOID);
                 endorsementRequestRepository.save(req);
-                try {
-                    billingClient.voidInvoiceByEndorsement(req.getEndorsementRequestId());
-                } catch (Exception ignored) {
+                Policy policy = policyRepository.findById(req.getPolicyId()).orElse(null);
+                if (policy != null) {
+                    requestEndorsementInvoiceVoid(policy, req);
                 }
                 enqueueEvent("EndorsementOverdue", req.getPolicyId(), Map.of(
                         "customer_id", req.getCustomerId().toString(),
@@ -807,7 +807,7 @@ public class PolicyLifecycleService {
 
     /**
      * Applies an endorsement to the policy. When {@code lockedPremium} is non-null (material
-     * endorsement approved by admin), the quoted premium is used as-is — no re-rate — so the
+     * endorsement approved by admin), the quoted premium is used as-is - no re-rate - so the
      * price the customer pays matches the price recorded on the policy and credit.
      */
     private PolicyResponse applyEndorsement(Policy policy, Map<String, Object> change, OffsetDateTime eff,
@@ -889,7 +889,7 @@ public class PolicyLifecycleService {
         long priorCoverage = prior != null ? prior.getCoverageAmountVnd() : 0L;
         long priorDeductible = prior != null ? prior.getDeductibleVnd() : 0L;
         Map<String, Object> structuredChange = new LinkedHashMap<>();
-        // Coverage/deductible are always inherited — they never appear in structuredChange.
+        // Coverage/deductible are always inherited - they never appear in structuredChange.
         // Only premium diff is recorded for the document.
         if (premiumNew != premiumOld) {
             structuredChange.put("premium", Map.of("old", premiumOld, "new", premiumNew));
@@ -911,13 +911,28 @@ public class PolicyLifecycleService {
 
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(eff, policy.getPolicyExpirationDate());
-        enqueueEvent("EndorsementApplied", policyId, Map.of(
-                "customer_id", policy.getCustomerId().toString(),
-                "order_id", policy.getOrderId().toString(),
-                "effective_date", eff.toString(),
-                "premium_old", premiumOld, "premium_new", premiumNew,
-                "difference_vnd", premiumNew - premiumOld,
-                "remaining_days", remainingDays, "term_days", termDays));
+        Map<String, Object> appliedPayload = new LinkedHashMap<>();
+        appliedPayload.put("customer_id", policy.getCustomerId().toString());
+        appliedPayload.put("order_id", policy.getOrderId().toString());
+        appliedPayload.put("product_id", policy.getProductId());
+        appliedPayload.put("line", policy.getLine());
+        appliedPayload.put("status", policy.getStatus().name());
+        appliedPayload.put("effective_date", eff.toString());
+        appliedPayload.put("exposure_id", seg.getSegmentId().toString());
+        appliedPayload.put("exposure_segment_seq", seg.getExposureSegmentSeq());
+        appliedPayload.put("segment_start", seg.getSegmentStart().toString());
+        appliedPayload.put("segment_end", seg.getSegmentEnd().toString());
+        appliedPayload.put("earned_exposure_years", seg.getEarnedExposureYears());
+        appliedPayload.put("coverage_amount_vnd", seg.getCoverageAmountVnd());
+        appliedPayload.put("deductible_vnd", seg.getDeductibleVnd());
+        appliedPayload.put("final_premium_vnd", premiumNew);
+        appliedPayload.put("premium_old", premiumOld);
+        appliedPayload.put("premium_new", premiumNew);
+        appliedPayload.put("difference_vnd", premiumNew - premiumOld);
+        appliedPayload.put("remaining_days", remainingDays);
+        appliedPayload.put("term_days", termDays);
+        appliedPayload.put("risk_snapshot", seg.getRiskSnapshot());
+        enqueueEvent("EndorsementApplied", policyId, appliedPayload);
         return toResponse(policy);
     }
 
@@ -1055,11 +1070,11 @@ public class PolicyLifecycleService {
     @Transactional
     public RenewalResponse renew(UUID policyId, String keycloakSubject) {
         Policy old = findOwnedPolicy(policyId, keycloakSubject);
-        // B1: Status guard — only active policies can be renewed.
+        // B1: Status guard - only active policies can be renewed.
         if (old.getStatus() != PolicyStatus.active) {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
-        // B2: Duplicate guard — block if a renewal already exists for the next term.
+        // B2: Duplicate guard - block if a renewal already exists for the next term.
         int nextRenewalNumber = old.getRenewalNumber() + 1;
         List<Policy> existingRenewals = policyRepository.findByOrderIdAndStatusIn(
                 old.getOrderId(),
@@ -1121,6 +1136,7 @@ public class PolicyLifecycleService {
         renewed.setOrderId(old.getOrderId());
         renewed.setCustomerId(old.getCustomerId());
         renewed.setProductId(old.getProductId());
+        renewed.setLine(old.getLine());
         renewed.setStatus(paymentRequired ? PolicyStatus.pending_payment : PolicyStatus.active);
         renewed.setPolicyEffectiveDate(newEff);
         renewed.setPolicyExpirationDate(newExp);
@@ -1183,6 +1199,9 @@ public class PolicyLifecycleService {
             Map<String, Object> renewalPayload = new LinkedHashMap<>();
             renewalPayload.put("customer_id", renewed.getCustomerId().toString());
             renewalPayload.put("order_id", renewed.getOrderId().toString());
+            renewalPayload.put("product_id", renewed.getProductId());
+            renewalPayload.put("line", renewed.getLine());
+            renewalPayload.put("status", renewed.getStatus().name());
             renewalPayload.put("previous_policy_id", policyId.toString());
             renewalPayload.put("renewal_number", nextRenewalNumber);
             renewalPayload.put("renewed_premium_vnd", renewedPremium);
@@ -1191,14 +1210,26 @@ public class PolicyLifecycleService {
             renewalPayload.put("invoice_id", invoiceId != null ? invoiceId.toString() : "");
             renewalPayload.put("new_effective_date", newEff.toString());
             renewalPayload.put("new_expiration_date", newExp.toString());
+            renewalPayload.put("exposure_id", seg.getSegmentId().toString());
+            renewalPayload.put("exposure_segment_seq", seg.getExposureSegmentSeq());
+            renewalPayload.put("segment_start", seg.getSegmentStart().toString());
+            renewalPayload.put("segment_end", seg.getSegmentEnd().toString());
+            renewalPayload.put("earned_exposure_years", seg.getEarnedExposureYears());
+            renewalPayload.put("coverage_amount_vnd", seg.getCoverageAmountVnd());
+            renewalPayload.put("deductible_vnd", seg.getDeductibleVnd());
+            renewalPayload.put("final_premium_vnd", renewedPremium);
+            renewalPayload.put("risk_snapshot", seg.getRiskSnapshot());
             renewalPayload.put("payment_required", true);
             enqueueEvent("PolicyRenewed", renewed.getPolicyId(), renewalPayload);
         } else {
-            // Credit covers full amount — activate immediately.
+            // Credit covers full amount - activate immediately.
             resp.setStatus(PolicyStatus.active);
             Map<String, Object> renewalPayload = new LinkedHashMap<>();
             renewalPayload.put("customer_id", renewed.getCustomerId().toString());
             renewalPayload.put("order_id", renewed.getOrderId().toString());
+            renewalPayload.put("product_id", renewed.getProductId());
+            renewalPayload.put("line", renewed.getLine());
+            renewalPayload.put("status", renewed.getStatus().name());
             renewalPayload.put("previous_policy_id", policyId.toString());
             renewalPayload.put("renewal_number", nextRenewalNumber);
             renewalPayload.put("renewed_premium_vnd", renewedPremium);
@@ -1206,6 +1237,15 @@ public class PolicyLifecycleService {
             renewalPayload.put("net_due_vnd", netDue);
             renewalPayload.put("new_effective_date", newEff.toString());
             renewalPayload.put("new_expiration_date", newExp.toString());
+            renewalPayload.put("exposure_id", seg.getSegmentId().toString());
+            renewalPayload.put("exposure_segment_seq", seg.getExposureSegmentSeq());
+            renewalPayload.put("segment_start", seg.getSegmentStart().toString());
+            renewalPayload.put("segment_end", seg.getSegmentEnd().toString());
+            renewalPayload.put("earned_exposure_years", seg.getEarnedExposureYears());
+            renewalPayload.put("coverage_amount_vnd", seg.getCoverageAmountVnd());
+            renewalPayload.put("deductible_vnd", seg.getDeductibleVnd());
+            renewalPayload.put("final_premium_vnd", renewedPremium);
+            renewalPayload.put("risk_snapshot", seg.getRiskSnapshot());
             renewalPayload.put("payment_required", false);
             enqueueEvent("PolicyRenewed", renewed.getPolicyId(), renewalPayload);
         }
@@ -1235,7 +1275,7 @@ public class PolicyLifecycleService {
         if (policy.getStatus() != PolicyStatus.active) {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
-        // E1: Block backdate — cancel_date must be >= now and within [effective, expiration].
+        // E1: Block backdate - cancel_date must be >= now and within [effective, expiration].
         OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime cancelDate = request != null && request.getCancelDate() != null ? request.getCancelDate() : now;
         if (cancelDate.isBefore(now) || cancelDate.isAfter(policy.getPolicyExpirationDate())
@@ -1271,6 +1311,9 @@ public class PolicyLifecycleService {
         }
         enqueueEvent("PolicyCancelled", policyId, Map.of(
                 "customer_id", policy.getCustomerId().toString(),
+                "product_id", policy.getProductId(),
+                "line", policy.getLine() != null ? policy.getLine() : resolveLineFromProductId(policy.getProductId()),
+                "status", policy.getStatus().name(),
                 "cancel_date", cancelDate.toString(),
                 "final_premium_vnd", policy.getFinalPremiumVnd(),
                 "remaining_days", remainingDays,
@@ -1308,6 +1351,14 @@ public class PolicyLifecycleService {
         }
     }
 
+
+    private void requestEndorsementInvoiceVoid(Policy policy, EndorsementRequestEntity req) {
+        enqueueEvent("EndorsementInvoiceVoidRequested", policy.getPolicyId(), Map.of(
+                "customer_id", policy.getCustomerId().toString(),
+                "order_id", policy.getOrderId().toString(),
+                "endorsement_request_id", req.getEndorsementRequestId().toString(),
+                "invoice_id", req.getInvoiceId() != null ? req.getInvoiceId().toString() : ""));
+    }
     public PolicyResponse toResponse(Policy policy) {
         PolicyResponse resp = new PolicyResponse();
         resp.setPolicyId(policy.getPolicyId());
@@ -1326,3 +1377,4 @@ public class PolicyLifecycleService {
         return resp;
     }
 }
+

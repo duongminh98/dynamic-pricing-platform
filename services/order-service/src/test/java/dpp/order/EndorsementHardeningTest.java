@@ -108,7 +108,7 @@ class EndorsementHardeningTest {
         return new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
     }
 
-    // ── A4: Concurrent endorsement block ──
+    // -- A4: Concurrent endorsement block --
 
     @Test
     void concurrentEndorsementInPendingReviewIsBlocked() {
@@ -184,7 +184,7 @@ class EndorsementHardeningTest {
         assertEquals("PENDING_REVIEW", result.getStatus());
     }
 
-    // ── A3: Backdate prevention ──
+    // -- A3: Backdate prevention --
 
     @Test
     void backdatedEffectiveDateIsRejected() {
@@ -223,7 +223,7 @@ class EndorsementHardeningTest {
         assertEquals(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE, ex.getErrorCode());
     }
 
-    // ── A5: Customer self-cancel ──
+    // -- A5: Customer self-cancel --
 
     @Test
     void cancelPendingReviewEndorsementSucceeds() {
@@ -258,10 +258,10 @@ class EndorsementHardeningTest {
         when(endRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         BillingClient billing = mock(BillingClient.class);
-        doNothing().when(billing).voidInvoiceByEndorsement(pending.getEndorsementRequestId());
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
 
         PolicyLifecycleService s = newService(policy, endRepo, mock(PricingClient.class),
-                billing, mock(OutboxPublisher.class));
+                billing, outbox);
 
         EndorsementCancelResponse resp = s.cancelEndorsement(
                 policy.getPolicyId(), pending.getEndorsementRequestId(), SUBJECT, "No longer needed");
@@ -269,7 +269,8 @@ class EndorsementHardeningTest {
         assertEquals(EndorsementStatus.CANCELLED, resp.getStatus());
         assertTrue(resp.isInvoiceVoided(), "invoice must be voided for APPROVED_PENDING_PAYMENT");
         assertFalse(resp.isPolicyChanged());
-        verify(billing, times(1)).voidInvoiceByEndorsement(pending.getEndorsementRequestId());
+        verify(billing, never()).createEndorsementInvoice(any(), any(), anyLong(), any(), any());
+        verify(outbox, times(1)).enqueue(eq("EndorsementInvoiceVoidRequested"), contains(pending.getEndorsementRequestId().toString()));
     }
 
     @Test
@@ -354,3 +355,4 @@ class EndorsementHardeningTest {
         assertEquals("EndorsementCancelled", eventCaptor.getValue());
     }
 }
+

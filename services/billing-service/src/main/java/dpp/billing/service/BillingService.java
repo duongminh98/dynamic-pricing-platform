@@ -1,6 +1,5 @@
 package dpp.billing.service;
 
-import dpp.billing.client.OrderClient;
 import dpp.billing.dto.AdjustmentResponse;
 import dpp.billing.dto.CreateInvoiceRequest;
 import dpp.billing.dto.CreditResponse;
@@ -29,18 +28,16 @@ public class BillingService {
 
     private final InvoiceRepository invoiceRepository;
     private final AdjustmentRepository adjustmentRepository;
-    private final OrderClient orderClient;
     private final OutboxPublisher outboxPublisher;
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
     private final RefundService refundService;
 
     public BillingService(InvoiceRepository invoiceRepository, AdjustmentRepository adjustmentRepository,
-                          OrderClient orderClient, OutboxPublisher outboxPublisher, CreditService creditService,
+                          OutboxPublisher outboxPublisher, CreditService creditService,
                           RefundService refundService) {
         this.invoiceRepository = invoiceRepository;
         this.adjustmentRepository = adjustmentRepository;
-        this.orderClient = orderClient;
         this.outboxPublisher = outboxPublisher;
         this.creditService = creditService;
         this.refundService = refundService;
@@ -58,7 +55,7 @@ public class BillingService {
      */
     @Transactional
     public InvoiceResponse createInvoice(CreateInvoiceRequest request) {
-        // Endorsement adjustment invoices — idempotent on endorsement_request_id.
+        // Endorsement adjustment invoices - idempotent on endorsement_request_id.
         // Multiple events may be delivered (reconciliation re-enqueue, redelivery);
         // dedup prevents duplicate invoices for the same endorsement.
         if (request.getEndorsementRequestId() != null) {
@@ -66,6 +63,7 @@ public class BillingService {
                     .findByEndorsementRequestIdOrderByCreatedAtDesc(request.getEndorsementRequestId());
             for (Invoice inv : existing) {
                 if (inv.getStatus() != InvoiceStatus.voided) {
+                    inv = attachCustomerIdIfMissing(inv, request.getCustomerId());
                     enqueueInvoiceCreated(inv);
                     return toResponse(inv);
                 }
@@ -74,6 +72,7 @@ public class BillingService {
             invoice.setInvoiceId(UUID.randomUUID());
             invoice.setOrderId(request.getOrderId());
             invoice.setPolicyId(request.getPolicyId());
+            invoice.setCustomerId(request.getCustomerId());
             invoice.setAmountVnd(request.getAmountVnd());
             invoice.setStatus(InvoiceStatus.unpaid);
             invoice.setEndorsementRequestId(request.getEndorsementRequestId());
@@ -81,18 +80,12 @@ public class BillingService {
             invoice.setCreatedAt(OffsetDateTime.now());
             invoice = invoiceRepository.save(invoice);
             // Net-off: apply available customer-scoped credits FIFO against this invoice.
-            UUID customerIdForCredit = request.getCustomerId();
-            if (customerIdForCredit == null) {
-                try {
-                    customerIdForCredit = resolveInvoiceOwner(invoice);
-                } catch (Exception ignored) {
-                }
-            }
+            UUID customerIdForCredit = invoice.getCustomerId();
             if (customerIdForCredit != null) {
                 long netDue = creditService.applyCreditsToInvoice(invoice.getInvoiceId(),
                         customerIdForCredit, invoice.getAmountVnd());
                 if (netDue <= 0) {
-                    // Credit covers full amount — mark paid immediately.
+                    // Credit covers full amount - mark paid immediately.
                     invoice.setStatus(InvoiceStatus.paid);
                     invoice.setPaidAt(OffsetDateTime.now());
                     invoice = invoiceRepository.save(invoice);
@@ -102,29 +95,24 @@ public class BillingService {
             enqueueInvoiceCreated(invoice);
             return toResponse(invoice);
         }
-        // Renewal invoices carry a policyId — idempotent on policyId so each renewal
-        // term gets its own invoice. Initial order invoices have null policyId —
+        // Renewal invoices carry a policyId - idempotent on policyId so each renewal
+        // term gets its own invoice. Initial order invoices have null policyId -
         // idempotent on orderId (existing behavior, backed by UNIQUE constraint V4).
         if (request.getPolicyId() != null) {
             return invoiceRepository.findByPolicyId(request.getPolicyId())
-                    .map(this::toResponse)
+                    .map(invoice -> toResponse(attachCustomerIdIfMissing(invoice, request.getCustomerId())))
                     .orElseGet(() -> {
                         Invoice invoice = new Invoice();
                         invoice.setInvoiceId(UUID.randomUUID());
                         invoice.setOrderId(request.getOrderId());
                         invoice.setPolicyId(request.getPolicyId());
+                        invoice.setCustomerId(request.getCustomerId());
                         invoice.setAmountVnd(request.getAmountVnd());
                         invoice.setStatus(InvoiceStatus.unpaid);
                         invoice.setCreatedAt(OffsetDateTime.now());
                         invoice = invoiceRepository.save(invoice);
                         // Net-off: apply available customer-scoped credits for renewal invoices.
-                        UUID customerIdForCredit = request.getCustomerId();
-                        if (customerIdForCredit == null) {
-                            try {
-                                customerIdForCredit = resolveInvoiceOwner(invoice);
-                            } catch (Exception ignored) {
-                            }
-                        }
+                        UUID customerIdForCredit = invoice.getCustomerId();
                         if (customerIdForCredit != null) {
                             long netDue = creditService.applyCreditsToInvoice(invoice.getInvoiceId(),
                                     customerIdForCredit, invoice.getAmountVnd());
@@ -140,6 +128,7 @@ public class BillingService {
         }
         return invoiceRepository.findByOrderId(request.getOrderId())
                 .map(inv -> {
+                    inv = attachCustomerIdIfMissing(inv, request.getCustomerId());
                     enqueueInvoiceCreated(inv);
                     return toResponse(inv);
                 })
@@ -148,6 +137,7 @@ public class BillingService {
                     invoice.setInvoiceId(UUID.randomUUID());
                     invoice.setOrderId(request.getOrderId());
                     invoice.setPolicyId(request.getPolicyId());
+                    invoice.setCustomerId(request.getCustomerId());
                     invoice.setAmountVnd(request.getAmountVnd());
                     invoice.setStatus(InvoiceStatus.unpaid);
                     invoice.setCreatedAt(OffsetDateTime.now());
@@ -155,6 +145,14 @@ public class BillingService {
                     enqueueInvoiceCreated(invoice);
                     return toResponse(invoice);
                 });
+    }
+
+    private Invoice attachCustomerIdIfMissing(Invoice invoice, UUID customerId) {
+        if (invoice.getCustomerId() == null && customerId != null) {
+            invoice.setCustomerId(customerId);
+            return invoiceRepository.save(invoice);
+        }
+        return invoice;
     }
 
     @Transactional
@@ -178,12 +176,9 @@ public class BillingService {
     /**
      * Customer-initiated payment of an invoice (task 20.13, R33.5, BR-10).
      *
-     * <p>Enforces data-ownership isolation: the JWT subject must own the order
-     * (or policy) the invoice belongs to. Ownership is resolved through
-     * Order_Service via {@link OrderClient}; a mismatch maps to FORBIDDEN_RESOURCE
-     * so a user cannot pay another customer's invoice. The server-to-server VNPAY
-     * IPN path uses {@link #payInvoice(UUID)} directly and is not subject to this
-     * check (the gateway/IPN signature is its trust boundary).</p>
+     * <p>Enforces data-ownership isolation using the customer_id persisted on the
+     * invoice at creation time. The server-to-server VNPAY IPN path uses
+     * {@link #payInvoice(UUID)} directly and is not subject to this check.</p>
      */
     @Transactional
     public InvoiceResponse payInvoiceAsCustomer(UUID invoiceId, UUID callerCustomerId) {
@@ -196,17 +191,8 @@ public class BillingService {
         return payInvoice(invoiceId);
     }
 
-    /**
-     * Resolve the owning customer of an invoice. Invoices created at order
-     * approval carry order_id with a null policy_id (the policy is issued only
-     * after payment), so the order is the primary resolution path; the policy
-     * path covers invoices that already reference an issued policy.
-     */
     private UUID resolveInvoiceOwner(Invoice invoice) {
-        if (invoice.getPolicyId() != null) {
-            return orderClient.getPolicyOwner(invoice.getPolicyId());
-        }
-        return orderClient.getOrderOwner(invoice.getOrderId());
+        return invoice.getCustomerId();
     }
 
     @Transactional(readOnly = true)
@@ -222,13 +208,14 @@ public class BillingService {
 
     @Transactional(readOnly = true)
     public PolicyBillingResponse getPolicyBilling(UUID policyId, UUID callerCustomerId) {
-        UUID owner = orderClient.getPolicyOwner(policyId);
-        if (owner == null || !owner.equals(callerCustomerId)) {
+        List<Invoice> invoiceRows = invoiceRepository.findByPolicyIdOrderByCreatedAtAsc(policyId);
+        boolean hasOwnerInvoice = invoiceRows.stream()
+                .anyMatch(invoice -> callerCustomerId.equals(invoice.getCustomerId()));
+        if (!hasOwnerInvoice) {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
         }
         PolicyBillingResponse resp = new PolicyBillingResponse();
-        List<InvoiceResponse> invoices = invoiceRepository.findByPolicyIdOrderByCreatedAtAsc(policyId)
-                .stream().map(this::toResponse).toList();
+        List<InvoiceResponse> invoices = invoiceRows.stream().map(this::toResponse).toList();
         List<AdjustmentResponse> adjustments = adjustmentRepository.findByPolicyIdOrderByCreatedAtAsc(policyId)
                 .stream().map(this::toAdjustmentResponse).toList();
         List<PremiumCredit> credits = creditService.getCreditsByPolicy(policyId);
@@ -274,6 +261,7 @@ public class BillingService {
         resp.setInvoiceId(invoice.getInvoiceId());
         resp.setOrderId(invoice.getOrderId());
         resp.setPolicyId(invoice.getPolicyId());
+        resp.setCustomerId(invoice.getCustomerId());
         resp.setAmountVnd(invoice.getAmountVnd());
         resp.setStatus(invoice.getStatus());
         resp.setPaidAt(invoice.getPaidAt());
@@ -330,9 +318,8 @@ public class BillingService {
         payload.put("invoice_id", invoice.getInvoiceId());
         payload.put("order_id", invoice.getOrderId());
         payload.put("policy_id", invoice.getPolicyId());
-        UUID customerId = tryResolveInvoiceOwner(invoice);
-        if (customerId != null) {
-            payload.put("customer_id", customerId);
+        if (invoice.getCustomerId() != null) {
+            payload.put("customer_id", invoice.getCustomerId());
         }
         payload.put("amount_vnd", invoice.getAmountVnd());
         try {
@@ -343,25 +330,31 @@ public class BillingService {
         return toResponse(invoice);
     }
 
-    private UUID tryResolveInvoiceOwner(Invoice invoice) {
-        try {
-            return resolveInvoiceOwner(invoice);
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
     @Transactional
     public void voidInvoiceByEndorsementRequestId(UUID endorsementRequestId) {
         List<Invoice> invoices = invoiceRepository.findByEndorsementRequestIdOrderByCreatedAtDesc(endorsementRequestId);
         for (Invoice invoice : invoices) {
             if (invoice.getStatus() == InvoiceStatus.unpaid) {
-                // Reverse credit applications before voiding.
                 if (invoice.getCreditAppliedVnd() > 0) {
                     creditService.reverseCreditsForInvoice(invoice.getInvoiceId());
                 }
                 invoice.setStatus(InvoiceStatus.voided);
-                invoiceRepository.save(invoice);
+                invoice = invoiceRepository.save(invoice);
+
+                Map<String, Object> payload = new LinkedHashMap<>();
+                payload.put("invoice_id", invoice.getInvoiceId());
+                payload.put("order_id", invoice.getOrderId());
+                payload.put("policy_id", invoice.getPolicyId());
+                payload.put("endorsement_request_id", endorsementRequestId);
+                if (invoice.getCustomerId() != null) {
+                    payload.put("customer_id", invoice.getCustomerId());
+                }
+                payload.put("amount_vnd", invoice.getAmountVnd());
+                try {
+                    outboxPublisher.enqueue("InvoiceVoided", objectMapper.writeValueAsString(payload));
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to enqueue InvoiceVoided event", e);
+                }
             }
         }
     }
@@ -375,6 +368,9 @@ public class BillingService {
         }
         if (invoice.getEndorsementRequestId() != null) {
             payload.put("endorsement_request_id", invoice.getEndorsementRequestId());
+        }
+        if (invoice.getCustomerId() != null) {
+            payload.put("customer_id", invoice.getCustomerId());
         }
         payload.put("amount_vnd", invoice.getAmountVnd());
         try {
@@ -391,6 +387,9 @@ public class BillingService {
         payload.put("invoice_id", invoice.getInvoiceId());
         if (invoice.getEndorsementRequestId() != null) {
             payload.put("endorsement_request_id", invoice.getEndorsementRequestId());
+        }
+        if (invoice.getCustomerId() != null) {
+            payload.put("customer_id", invoice.getCustomerId());
         }
         try {
             outboxPublisher.enqueue("InvoicePaid", objectMapper.writeValueAsString(payload));
@@ -411,3 +410,5 @@ public class BillingService {
         return resp;
     }
 }
+
+

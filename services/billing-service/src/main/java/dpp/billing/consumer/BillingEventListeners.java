@@ -134,4 +134,14 @@ public class BillingEventListeners {
             billingService.createInvoice(req);
         } catch (Exception e) { throw new RuntimeException("EndorsementPendingPayment processing failed", e); }
     }
+
+    @RabbitListener(queues = "endorsement.invoice.void.requested.billing.queue")
+    public void onEndorsementInvoiceVoidRequested(@Payload String message,
+                                                  @Header(name = "X-Event-Id", required = false) String eventId) {
+        try {
+            JsonNode n = objectMapper.readTree(message);
+            billingService.voidInvoiceByEndorsementRequestId(UUID.fromString(n.get("endorsement_request_id").asText()));
+        } catch (Exception e) { throw new RuntimeException("EndorsementInvoiceVoidRequested processing failed", e); }
+    }
 }
+
