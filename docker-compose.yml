@@ -1,4 +1,4 @@
-﻿name: ${COMPOSE_PROJECT_NAME:-dynamic-pricing-platform}
+name: ${COMPOSE_PROJECT_NAME:-dynamic-pricing-platform}
 
 x-postgres-healthcheck: &postgres-healthcheck
   test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
@@ -456,7 +456,6 @@ services:
       <<: *java-env
       BILLING_DB_HOST: postgres-billing
       BILLING_DB_PORT: 5432
-      ORDER_BASE_URL: http://order-service-1:8080
       VNP_TMN_CODE: ${VNP_TMN_CODE:-}
       VNP_HASH_SECRET: ${VNP_HASH_SECRET:-}
       VNP_PAY_URL: ${VNP_PAY_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
@@ -496,7 +495,6 @@ services:
       MAIL_PORT: 1025
       MAIL_FROM: noreply@dynamic-pricing.local
       NOTIFICATION_EMAIL_ENABLED: "true"
-      CUSTOMER_BASE_URL: http://customer-service-1:8080
     expose:
       - "8080"
     depends_on:
@@ -596,5 +594,6 @@ volumes:
   prometheus_data:
   grafana_data:
   minio_data:
+
 
 

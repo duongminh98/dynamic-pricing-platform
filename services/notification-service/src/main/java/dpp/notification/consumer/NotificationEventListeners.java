@@ -1,5 +1,7 @@
 package dpp.notification.consumer;
 
+import dpp.notification.entity.CustomerEmailProjection;
+import dpp.notification.repository.CustomerEmailProjectionRepository;
 import dpp.notification.service.NotificationService;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.messaging.handler.annotation.Header;
@@ -9,19 +11,37 @@ import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Component
 public class NotificationEventListeners {
 
     private final NotificationService notificationService;
+    private final CustomerEmailProjectionRepository customerEmailProjectionRepository;
     private final ObjectMapper objectMapper;
 
-    public NotificationEventListeners(NotificationService notificationService) {
+    public NotificationEventListeners(NotificationService notificationService,
+                                      CustomerEmailProjectionRepository customerEmailProjectionRepository) {
         this.notificationService = notificationService;
+        this.customerEmailProjectionRepository = customerEmailProjectionRepository;
         this.objectMapper = new ObjectMapper();
     }
 
+    @RabbitListener(queues = "customer.created.notification.queue")
+    public void onCustomerCreated(@Payload String msg) {
+        upsertCustomerEmailProjection(msg);
+    }
+
+    @RabbitListener(queues = "customer.email.updated.notification.queue")
+    public void onCustomerEmailUpdated(@Payload String msg) {
+        upsertCustomerEmailProjection(msg);
+    }
+
+    @RabbitListener(queues = "customer.profile.updated.notification.queue")
+    public void onCustomerProfileUpdated(@Payload String msg) {
+        upsertCustomerEmailProjection(msg);
+    }
     @RabbitListener(queues = "policy.issued.queue")
     public void onPolicyIssued(@Payload String msg, @Header(name = "X-Event-Id", required = false) String eventId) {
         handle(msg, eventId, "PolicyIssued", this::buildPolicyIssuedMessage);
@@ -467,6 +487,36 @@ public class NotificationEventListeners {
         return sb.toString();
     }
 
+    private void upsertCustomerEmailProjection(String msg) {
+        try {
+            JsonNode n = objectMapper.readTree(msg);
+            String customerIdText = text(n, "customer_id");
+            String email = text(n, "email");
+            if (customerIdText == null || email == null || email.isBlank()) {
+                return;
+            }
+            UUID customerId = UUID.fromString(customerIdText);
+            CustomerEmailProjection projection = customerEmailProjectionRepository.findById(customerId)
+                    .orElseGet(CustomerEmailProjection::new);
+            projection.setCustomerId(customerId);
+            projection.setEmail(email);
+            projection.setUpdatedAt(parseTime(text(n, "updated_at")));
+            customerEmailProjectionRepository.save(projection);
+        } catch (Exception e) {
+            throw new RuntimeException("Customer email projection failed", e);
+        }
+    }
+
+    private OffsetDateTime parseTime(String value) {
+        if (value == null || value.isBlank()) {
+            return OffsetDateTime.now();
+        }
+        try {
+            return OffsetDateTime.parse(value);
+        } catch (Exception ignored) {
+            return OffsetDateTime.now();
+        }
+    }
     private String text(JsonNode n, String field) {
         return n.has(field) && !n.get(field).isNull() ? n.get(field).asText() : null;
     }

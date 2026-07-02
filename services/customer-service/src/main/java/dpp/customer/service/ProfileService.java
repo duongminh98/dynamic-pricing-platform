@@ -3,6 +3,7 @@ package dpp.customer.service;
 import dpp.common.api.ErrorCode;
 import dpp.common.security.CustomerId;
 import dpp.common.api.ServiceException;
+import dpp.common.outbox.OutboxPublisher;
 import dpp.customer.dto.AdminCustomerResponse;
 import dpp.customer.dto.BaseProfileRequest;
 import dpp.customer.dto.LineProfileRequest;
@@ -16,17 +17,23 @@ import dpp.customer.repository.AccountRepository;
 import dpp.customer.repository.CustomerProfileRepository;
 import dpp.customer.repository.ProfileVersionRepository;
 import dpp.customer.validator.ProfileValidator;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
 public class ProfileService {
@@ -35,22 +42,40 @@ public class ProfileService {
     private final ProfileVersionRepository versionRepository;
     private final AccountRepository accountRepository;
     private final ProfileValidator profileValidator;
+    private final OutboxPublisher outboxPublisher;
+    private final ObjectMapper objectMapper;
+
+    @Autowired
+    public ProfileService(CustomerProfileRepository profileRepository,
+                          ProfileVersionRepository versionRepository,
+                          AccountRepository accountRepository,
+                          ProfileValidator profileValidator,
+                          OutboxPublisher outboxPublisher) {
+        this.profileRepository = profileRepository;
+        this.versionRepository = versionRepository;
+        this.accountRepository = accountRepository;
+        this.profileValidator = profileValidator;
+        this.outboxPublisher = outboxPublisher;
+        this.objectMapper = new ObjectMapper();
+    }
 
     public ProfileService(CustomerProfileRepository profileRepository,
                           ProfileVersionRepository versionRepository,
                           AccountRepository accountRepository,
                           ProfileValidator profileValidator) {
-        this.profileRepository = profileRepository;
-        this.versionRepository = versionRepository;
-        this.accountRepository = accountRepository;
-        this.profileValidator = profileValidator;
+        this(profileRepository, versionRepository, accountRepository, profileValidator, null);
     }
 
     @Transactional
     public ProfileResponse updateBaseProfile(String keycloakSubject, BaseProfileRequest request) {
+        return updateBaseProfile(keycloakSubject, null, request);
+    }
+
+    @Transactional
+    public ProfileResponse updateBaseProfile(String keycloakSubject, String email, BaseProfileRequest request) {
         profileValidator.validateBase(request);
 
-        Account account = resolveAccount(keycloakSubject);
+        Account account = resolveOrProvisionAccount(keycloakSubject, email);
 
         CustomerProfile profile = profileRepository.findByAccount_AccountId(account.getAccountId());
 
@@ -72,6 +97,7 @@ public class ProfileService {
         profile.setUpdatedAt(OffsetDateTime.now());
 
         profile = profileRepository.save(profile);
+        enqueueProfileUpdated(profile, null);
 
         return getProfile(keycloakSubject);
     }
@@ -96,13 +122,19 @@ public class ProfileService {
         version.setEffectiveAt(OffsetDateTime.now());
 
         version = versionRepository.save(version);
+        enqueueProfileUpdated(profile, version);
 
         return toLineResponse(version);
     }
 
     @Transactional(readOnly = true)
     public ProfileResponse getProfile(String keycloakSubject) {
-        Account account = resolveAccount(keycloakSubject);
+        return getProfile(keycloakSubject, null);
+    }
+
+    @Transactional
+    public ProfileResponse getProfile(String keycloakSubject, String email) {
+        Account account = resolveOrProvisionAccount(keycloakSubject, email);
 
         CustomerProfile profile = profileRepository.findByAccount_AccountId(account.getAccountId());
         if (profile == null) {
@@ -138,6 +170,48 @@ public class ProfileService {
                         "Account not found for subject", null));
     }
 
+    private Account resolveOrProvisionAccount(String keycloakSubject, String email) {
+        return accountRepository.findByKeycloakSubject(keycloakSubject)
+                .map(account -> syncAccountEmail(account, email))
+                .orElseGet(() -> provisionAccount(keycloakSubject, email));
+    }
+
+    @Transactional
+    public Account ensureAccount(String keycloakSubject, String email) {
+        return resolveOrProvisionAccount(keycloakSubject, email);
+    }
+
+    private Account provisionAccount(String keycloakSubject, String email) {
+        if (email == null || email.isBlank()) {
+            throw new ServiceException(ErrorCode.UNAUTHENTICATED, "Email claim is required", null);
+        }
+        Account account = new Account();
+        account.setAccountId(UUID.randomUUID());
+        account.setKeycloakSubject(keycloakSubject);
+        account.setEmail(email);
+        account.setCreatedAt(OffsetDateTime.now());
+        account.setFailedLoginCount(0);
+        try {
+            Account saved = accountRepository.save(account);
+            enqueueCustomerCreated(saved);
+            return saved;
+        } catch (DataIntegrityViolationException e) {
+            return accountRepository.findByKeycloakSubject(keycloakSubject)
+                    .map(existing -> syncAccountEmail(existing, email))
+                    .orElseThrow(() -> new ServiceException(ErrorCode.INTERNAL_ERROR));
+        }
+    }
+
+    private Account syncAccountEmail(Account account, String email) {
+        if (email == null || email.isBlank() || email.equals(account.getEmail())) {
+            return account;
+        }
+        account.setEmail(email);
+        Account saved = accountRepository.save(account);
+        enqueueCustomerEmailUpdated(saved);
+        return saved;
+    }
+
     private ProfileResponse mapBaseToResponse(CustomerProfile profile) {
         ProfileResponse response = new ProfileResponse();
         response.setCustomerId(profile.getCustomerId());
@@ -161,6 +235,85 @@ public class ProfileService {
         resp.setLineAttributes(version.getLineAttributes());
         resp.setEffectiveAt(version.getEffectiveAt());
         return resp;
+    }
+
+    private void enqueueCustomerCreated(Account account) {
+        if (outboxPublisher == null) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("event_type", "CustomerCreated");
+        payload.put("schema_version", 1);
+        payload.put("producer", "customer-service");
+        payload.put("customer_id", CustomerId.fromSubject(account.getKeycloakSubject()).toString());
+        payload.put("account_id", account.getAccountId().toString());
+        payload.put("email", account.getEmail());
+        payload.put("updated_at", OffsetDateTime.now().toString());
+        try {
+            outboxPublisher.enqueue("CustomerCreated", objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to enqueue CustomerCreated", e);
+        }
+    }
+
+    private void enqueueCustomerEmailUpdated(Account account) {
+        if (outboxPublisher == null) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("event_type", "CustomerEmailUpdated");
+        payload.put("schema_version", 1);
+        payload.put("producer", "customer-service");
+        payload.put("customer_id", CustomerId.fromSubject(account.getKeycloakSubject()).toString());
+        payload.put("account_id", account.getAccountId().toString());
+        payload.put("email", account.getEmail());
+        payload.put("updated_at", OffsetDateTime.now().toString());
+        try {
+            outboxPublisher.enqueue("CustomerEmailUpdated", objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to enqueue CustomerEmailUpdated", e);
+        }
+    }
+
+    private void enqueueProfileUpdated(CustomerProfile profile, ProfileVersion lineVersion) {
+        if (outboxPublisher == null) {
+            return;
+        }
+        Map<String, Object> common = new LinkedHashMap<>();
+        common.put("age", profile.getAge());
+        common.put("gender", profile.getGender());
+        common.put("province", profile.getProvince());
+        common.put("region", profile.getRegion());
+        common.put("urban_tier", profile.getUrbanTier());
+        common.put("occupation", profile.getOccupation());
+        common.put("income_level", profile.getIncomeLevel());
+        common.put("monthly_income_vnd", profile.getMonthlyIncomeVnd());
+        common.put("marital_status", profile.getMaritalStatus());
+
+        Map<String, Object> lineAttrs = new LinkedHashMap<>();
+        List<ProfileVersion> latestPerLine = versionRepository.findLatestPerLine(profile.getCustomerId());
+        for (ProfileVersion version : latestPerLine) {
+            lineAttrs.put(version.getLine(), version.getLineAttributes());
+        }
+        if (lineVersion != null) {
+            lineAttrs.put(lineVersion.getLine(), lineVersion.getLineAttributes());
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("event_type", "CustomerProfileUpdated");
+        payload.put("schema_version", 1);
+        payload.put("producer", "customer-service");
+        payload.put("customer_id", profile.getCustomerId().toString());
+        payload.put("email", profile.getAccount().getEmail());
+        payload.put("profile_version", Math.max(1, latestPerLine.size() + (lineVersion == null ? 0 : 1)));
+        payload.put("effective_at", OffsetDateTime.now().toString());
+        payload.put("common_risk_attributes", common);
+        payload.put("line_risk_attributes", lineAttrs);
+        try {
+            outboxPublisher.enqueue("CustomerProfileUpdated", objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to enqueue CustomerProfileUpdated", e);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -227,4 +380,5 @@ public class ProfileService {
         return resp;
     }
 }
+
 

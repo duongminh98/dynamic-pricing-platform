@@ -4,8 +4,8 @@ import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.notification.dto.NotificationResponse;
 import dpp.notification.entity.*;
+import dpp.notification.repository.CustomerEmailProjectionRepository;
 import dpp.notification.repository.NotificationRepository;
-import dpp.notification.client.CustomerClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,16 +35,16 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final EmailSender emailSender;
-    private final CustomerClient customerClient;
+    private final CustomerEmailProjectionRepository customerEmailProjectionRepository;
     private final boolean emailEnabled;
 
     public NotificationService(NotificationRepository notificationRepository,
                                EmailSender emailSender,
-                               CustomerClient customerClient,
+                               CustomerEmailProjectionRepository customerEmailProjectionRepository,
                                @Value("${notification.email.enabled:false}") boolean emailEnabled) {
         this.notificationRepository = notificationRepository;
         this.emailSender = emailSender;
-        this.customerClient = customerClient;
+        this.customerEmailProjectionRepository = customerEmailProjectionRepository;
         this.emailEnabled = emailEnabled;
     }
 
@@ -111,17 +111,15 @@ public class NotificationService {
         }
     }
 
-    /** Single delivery attempt. In-app always succeeds; email fetches address + sends. */
+    /** Single delivery attempt. In-app always succeeds; email uses the local customer email projection. */
     private boolean sendOnce(Notification n) {
         if (n.getChannel() == NotificationChannel.in_app) {
             return true;
         }
-        if (n.getChannel() == NotificationChannel.email && emailSender != null && customerClient != null) {
-            String email = customerClient.getEmail(n.getCustomerId());
-            if (email == null) {
-                return false;
-            }
-            return emailSender.send(email, subjectFor(n.getType()), n.getMessage());
+        if (n.getChannel() == NotificationChannel.email && emailSender != null && customerEmailProjectionRepository != null) {
+            return customerEmailProjectionRepository.findById(n.getCustomerId())
+                    .map(projection -> emailSender.send(projection.getEmail(), subjectFor(n.getType()), n.getMessage()))
+                    .orElse(false);
         }
         return false;
     }
@@ -196,3 +194,5 @@ public class NotificationService {
                 .build();
     }
 }
+
+

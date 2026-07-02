@@ -14,7 +14,7 @@ class InvoiceVoidedNotificationTest {
     @Test
     void invoiceVoidedCreatesInAppNotificationWithDetails() {
         NotificationService svc = mock(NotificationService.class);
-        NotificationEventListeners l = new NotificationEventListeners(svc);
+        NotificationEventListeners l = new NotificationEventListeners(svc, mock(dpp.notification.repository.CustomerEmailProjectionRepository.class));
 
         UUID customerId = UUID.randomUUID();
         UUID invoiceId = UUID.randomUUID();

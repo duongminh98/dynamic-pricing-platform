@@ -72,4 +72,13 @@ public class RabbitConfig {
 
     @Bean public Queue invoiceVoidedQueue() { return quorumQueue("invoice.voided.queue","InvoiceVoided"); }
     @Bean public Binding invoiceVoidedBinding() { return BindingBuilder.bind(invoiceVoidedQueue()).to(eventsExchange()).with("InvoiceVoided"); }
+    @Bean public Queue customerCreatedNotificationQueue() { return quorumQueue("customer.created.notification.queue","CustomerCreated"); }
+    @Bean public Binding customerCreatedNotificationBinding() { return BindingBuilder.bind(customerCreatedNotificationQueue()).to(eventsExchange()).with("CustomerCreated"); }
+
+    @Bean public Queue customerEmailUpdatedNotificationQueue() { return quorumQueue("customer.email.updated.notification.queue","CustomerEmailUpdated"); }
+    @Bean public Binding customerEmailUpdatedNotificationBinding() { return BindingBuilder.bind(customerEmailUpdatedNotificationQueue()).to(eventsExchange()).with("CustomerEmailUpdated"); }
+
+    @Bean public Queue customerProfileUpdatedNotificationQueue() { return quorumQueue("customer.profile.updated.notification.queue","CustomerProfileUpdated"); }
+    @Bean public Binding customerProfileUpdatedNotificationBinding() { return BindingBuilder.bind(customerProfileUpdatedNotificationQueue()).to(eventsExchange()).with("CustomerProfileUpdated"); }
 }
+

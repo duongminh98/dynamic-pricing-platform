@@ -20,7 +20,7 @@ class OrderNotificationMessageTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private NotificationEventListeners listeners(NotificationService svc) {
-        return new NotificationEventListeners(svc);
+        return new NotificationEventListeners(svc, mock(dpp.notification.repository.CustomerEmailProjectionRepository.class));
     }
 
     private JsonNode payload(String json) throws Exception {
@@ -113,7 +113,7 @@ class OrderNotificationMessageTest {
 
     @Test
     void orderSubmittedDoesNotSendEmail() {
-        // OrderSubmitted is NOT in EMAIL_EVENT_TYPES — verify by checking the set
+        // OrderSubmitted is NOT in EMAIL_EVENT_TYPES â€” verify by checking the set
         // does not contain it. The NotificationService.resolveChannels method
         // only adds email channel for types in EMAIL_EVENT_TYPES.
         // This is verified implicitly: when email is enabled, OrderSubmitted
