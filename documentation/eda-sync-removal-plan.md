@@ -142,29 +142,39 @@ Remove claims-service synchronous policy and exposure-segment reads from order-s
 - `claims-service -> order-service /internal/policies/{policyId}/exposure-segments`
 - Fallback call: `claims-service -> order-service /internal/orders/by-policy/{policyId}`
 
-### Work
+### Status
 
-- Define and emit rich policy-domain events from order-service, for example:
+Implemented pending final operational rollout/backfill strategy.
+
+### Event-driven replacement
+
+- Claims service consumes policy-domain events from `platform.events`:
   - `PolicyIssued`
   - `PolicyRenewed`
   - `PolicyCancelled`
   - `EndorsementApplied`
-  - `PolicyExposureSegmentsChanged`
-- Build local claims projections for:
-  - policy ownership/status
-  - exposure segments
-  - optional quote linkage
-- Move FNOL validation and payout-cap reads to local projection tables.
-- Replay/backfill historical data for active policies.
+- Claims service stores local read models:
+  - `claim_policy_projection`
+  - `claim_exposure_segment_projection`
+- FNOL ownership/status validation uses `claim_policy_projection`.
+- FNOL segment resolution and payout cap checks use `claim_exposure_segment_projection`.
+- `ClaimSettled` quote linkage uses the cached claim `quote_id` and local policy projection line, not an order-service HTTP fallback.
+
+### Verification requirements
+
+- Unit/property tests for claims pass.
+- Grep has no claims-service HTTP `RestTemplate` order client or `ORDER_BASE_URL` dependency.
+- Docker live event flow publishes `PolicyIssued`, verifies both projection tables, then creates a claim through claims-service using the local projection.
+- Claims-service logs show no order-service internal policy/exposure/order lookup during FNOL or settlement.
 
 ### Risk
 
-- Medium.
+Medium.
 
 ### Notes
 
-- This removes one of the heaviest synchronous cross-service runtime dependencies.
-- Replay strategy matters because claims validation depends on complete segment history.
+- Historical active policies still need replay/backfill before production cutover.
+- Internal order endpoints can remain temporarily for admin/backfill tooling, but claims runtime no longer depends on them.
 
 ## Phase 4 - Replace Invoice Void Sync Calls with Events
 

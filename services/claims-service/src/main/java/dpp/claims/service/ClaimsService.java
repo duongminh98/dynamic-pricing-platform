@@ -3,6 +3,8 @@ package dpp.claims.service;
 import dpp.claims.client.OrderClient;
 import dpp.claims.dto.*;
 import dpp.claims.entity.*;
+import dpp.claims.repository.ClaimExposureSegmentProjectionRepository;
+import dpp.claims.repository.ClaimPolicyProjectionRepository;
 import dpp.claims.repository.ClaimRepository;
 import dpp.common.dto.PageResponse;
 import dpp.common.security.CustomerId;
@@ -14,6 +16,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,28 +35,44 @@ public class ClaimsService {
     private static final Logger log = LoggerFactory.getLogger(ClaimsService.class);
 
     private final ClaimRepository claimRepository;
-    private final OrderClient orderClient;
+    private final ClaimPolicyProjectionRepository policyProjectionRepository;
+    private final ClaimExposureSegmentProjectionRepository segmentProjectionRepository;
+    private final OrderClient compatibilityProjectionReader;
     private final OutboxPublisher outboxPublisher;
     private final ObjectMapper objectMapper;
 
-    public ClaimsService(ClaimRepository claimRepository, OrderClient orderClient, OutboxPublisher outboxPublisher) {
+    @Autowired
+    public ClaimsService(ClaimRepository claimRepository,
+                         ClaimPolicyProjectionRepository policyProjectionRepository,
+                         ClaimExposureSegmentProjectionRepository segmentProjectionRepository,
+                         OutboxPublisher outboxPublisher) {
         this.claimRepository = claimRepository;
-        this.orderClient = orderClient;
+        this.policyProjectionRepository = policyProjectionRepository;
+        this.segmentProjectionRepository = segmentProjectionRepository;
+        this.compatibilityProjectionReader = null;
         this.outboxPublisher = outboxPublisher;
         this.objectMapper = new ObjectMapper();
     }
 
+    public ClaimsService(ClaimRepository claimRepository, OrderClient compatibilityProjectionReader, OutboxPublisher outboxPublisher) {
+        this.claimRepository = claimRepository;
+        this.policyProjectionRepository = null;
+        this.segmentProjectionRepository = null;
+        this.compatibilityProjectionReader = compatibilityProjectionReader;
+        this.outboxPublisher = outboxPublisher;
+        this.objectMapper = new ObjectMapper();
+    }
     @Transactional
     public ClaimResponse fnol(String keycloakSubject, FnolRequest request) {
         UUID policyId = request.getPolicyId();
-        Map<String, Object> policy = orderClient.getPolicy(policyId);
-        UUID policyOwner = UUID.fromString(String.valueOf(policy.get("customer_id")));
+        ClaimPolicyProjection policy = findPolicyProjection(policyId);
+        UUID policyOwner = policy.getCustomerId();
         UUID customerId = CustomerId.fromSubject(keycloakSubject);
         if (!policyOwner.equals(customerId)) {
             throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null);
         }
 
-        String policyStatus = String.valueOf(policy.get("status"));
+        String policyStatus = policy.getStatus();
         if (!"active".equalsIgnoreCase(policyStatus)) {
             throw new ServiceException(ErrorCode.POLICY_NOT_MODIFIABLE);
         }
@@ -64,20 +83,10 @@ public class ClaimsService {
             throw new ServiceException(ErrorCode.BAD_REQUEST, "Report date before occurrence", null);
         }
 
-        List<Map<String, Object>> segments = orderClient.getExposureSegments(policyId);
+        List<ClaimExposureSegmentProjection> segments = findSegmentProjections(policyId);
         int segmentSeq = findSegmentSeq(segments, occurrence);
 
-        // Cache quote_id now (order is reachable during FNOL) so ClaimSettled can emit
-        // it later without a settle-time order call that could fail transiently.
-        UUID quoteId = null;
-        try {
-            Map<String, Object> orderInfo = orderClient.getQuoteIdByPolicy(policyId);
-            if (orderInfo != null && orderInfo.get("quote_id") != null) {
-                quoteId = UUID.fromString(String.valueOf(orderInfo.get("quote_id")));
-            }
-        } catch (Exception e) {
-            log.warn("Could not resolve quote_id at FNOL for policy {}: {}", policyId, e.getMessage());
-        }
+        UUID quoteId = policy.getQuoteId();
 
         Claim claim = new Claim();
         claim.setClaimId(UUID.randomUUID());
@@ -101,19 +110,19 @@ public class ClaimsService {
         return toResponse(claim);
     }
 
-    private int findSegmentSeq(List<Map<String, Object>> segments, OffsetDateTime occurrence) {
+    private int findSegmentSeq(List<ClaimExposureSegmentProjection> segments, OffsetDateTime occurrence) {
         int last = segments.size() - 1;
         for (int i = 0; i < segments.size(); i++) {
-            Map<String, Object> seg = segments.get(i);
-            OffsetDateTime start = OffsetDateTime.parse(String.valueOf(seg.get("segment_start")));
-            OffsetDateTime end = OffsetDateTime.parse(String.valueOf(seg.get("segment_end")));
-            if (i == last || end == null) {
+            ClaimExposureSegmentProjection seg = segments.get(i);
+            OffsetDateTime start = seg.getSegmentStart();
+            OffsetDateTime end = seg.getSegmentEnd();
+            if (i == last) {
                 if (!occurrence.isBefore(start) && !occurrence.isAfter(end)) {
-                    return ((Number) seg.get("exposure_segment_seq")).intValue();
+                    return seg.getExposureSegmentSeq();
                 }
             } else {
                 if (!occurrence.isBefore(start) && occurrence.isBefore(end)) {
-                    return ((Number) seg.get("exposure_segment_seq")).intValue();
+                    return seg.getExposureSegmentSeq();
                 }
             }
         }
@@ -121,15 +130,8 @@ public class ClaimsService {
     }
 
     private long payoutCapForClaim(Claim claim) {
-        List<Map<String, Object>> segments = orderClient.getExposureSegments(claim.getPolicyId());
-        for (Map<String, Object> seg : segments) {
-            if (((Number) seg.get("exposure_segment_seq")).intValue() == claim.getExposureSegmentSeq()) {
-                long coverage = ((Number) seg.get("coverage_amount_vnd")).longValue();
-                long deductible = ((Number) seg.get("deductible_vnd")).longValue();
-                return Math.max(0L, coverage - deductible);
-            }
-        }
-        throw new ServiceException(ErrorCode.OCCURRENCE_OUT_OF_COVERAGE);
+        ClaimExposureSegmentProjection segment = findSegmentProjection(claim.getPolicyId(), claim.getExposureSegmentSeq());
+        return Math.max(0L, segment.getCoverageAmountVnd() - segment.getDeductibleVnd());
     }
 
     @Transactional
@@ -321,28 +323,21 @@ public class ClaimsService {
     }
 
     private void enqueueClaimSettled(Claim claim) {
-        // Prefer the quote_id cached at FNOL; only call order-service as a fallback
-        // for legacy claims created before quote_id caching.
         String quoteId = claim.getQuoteId() != null ? claim.getQuoteId().toString() : null;
-        String line = null;
-        if (quoteId == null) {
-            try {
-                Map<String, Object> orderInfo = orderClient.getQuoteIdByPolicy(claim.getPolicyId());
-                if (orderInfo != null) {
-                    quoteId = orderInfo.get("quote_id") != null ? String.valueOf(orderInfo.get("quote_id")) : null;
-                    line = orderInfo.get("line") != null ? String.valueOf(orderInfo.get("line")) : null;
-                }
-            } catch (Exception e) {
-                log.warn("ClaimSettled for claim {} emitted without quote_id (order lookup failed): {}",
-                        claim.getClaimId(), e.getMessage());
-            }
-        }
+        String line = findPolicyProjectionOrNull(claim.getPolicyId()) != null ? findPolicyProjectionOrNull(claim.getPolicyId()).getLine() : null;
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("claim_id", claim.getClaimId().toString());
         payload.put("policy_id", claim.getPolicyId().toString());
+        payload.put("customer_id", claim.getCustomerId().toString());
         payload.put("quote_id", quoteId);
         payload.put("line", line);
+        payload.put("exposure_segment_seq", claim.getExposureSegmentSeq());
+        payload.put("loss_type", claim.getLossType());
+        payload.put("occurrence_date", claim.getOccurrenceDate().toString());
+        payload.put("reported_at", claim.getReportDate().toString());
+        payload.put("incurred_amount_vnd", claim.getIncurredAmount());
         payload.put("paid_amount_vnd", claim.getPaidAmount());
+        payload.put("claim_status", claim.getClaimStatus().name());
         payload.put("settled_at", claim.getPaidAt() != null ? claim.getPaidAt().toString() : OffsetDateTime.now().toString());
         try {
             outboxPublisher.enqueue("ClaimSettled", objectMapper.writeValueAsString(payload));
@@ -351,6 +346,64 @@ public class ClaimsService {
         }
     }
 
+    private ClaimPolicyProjection findPolicyProjection(UUID policyId) {
+        if (policyProjectionRepository != null) {
+            return policyProjectionRepository.findById(policyId)
+                    .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Policy not found", null));
+        }
+        Map<String, Object> policy = compatibilityProjectionReader.getPolicy(policyId);
+        ClaimPolicyProjection projection = new ClaimPolicyProjection();
+        projection.setPolicyId(policyId);
+        projection.setCustomerId(UUID.fromString(String.valueOf(policy.get("customer_id"))));
+        projection.setStatus(String.valueOf(policy.get("status")));
+        if (policy.get("quote_id") != null) {
+            projection.setQuoteId(UUID.fromString(String.valueOf(policy.get("quote_id"))));
+        }
+        if (policy.get("line") != null) {
+            projection.setLine(String.valueOf(policy.get("line")));
+        }
+        return projection;
+    }
+
+    private ClaimPolicyProjection findPolicyProjectionOrNull(UUID policyId) {
+        try {
+            return findPolicyProjection(policyId);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private List<ClaimExposureSegmentProjection> findSegmentProjections(UUID policyId) {
+        if (segmentProjectionRepository != null) {
+            return segmentProjectionRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
+        }
+        return compatibilityProjectionReader.getExposureSegments(policyId).stream()
+                .map(segment -> toProjection(policyId, segment))
+                .toList();
+    }
+
+    private ClaimExposureSegmentProjection findSegmentProjection(UUID policyId, int segmentSeq) {
+        if (segmentProjectionRepository != null) {
+            return segmentProjectionRepository.findByPolicyIdAndExposureSegmentSeq(policyId, segmentSeq)
+                    .orElseThrow(() -> new ServiceException(ErrorCode.OCCURRENCE_OUT_OF_COVERAGE));
+        }
+        return compatibilityProjectionReader.getExposureSegments(policyId).stream()
+                .filter(segment -> ((Number) segment.get("exposure_segment_seq")).intValue() == segmentSeq)
+                .findFirst()
+                .map(segment -> toProjection(policyId, segment))
+                .orElseThrow(() -> new ServiceException(ErrorCode.OCCURRENCE_OUT_OF_COVERAGE));
+    }
+
+    private ClaimExposureSegmentProjection toProjection(UUID policyId, Map<String, Object> segment) {
+        ClaimExposureSegmentProjection projection = new ClaimExposureSegmentProjection();
+        projection.setPolicyId(policyId);
+        projection.setExposureSegmentSeq(((Number) segment.get("exposure_segment_seq")).intValue());
+        projection.setSegmentStart(OffsetDateTime.parse(String.valueOf(segment.get("segment_start"))));
+        projection.setSegmentEnd(OffsetDateTime.parse(String.valueOf(segment.get("segment_end"))));
+        projection.setCoverageAmountVnd(((Number) segment.get("coverage_amount_vnd")).longValue());
+        projection.setDeductibleVnd(((Number) segment.get("deductible_vnd")).longValue());
+        return projection;
+    }
     private ClaimResponse toResponse(Claim claim) {
         ClaimResponse resp = new ClaimResponse();
         resp.setClaimId(claim.getClaimId());

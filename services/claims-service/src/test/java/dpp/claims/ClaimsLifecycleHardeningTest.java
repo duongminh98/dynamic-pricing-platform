@@ -110,7 +110,7 @@ class ClaimsLifecycleHardeningTest {
         return c;
     }
 
-    // ── T1: FNOL ownership hidden ──
+    // â”€â”€ T1: FNOL ownership hidden â”€â”€
     @Test
     void t1_fnolOwnershipHiddenReturns404() {
         when(orderClient.getPolicy(policyId)).thenReturn(activePolicy(otherCustomerId));
@@ -120,7 +120,7 @@ class ClaimsLifecycleHardeningTest {
         verify(repo, never()).save(any());
     }
 
-    // ── T2: Get claim ownership hidden ──
+    // â”€â”€ T2: Get claim ownership hidden â”€â”€
     @Test
     void t2_getClaimOwnershipHiddenReturns404() {
         Claim claim = pendingClaim();
@@ -132,7 +132,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
-    // ── T3: FNOL policy not active ──
+    // â”€â”€ T3: FNOL policy not active â”€â”€
     @Test
     void t3_fnolPolicyNotActiveReturns409() {
         when(orderClient.getPolicy(policyId)).thenReturn(policyWithStatus(customerId, "pending_payment"));
@@ -142,7 +142,7 @@ class ClaimsLifecycleHardeningTest {
         verify(repo, never()).save(any());
     }
 
-    // ── T4: FNOL occurrence outside coverage ──
+    // â”€â”€ T4: FNOL occurrence outside coverage â”€â”€
     @Test
     void t4_fnolOccurrenceOutsideCoverageReturns400() {
         when(orderClient.getPolicy(policyId)).thenReturn(activePolicy(customerId));
@@ -153,7 +153,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(ErrorCode.OCCURRENCE_OUT_OF_COVERAGE, ex.getErrorCode());
     }
 
-    // ── T5: FNOL claim submitted notification ──
+    // â”€â”€ T5: FNOL claim submitted notification â”€â”€
     @Test
     void t5_fnolEmitsClaimSubmittedEvent() throws Exception {
         when(orderClient.getPolicy(policyId)).thenReturn(activePolicy(customerId));
@@ -173,7 +173,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(12_000_000L, payload.get("estimated_cost").asLong());
     }
 
-    // ── T6: Approve per-claim cap ──
+    // â”€â”€ T6: Approve per-claim cap â”€â”€
     @Test
     void t6_approvePerClaimCapExceeded() {
         Claim claim = pendingClaim();
@@ -189,7 +189,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(ErrorCode.PAID_AMOUNT_EXCEEDS_REMAINING_COVERAGE, ex.getErrorCode());
     }
 
-    // ── T7: Approve aggregate cap exceeded ──
+    // â”€â”€ T7: Approve aggregate cap exceeded â”€â”€
     @Test
     void t7_approveAggregateCapExceeded() {
         Claim claim = pendingClaim();
@@ -207,7 +207,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(ErrorCode.PAID_AMOUNT_EXCEEDS_REMAINING_COVERAGE, ex.getErrorCode());
     }
 
-    // ── T8: Approve within aggregate cap ──
+    // â”€â”€ T8: Approve within aggregate cap â”€â”€
     @Test
     void t8_approveWithinAggregateCapAccepted() {
         Claim claim = pendingClaim();
@@ -229,7 +229,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals("Approved after review", resp.getAdminNote());
     }
 
-    // ── T9: Reject requires reason ──
+    // â”€â”€ T9: Reject requires reason â”€â”€
     @Test
     void t9_rejectWithoutReasonFailsValidation() {
         Claim claim = pendingClaim();
@@ -242,7 +242,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
     }
 
-    // ── T10: Reject stores admin note + notification ──
+    // â”€â”€ T10: Reject stores admin note + notification â”€â”€
     @Test
     void t10_rejectStoresAdminNoteAndEmitsNotification() throws Exception {
         Claim claim = pendingClaim();
@@ -265,7 +265,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals("The loss is not covered by policy terms", payload.get("admin_note").asText());
     }
 
-    // ── T11: Misrepresentation stores reasons + adjusts paid ──
+    // â”€â”€ T11: Misrepresentation stores reasons + adjusts paid â”€â”€
     @Test
     void t11_misrepresentationProportionalStoresReasonsAndAdjustsPaid() {
         Claim claim = approvedClaim(8_000_000L);
@@ -288,7 +288,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals("Customer reported personal use, but evidence shows commercial use", resp.getAdminNote());
     }
 
-    // ── T12: Customer list pagination ──
+    // â”€â”€ T12: Customer list pagination â”€â”€
     @Test
     void t12_customerListReturnsPageResponse() {
         Claim c1 = pendingClaim();
@@ -304,7 +304,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(1, resp.getTotalPages());
     }
 
-    // ── T13: Admin list pagination + filters ──
+    // â”€â”€ T13: Admin list pagination + filters â”€â”€
     @Test
     void t13_adminListWithFiltersReturnsPageResponse() {
         Claim c1 = pendingClaim();
@@ -318,7 +318,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(1, resp.getTotalElements());
     }
 
-    // ── T14: ClaimStatusChanged detailed notification for approve ──
+    // â”€â”€ T14: ClaimStatusChanged detailed notification for approve â”€â”€
     @Test
     void t14_approveEmitsDetailedNotification() throws Exception {
         Claim claim = pendingClaim();
@@ -346,7 +346,7 @@ class ClaimsLifecycleHardeningTest {
         assertEquals(customerId.toString(), payload.get("customer_id").asText());
     }
 
-    // ── T15: Approve without payment_reference → 400 ──
+    // â”€â”€ T15: Approve without payment_reference â†’ 400 â”€â”€
     @Test
     void t15_approveWithoutPaymentReferenceFails() {
         Claim claim = pendingClaim();
@@ -358,20 +358,21 @@ class ClaimsLifecycleHardeningTest {
         ApproveClaimRequest req = new ApproveClaimRequest();
         req.setIncurredAmount(10_000_000L);
         req.setPaidAmount(8_000_000L);
-        // paymentReference intentionally null — @NotBlank validation enforced at controller layer
+        // paymentReference intentionally null â€” @NotBlank validation enforced at controller layer
         // Service-level guard for defensive coding:
         assertNotNull(req);
     }
 
-    // ── T16: Approve emits ClaimSettled with quote_id + paid_amount_vnd ──
+    // â”€â”€ T16: Approve emits ClaimSettled with quote_id + paid_amount_vnd â”€â”€
     @Test
     void t16_approveEmitsClaimSettledWithQuoteId() throws Exception {
         Claim claim = pendingClaim();
         UUID claimId = claim.getClaimId();
         UUID quoteId = UUID.randomUUID();
         when(repo.findById(claimId)).thenReturn(Optional.of(claim));
+        claim.setQuoteId(quoteId);
         when(orderClient.getExposureSegments(policyId)).thenReturn(List.of(segment(0, 100_000_000, 0)));
-        when(orderClient.getQuoteIdByPolicy(policyId)).thenReturn(Map.of("quote_id", quoteId, "line", "car"));
+        when(orderClient.getPolicy(policyId)).thenReturn(Map.of("customer_id", customerId.toString(), "status", "active", "quote_id", quoteId.toString(), "line", "car"));
         when(repo.save(any(Claim.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ApproveClaimRequest req = new ApproveClaimRequest();
@@ -385,6 +386,7 @@ class ClaimsLifecycleHardeningTest {
         JsonNode payload = om.readTree(eventCaptor.getValue());
         assertEquals(claimId.toString(), payload.get("claim_id").asText());
         assertEquals(policyId.toString(), payload.get("policy_id").asText());
+        assertEquals(customerId.toString(), payload.get("customer_id").asText());
         assertEquals(quoteId.toString(), payload.get("quote_id").asText());
         assertEquals("car", payload.get("line").asText());
         assertEquals(8_000_000L, payload.get("paid_amount_vnd").asLong());
@@ -412,6 +414,7 @@ class ClaimsLifecycleHardeningTest {
         verify(outbox, atLeast(1)).enqueue(eq("ClaimSettled"), eventCaptor.capture());
         JsonNode payload = om.readTree(eventCaptor.getValue());
         assertEquals(cachedQuoteId.toString(), payload.get("quote_id").asText());
+        assertEquals(customerId.toString(), payload.get("customer_id").asText());
         // settle must NOT call order-service when quote_id is already cached on the claim
         verify(orderClient, never()).getQuoteIdByPolicy(any());
     }

@@ -426,8 +426,6 @@ services:
       <<: *java-env
       CLAIMS_DB_HOST: postgres-claims
       CLAIMS_DB_PORT: 5432
-      ORDER_BASE_URL: http://order-service-1:8080
-      PRODUCT_BASE_URL: http://product-service-1:8080
     expose:
       - "8080"
     depends_on:

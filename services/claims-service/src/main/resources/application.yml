@@ -10,11 +10,6 @@ spring:
     password: ${POSTGRES_PASSWORD:platform_password_dev_only}
     hikari:
       maximum-pool-size: 10
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8080/realms/dynamic-pricing/protocol/openid-connect/certs}
   jpa:
     hibernate:
       ddl-auto: none
@@ -38,11 +33,6 @@ management:
     health:
       show-details: when-authorized
 
-dpp:
-  order:
-    base-url: ${ORDER_BASE_URL:http://localhost:8083}
-  product:
-    base-url: ${PRODUCT_BASE_URL:http://localhost:8082}
 
 springdoc:
   swagger-ui:
