@@ -594,11 +594,12 @@ def edge_tier(cfg: dict) -> str:
                 - {{name: kong-config, mountPath: /etc/kong/kong.yml, subPath: kong.yml}}
                 readinessProbe:
                   httpGet: {{path: /status, port: 8100}}
-                  initialDelaySeconds: 15
+                  initialDelaySeconds: 20
                   periodSeconds: 10
+                  timeoutSeconds: 5
                 resources:
-                  requests: {{cpu: 250m, memory: 512Mi}}
-                  limits: {{memory: 1Gi}}
+                  requests: {{cpu: 250m, memory: 768Mi}}
+                  limits: {{memory: 2Gi}}
               volumes:
               - name: kong-config
                 configMap: {{name: kong-prod-config}}
