@@ -469,11 +469,24 @@ def keycloak_deployment(cfg: dict) -> str:
               - name: realm
                 configMap: {{name: keycloak-realm}}
         ---
+        apiVersion: cloud.google.com/v1
+        kind: BackendConfig
+        metadata:
+          name: keycloak-backendconfig
+          namespace: dpp
+        spec:
+          healthCheck:
+            type: HTTP
+            port: 8080
+            requestPath: /realms/dynamic-pricing
+        ---
         apiVersion: v1
         kind: Service
         metadata:
           name: keycloak
           namespace: dpp
+          annotations:
+            cloud.google.com/backend-config: '{{"default": "keycloak-backendconfig"}}'
         spec:
           type: ClusterIP
           selector: {{app: keycloak}}
@@ -707,7 +720,7 @@ def edge_tier(cfg: dict) -> str:
         spec:
           podSelector:
             matchExpressions:
-            - {{key: app, operator: In, values: [kong, frontend]}}
+            - {{key: app, operator: In, values: [kong, frontend, keycloak]}}
           policyTypes: [Ingress]
           ingress:
           - from:

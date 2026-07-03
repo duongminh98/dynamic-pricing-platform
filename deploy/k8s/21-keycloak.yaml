@@ -62,11 +62,24 @@ spec:
       - name: realm
         configMap: {name: keycloak-realm}
 ---
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: keycloak-backendconfig
+  namespace: dpp
+spec:
+  healthCheck:
+    type: HTTP
+    port: 8080
+    requestPath: /realms/dynamic-pricing
+---
 apiVersion: v1
 kind: Service
 metadata:
   name: keycloak
   namespace: dpp
+  annotations:
+    cloud.google.com/backend-config: '{"default": "keycloak-backendconfig"}'
 spec:
   type: ClusterIP
   selector: {app: keycloak}
