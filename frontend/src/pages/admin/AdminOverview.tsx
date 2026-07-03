@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi, vndLabel, dateTime } from '../../lib/format';
-import { LINE_LABEL, LINE_ICON, LINES, Line } from '../../lib/domain';
+import { LINE_LABEL, LINE_ICON, Line } from '../../lib/domain';
 import { Loading, EmptyState, StatusPill } from '../../lib/ui';
 
 interface ReviewItem {
@@ -8,7 +8,6 @@ interface ReviewItem {
   final_premium_vnd: number; status: string; line: string; created_at: string;
 }
 interface Page<T> { content: T[]; total_elements: number; }
-interface Drift { line: string; needs_recalibration: boolean; }
 
 export default function AdminOverview() {
   const nav = useNavigate();
@@ -57,8 +56,6 @@ export default function AdminOverview() {
           </div>
         )}
       </div>
-
-      <DriftStrip />
     </div>
   );
 }
@@ -75,31 +72,3 @@ function StatCard({ label, value, to, ico }: { label: string; value?: number; to
   );
 }
 
-function DriftStrip() {
-  return (
-    <div className="card stack">
-      <h3 style={{ fontSize: 'var(--step-1)' }}>Model Drift Status</h3>
-      <div className="cards-grid">
-        {LINES.map((l) => <DriftCell key={l} line={l} />)}
-      </div>
-      <Link to="/admin/models" className="btn-link">Chi tiết quản trị mô hình →</Link>
-    </div>
-  );
-}
-
-function DriftCell({ line }: { line: Line }) {
-  const { data } = useApi<Drift | Drift[]>(`/pricing/drift?line=${line}`, [line]);
-  // The endpoint returns an array of all lines (ignoring ?line=); pick ours.
-  const drift = Array.isArray(data) ? data.find((d) => d.line === line) ?? null : data;
-  const needs = drift?.needs_recalibration;
-  return (
-    <div className="panel row-between">
-      <span>{LINE_ICON[line]} {LINE_LABEL[line]}</span>
-      {drift ? (
-        <span className={'pill ' + (needs ? 'pill-bad' : 'pill-ok')}>{needs ? 'needs recalibration' : 'stable'}</span>
-      ) : (
-        <span className="pill pill-muted">—</span>
-      )}
-    </div>
-  );
-}

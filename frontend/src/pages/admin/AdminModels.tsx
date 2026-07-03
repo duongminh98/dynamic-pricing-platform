@@ -1,8 +1,7 @@
-import { useState } from 'react';
 import { ApiError } from '../../api/client';
 import { useApi, useMutation, dateTime } from '../../lib/format';
 import { LINES, LINE_LABEL, Line } from '../../lib/domain';
-import { Loading, ErrorBanner, EmptyState, Spinner, Alert, useToast } from '../../lib/ui';
+import { Loading, ErrorBanner, EmptyState, Spinner, useToast } from '../../lib/ui';
 
 interface ModelVersion {
   model_version_id: string; line: string; algorithm: string;
@@ -15,7 +14,7 @@ interface DriftMetric { value: number; threshold: number; needs_recalibration: b
 interface Drift { line: string; needs_recalibration: boolean; metrics: Record<string, DriftMetric>; }
 
 export default function AdminModels() {
-  const [line, setLine] = useState<Line>('car');
+  const line: Line = 'car';
   return (
     <div className="stack">
       <div>
@@ -23,70 +22,11 @@ export default function AdminModels() {
         <h2>Định giá & giám sát mô hình</h2>
       </div>
 
-      <div className="tabs">
-        {LINES.map((l) => (
-          <button key={l} className={'tab' + (line === l ? ' active' : '')} onClick={() => setLine(l)}>{LINE_LABEL[l]}</button>
-        ))}
-      </div>
-
       <ModelsPanel line={line} />
-      <ReportsPanel line={line} />
-      <DriftPanel line={line} />
     </div>
   );
 }
 
-/* ---------- drift (3 metrics) ---------- */
-// The drift endpoint currently returns an array of all lines (ignoring ?line=),
-// though the contract describes a single object. Normalize both shapes and pick
-// the requested line so a shape change on either side can't crash the page.
-function pickDrift(data: Drift | Drift[] | null, line: Line): Drift | null {
-  if (!data) return null;
-  if (Array.isArray(data)) return data.find((d) => d.line === line) ?? null;
-  return data;
-}
-
-function DriftPanel({ line }: { line: Line }) {
-  const { data, loading } = useApi<Drift | Drift[]>(`/pricing/drift?line=${line}`, [line]);
-  const drift = pickDrift(data, line);
-  const metrics = drift?.metrics ?? {};
-  return (
-    <div className="card stack">
-      <div className="row-between">
-        <h3 style={{ fontSize: 'var(--step-1)' }}>Model Drift</h3>
-        {drift && (drift.needs_recalibration ? <span className="pill pill-bad">needs recalibration</span> : <span className="pill pill-ok">stable</span>)}
-      </div>
-      {loading && <Loading />}
-      {drift && Object.keys(metrics).length > 0 && (
-        <div className="cards-grid">
-          {Object.entries(metrics).map(([k, m]) => (
-            <div className="panel stack" key={k} style={{ gap: 'var(--s2)' }}>
-              <div className="row-between">
-                <span className="stat-l">{METRIC_LABEL[k] || k}</span>
-                {m.needs_recalibration ? <span className="pill pill-bad">over threshold</span> : <span className="pill pill-ok">within threshold</span>}
-              </div>
-              <div className="figure" style={{ fontSize: 'var(--step-2)' }}>{m.value?.toFixed?.(3) ?? '—'}</div>
-              <div className="faint mono" style={{ fontSize: '0.74rem' }}>
-                threshold {m.threshold}
-                {m.status && ` · ${m.status}`}
-                {m.bins_evaluated !== undefined && ` · ${m.bins_evaluated} bins`}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {!loading && drift && Object.keys(metrics).length === 0 && (
-        <p className="faint">No drift metrics available for this line.</p>
-      )}
-    </div>
-  );
-}
-
-const METRIC_LABEL: Record<string, string> = {
-  feature_psi: 'Feature PSI',
-  prediction_psi: 'Prediction PSI',
-  calibration: 'Calibration',
-};
 
 /* ---------- model versions + promote/rollback ---------- */
 function ModelsPanel({ line }: { line: Line }) {
@@ -129,19 +69,19 @@ function ModelsPanel({ line }: { line: Line }) {
         <h3 style={{ fontSize: 'var(--step-1)' }}>Model lifecycle · {LINE_LABEL[line]}</h3>
         <button className="btn btn-ghost btn-sm" disabled={busy} onClick={rollback}>↺ Rollback champion</button>
       </div>
-      <p className="muted" style={{ marginTop: -8 }}>Review candidate lineage, offline gates, compare report. Drift stays diagnostics only.</p>
+      <p className="muted" style={{ marginTop: -8 }}>Review candidate lineage and offline gates.</p>
       {loading && <Loading />}
       <ErrorBanner error={error} />
       {data && data.length === 0 && <EmptyState title="Chưa có phiên bản mô hình cho dòng này" />}
       {data && data.length > 0 && (
-        <div className="table-wrap">
-          <table className="table">
+        <div className="table-wrap" style={{ overflowX: 'auto' }}>
+          <table className="table" style={{ minWidth: 1280 }}>
             <thead><tr><th>Version</th><th>Family</th><th>Status</th><th>Dataset</th><th>Gini</th><th>MAE</th><th>RMSE</th><th>Deviance</th><th>Gates</th><th>Checksum</th><th></th></tr></thead>
             <tbody>
               {data.map((m) => (
                 <tr key={m.model_version_id}>
                   <td className="mono" style={{ fontSize: '0.78rem' }}>{m.model_version_id}<div className="faint" style={{ fontSize: '0.7rem' }}>{dateTime(m.trained_at)}</div></td>
-                  <td>{m.algorithm}<div className="faint">{m.family || 'tw'}</div></td>
+                  <td>{m.algorithm}<div className="faint">{m.family || 'freqsev'}</div></td>
                   <td>{m.is_champion ? <span className="pill pill-ok">champion</span> : <span className="pill pill-muted">{m.status || 'unknown'}</span>}</td>
                   <td className="mono" style={{ fontSize: '0.72rem' }}>{m.dataset_version_id || m.dataset_desc}</td>
                   <td className="num">{m.gini?.toFixed(3)}</td>
@@ -168,31 +108,3 @@ function ModelsPanel({ line }: { line: Line }) {
   );
 }
 
-/* ---------- validation / fairness reports ---------- */
-function ReportsPanel({ line }: { line: Line }) {
-  const [view, setView] = useState<'validation' | 'fairness'>('validation');
-  const { data, error, loading } = useApi<any>(`/pricing/${view}/${line}`, [view, line]);
-
-  return (
-    <div className="card stack">
-      <div className="row-between">
-        <h3 style={{ fontSize: 'var(--step-1)' }}>Báo cáo</h3>
-        <div className="tabs" style={{ border: 'none', margin: 0 }}>
-          <button className={'tab' + (view === 'validation' ? ' active' : '')} onClick={() => setView('validation')}>Validation</button>
-          <button className={'tab' + (view === 'fairness' ? ' active' : '')} onClick={() => setView('fairness')}>Fairness</button>
-        </div>
-      </div>
-      {loading && <Loading />}
-      {error && error.status === 404 ? (
-        <Alert kind="info">Báo cáo {view === 'validation' ? 'Validation' : 'Fairness'} chưa khả dụng cho dòng {LINE_LABEL[line].toLowerCase()} (tính năng tắt hoặc chưa có dữ liệu).</Alert>
-      ) : (
-        <ErrorBanner error={error} />
-      )}
-      {data && (
-        <pre className="mono" style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: 'var(--s4)', overflow: 'auto', fontSize: '0.78rem', lineHeight: 1.6 }}>
-          {JSON.stringify(data, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-}
