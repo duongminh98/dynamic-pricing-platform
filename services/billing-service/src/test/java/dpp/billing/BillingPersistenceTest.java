@@ -45,8 +45,7 @@ class BillingPersistenceTest {
     @MockBean
     private RabbitTemplate rabbitTemplate;
 
-    // OutboxPublisher is a real bean; OrderClient is autowired. We do not hit the
-    // network here because these tests do not call getPolicyBilling.
+    // OutboxPublisher is a real bean. These tests do not require external service calls.
 
     @Test
     void endorsementAdjustmentPersistsWithCreatedAt() {
@@ -88,12 +87,14 @@ class BillingPersistenceTest {
         UUID orderId = UUID.randomUUID();
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(orderId);
+        req.setCustomerId(UUID.randomUUID());
         req.setAmountVnd(2_500_000L);
         InvoiceResponse first = billingService.createInvoice(req);
 
         // A commit-then-REST retry replays createInvoice with the same order_id.
         CreateInvoiceRequest retry = new CreateInvoiceRequest();
         retry.setOrderId(orderId);
+        retry.setCustomerId(UUID.randomUUID());
         retry.setAmountVnd(2_500_000L);
         InvoiceResponse second = billingService.createInvoice(retry);
 
@@ -106,6 +107,7 @@ class BillingPersistenceTest {
         UUID policyId = UUID.randomUUID();
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(UUID.randomUUID());
+        req.setCustomerId(UUID.randomUUID());
         req.setPolicyId(policyId);
         req.setAmountVnd(3_300_000L);
         InvoiceResponse created = billingService.createInvoice(req);
@@ -114,3 +116,5 @@ class BillingPersistenceTest {
         assertEquals(1, invoiceRepository.findByPolicyIdOrderByCreatedAtAsc(policyId).size());
     }
 }
+
+

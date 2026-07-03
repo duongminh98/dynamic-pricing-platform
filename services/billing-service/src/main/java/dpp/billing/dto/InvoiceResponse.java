@@ -13,6 +13,7 @@ public class InvoiceResponse {
     private UUID invoiceId;
     private UUID orderId;
     private UUID policyId;
+    private UUID customerId;
     private long amountVnd;
     private InvoiceStatus status;
     private OffsetDateTime paidAt;

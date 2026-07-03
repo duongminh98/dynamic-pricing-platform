@@ -19,5 +19,6 @@ public class CreateInvoiceRequest {
     private long amountVnd;
     private UUID endorsementRequestId;
     private OffsetDateTime dueDate;
+    @NotNull
     private UUID customerId;
 }

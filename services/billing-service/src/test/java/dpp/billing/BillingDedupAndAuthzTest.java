@@ -1,6 +1,5 @@
 package dpp.billing;
 
-import dpp.billing.client.OrderClient;
 import dpp.billing.dto.CreateInvoiceRequest;
 import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.entity.Invoice;
@@ -104,13 +103,15 @@ class BillingDedupAndAuthzTest {
         existing.setInvoiceId(existingId);
         existing.setOrderId(orderId);
         existing.setAmountVnd(2_500_000L);
+        existing.setCustomerId(UUID.randomUUID());
         existing.setStatus(InvoiceStatus.unpaid);
         when(invRepo.findByOrderId(orderId)).thenReturn(Optional.of(existing));
 
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
+                mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(orderId);
+        req.setCustomerId(UUID.randomUUID());
         req.setAmountVnd(2_500_000L);
 
         InvoiceResponse resp = svc.createInvoice(req);
@@ -127,9 +128,10 @@ class BillingDedupAndAuthzTest {
         when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
 
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
+                mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(orderId);
+        req.setCustomerId(UUID.randomUUID());
         req.setAmountVnd(2_500_000L);
 
         InvoiceResponse resp = svc.createInvoice(req);
@@ -144,7 +146,6 @@ class BillingDedupAndAuthzTest {
     @Test
     void payInvoiceAsCustomerRejectsNonOwner() {
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
-        OrderClient orderClient = mock(OrderClient.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
 
         UUID invoiceId = UUID.randomUUID();
@@ -156,10 +157,10 @@ class BillingDedupAndAuthzTest {
         invoice.setInvoiceId(invoiceId);
         invoice.setOrderId(orderId);
         invoice.setStatus(InvoiceStatus.unpaid);
+        invoice.setCustomerId(owner);
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(invoice));
-        when(orderClient.getOrderOwner(orderId)).thenReturn(owner);
 
-        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox, mock(CreditService.class), mock(RefundService.class));
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), outbox, mock(CreditService.class), mock(RefundService.class));
 
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.payInvoiceAsCustomer(invoiceId, attacker));
@@ -170,7 +171,6 @@ class BillingDedupAndAuthzTest {
     @Test
     void payInvoiceAsCustomerAllowsOwner() {
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
-        OrderClient orderClient = mock(OrderClient.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         when(outbox.enqueue(anyString(), anyString())).thenReturn(null);
 
@@ -182,11 +182,11 @@ class BillingDedupAndAuthzTest {
         invoice.setInvoiceId(invoiceId);
         invoice.setOrderId(orderId);
         invoice.setStatus(InvoiceStatus.unpaid);
+        invoice.setCustomerId(owner);
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(invoice));
         when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(orderClient.getOrderOwner(orderId)).thenReturn(owner);
 
-        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox, mock(CreditService.class), mock(RefundService.class));
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), outbox, mock(CreditService.class), mock(RefundService.class));
 
         InvoiceResponse resp = svc.payInvoiceAsCustomer(invoiceId, owner);
 
@@ -197,7 +197,6 @@ class BillingDedupAndAuthzTest {
     @Test
     void payInvoiceAsCustomerResolvesOwnerViaPolicyWhenPresent() {
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
-        OrderClient orderClient = mock(OrderClient.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
 
         UUID invoiceId = UUID.randomUUID();
@@ -210,14 +209,12 @@ class BillingDedupAndAuthzTest {
         invoice.setOrderId(UUID.randomUUID());
         invoice.setPolicyId(policyId);
         invoice.setStatus(InvoiceStatus.unpaid);
+        invoice.setCustomerId(owner);
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(invoice));
-        when(orderClient.getPolicyOwner(policyId)).thenReturn(owner);
 
-        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox, mock(CreditService.class), mock(RefundService.class));
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class), outbox, mock(CreditService.class), mock(RefundService.class));
 
         assertThrows(ServiceException.class, () -> svc.payInvoiceAsCustomer(invoiceId, attacker));
-        verify(orderClient, times(1)).getPolicyOwner(policyId);
-        verify(orderClient, never()).getOrderOwner(any());
     }
 
     // --- Endorsement invoice dedup (Branch A) ---
@@ -230,16 +227,20 @@ class BillingDedupAndAuthzTest {
         Invoice existing = new Invoice();
         existing.setInvoiceId(existingInvoiceId);
         existing.setEndorsementRequestId(endorsementRequestId);
+        existing.setCustomerId(UUID.randomUUID());
         existing.setStatus(InvoiceStatus.unpaid);
         when(invRepo.findByEndorsementRequestIdOrderByCreatedAtDesc(endorsementRequestId))
                 .thenReturn(List.of(existing));
 
         OutboxPublisher outbox = mock(OutboxPublisher.class);
+        CreditService creditService = mock(CreditService.class);
+        when(creditService.applyCreditsToInvoice(any(), any(), anyLong())).thenReturn(1_200_000L);
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+                outbox, creditService, mock(RefundService.class));
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setEndorsementRequestId(endorsementRequestId);
         req.setOrderId(UUID.randomUUID());
+        req.setCustomerId(UUID.randomUUID());
         req.setPolicyId(UUID.randomUUID());
         req.setAmountVnd(1_200_000L);
 
@@ -260,11 +261,14 @@ class BillingDedupAndAuthzTest {
         when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
 
         OutboxPublisher outbox = mock(OutboxPublisher.class);
+        CreditService creditService = mock(CreditService.class);
+        when(creditService.applyCreditsToInvoice(any(), any(), anyLong())).thenReturn(1_200_000L);
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+                outbox, creditService, mock(RefundService.class));
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setEndorsementRequestId(endorsementRequestId);
         req.setOrderId(UUID.randomUUID());
+        req.setCustomerId(UUID.randomUUID());
         req.setPolicyId(UUID.randomUUID());
         req.setAmountVnd(1_200_000L);
         req.setDueDate(OffsetDateTime.now().plusDays(14));
@@ -290,11 +294,14 @@ class BillingDedupAndAuthzTest {
         when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
 
         OutboxPublisher outbox = mock(OutboxPublisher.class);
+        CreditService creditService = mock(CreditService.class);
+        when(creditService.applyCreditsToInvoice(any(), any(), anyLong())).thenReturn(1_200_000L);
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+                outbox, creditService, mock(RefundService.class));
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setEndorsementRequestId(endorsementRequestId);
         req.setOrderId(UUID.randomUUID());
+        req.setCustomerId(UUID.randomUUID());
         req.setPolicyId(UUID.randomUUID());
         req.setAmountVnd(1_200_000L);
 
@@ -303,6 +310,60 @@ class BillingDedupAndAuthzTest {
         assertEquals(InvoiceStatus.unpaid, resp.getStatus());
         verify(invRepo, times(1)).save(any());
         verify(outbox, times(1)).enqueue(eq("InvoiceCreated"), anyString());
+    }
+
+
+    @Test
+    void createOrderInvoiceBackfillsCustomerIdOnDedupReturn() {
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        UUID orderId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        Invoice existing = new Invoice();
+        existing.setInvoiceId(UUID.randomUUID());
+        existing.setOrderId(orderId);
+        existing.setStatus(InvoiceStatus.unpaid);
+        when(invRepo.findByOrderId(orderId)).thenReturn(Optional.of(existing));
+        when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
+                mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
+        CreateInvoiceRequest req = new CreateInvoiceRequest();
+        req.setOrderId(orderId);
+        req.setCustomerId(customerId);
+        req.setAmountVnd(2_500_000L);
+
+        InvoiceResponse resp = svc.createInvoice(req);
+
+        assertEquals(customerId, resp.getCustomerId());
+        verify(invRepo, times(1)).save(existing);
+    }
+
+    @Test
+    void createEndorsementInvoiceBackfillsCustomerIdOnDedupReturn() {
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        UUID endorsementRequestId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        Invoice existing = new Invoice();
+        existing.setInvoiceId(UUID.randomUUID());
+        existing.setEndorsementRequestId(endorsementRequestId);
+        existing.setStatus(InvoiceStatus.unpaid);
+        when(invRepo.findByEndorsementRequestIdOrderByCreatedAtDesc(endorsementRequestId))
+                .thenReturn(List.of(existing));
+        when(invRepo.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
+                mock(OutboxPublisher.class), mock(CreditService.class), mock(RefundService.class));
+        CreateInvoiceRequest req = new CreateInvoiceRequest();
+        req.setEndorsementRequestId(endorsementRequestId);
+        req.setOrderId(UUID.randomUUID());
+        req.setCustomerId(customerId);
+        req.setPolicyId(UUID.randomUUID());
+        req.setAmountVnd(1_200_000L);
+
+        InvoiceResponse resp = svc.createInvoice(req);
+
+        assertEquals(customerId, resp.getCustomerId());
+        verify(invRepo, times(1)).save(existing);
     }
 
     // --- InvoiceCreated enqueue on Branch C (order invoice) ---
@@ -316,9 +377,10 @@ class BillingDedupAndAuthzTest {
 
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+                outbox, mock(CreditService.class), mock(RefundService.class));
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(orderId);
+        req.setCustomerId(UUID.randomUUID());
         req.setAmountVnd(2_500_000L);
 
         svc.createInvoice(req);
@@ -337,14 +399,16 @@ class BillingDedupAndAuthzTest {
         Invoice existing = new Invoice();
         existing.setInvoiceId(existingInvoiceId);
         existing.setOrderId(orderId);
+        existing.setCustomerId(UUID.randomUUID());
         existing.setStatus(InvoiceStatus.unpaid);
         when(invRepo.findByOrderId(orderId)).thenReturn(Optional.of(existing));
 
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         BillingService svc = new BillingService(invRepo, mock(AdjustmentRepository.class),
-                mock(OrderClient.class), outbox, mock(CreditService.class), mock(RefundService.class));
+                outbox, mock(CreditService.class), mock(RefundService.class));
         CreateInvoiceRequest req = new CreateInvoiceRequest();
         req.setOrderId(orderId);
+        req.setCustomerId(UUID.randomUUID());
         req.setAmountVnd(2_500_000L);
 
         svc.createInvoice(req);
@@ -352,3 +416,4 @@ class BillingDedupAndAuthzTest {
         verify(outbox, times(1)).enqueue(eq("InvoiceCreated"), anyString());
     }
 }
+

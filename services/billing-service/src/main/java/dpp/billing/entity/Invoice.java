@@ -22,6 +22,9 @@ public class Invoice {
     @Column(name = "policy_id")
     private UUID policyId;
 
+    @Column(name = "customer_id")
+    private UUID customerId;
+
     @Column(name = "amount_vnd", nullable = false)
     private long amountVnd;
 

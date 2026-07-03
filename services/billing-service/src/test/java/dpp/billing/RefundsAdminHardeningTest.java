@@ -8,7 +8,6 @@ import dpp.billing.repository.RefundRequestRepository;
 import dpp.billing.service.BillingService;
 import dpp.billing.service.CreditService;
 import dpp.billing.service.RefundService;
-import dpp.billing.client.OrderClient;
 import dpp.billing.repository.AdjustmentRepository;
 import dpp.billing.repository.InvoiceRepository;
 import dpp.common.api.ErrorCode;
@@ -287,14 +286,20 @@ class RefundsAdminHardeningTest {
     void t10_policyBillingIncludesRefundsList() {
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
         AdjustmentRepository adjRepo = mock(AdjustmentRepository.class);
-        OrderClient orderClient = mock(OrderClient.class);
         RefundService refundService = mock(RefundService.class);
         CreditService creditService = mock(CreditService.class);
 
         UUID policyId = UUID.randomUUID();
         UUID owner = UUID.randomUUID();
-        when(orderClient.getPolicyOwner(policyId)).thenReturn(owner);
-        when(invRepo.findByPolicyIdOrderByCreatedAtAsc(policyId)).thenReturn(List.of());
+        Invoice invoice = new Invoice();
+        invoice.setInvoiceId(UUID.randomUUID());
+        invoice.setOrderId(UUID.randomUUID());
+        invoice.setPolicyId(policyId);
+        invoice.setCustomerId(owner);
+        invoice.setAmountVnd(100_000L);
+        invoice.setStatus(InvoiceStatus.unpaid);
+        invoice.setCreatedAt(java.time.OffsetDateTime.now());
+        when(invRepo.findByPolicyIdOrderByCreatedAtAsc(policyId)).thenReturn(List.of(invoice));
         when(adjRepo.findByPolicyIdOrderByCreatedAtAsc(policyId)).thenReturn(List.of());
         when(creditService.getCreditsByPolicy(policyId)).thenReturn(List.of());
 
@@ -305,7 +310,7 @@ class RefundsAdminHardeningTest {
         refundResp.setStatus(RefundStatus.pending);
         when(refundService.listByPolicy(policyId)).thenReturn(List.of(refundResp));
 
-        BillingService svc = new BillingService(invRepo, adjRepo, orderClient, mock(OutboxPublisher.class), creditService, refundService);
+        BillingService svc = new BillingService(invRepo, adjRepo, mock(OutboxPublisher.class), creditService, refundService);
         PolicyBillingResponse resp = svc.getPolicyBilling(policyId, owner);
 
         assertNotNull(resp.getRefunds());

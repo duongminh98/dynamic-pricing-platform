@@ -1,6 +1,5 @@
 package dpp.billing;
 
-import dpp.billing.client.OrderClient;
 import dpp.billing.dto.CreateInvoiceRequest;
 import dpp.billing.dto.InvoiceResponse;
 import dpp.billing.dto.PageResponse;
@@ -29,8 +28,8 @@ import static org.mockito.Mockito.*;
 
 class BillingHardeningTest {
 
-    private BillingService serviceWith(InvoiceRepository invRepo, OutboxPublisher outbox, OrderClient orderClient) {
-        return new BillingService(invRepo, mock(AdjustmentRepository.class), orderClient, outbox,
+    private BillingService serviceWith(InvoiceRepository invRepo, OutboxPublisher outbox) {
+        return new BillingService(invRepo, mock(AdjustmentRepository.class), outbox,
                 mock(CreditService.class), mock(RefundService.class));
     }
 
@@ -38,6 +37,7 @@ class BillingHardeningTest {
         Invoice inv = new Invoice();
         inv.setInvoiceId(invoiceId);
         inv.setOrderId(orderId);
+        inv.setCustomerId(UUID.randomUUID());
         inv.setAmountVnd(2_000_000L);
         inv.setStatus(InvoiceStatus.unpaid);
         inv.setCreatedAt(OffsetDateTime.now());
@@ -57,7 +57,7 @@ class BillingHardeningTest {
         return inv;
     }
 
-    // ── §1: Guard double-pay ──
+    // Section 1: Guard double pay
 
     @Test
     void payInvoiceOnPaidInvoiceIsIdempotentNoReenqueue() {
@@ -67,7 +67,7 @@ class BillingHardeningTest {
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(paidInvoice(invoiceId, orderId)));
 
-        BillingService svc = serviceWith(invRepo, outbox, mock(OrderClient.class));
+        BillingService svc = serviceWith(invRepo, outbox);
         InvoiceResponse resp = svc.payInvoice(invoiceId);
 
         assertEquals(InvoiceStatus.paid, resp.getStatus());
@@ -81,7 +81,7 @@ class BillingHardeningTest {
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(voidedInvoice(invoiceId, orderId)));
 
-        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class), mock(OrderClient.class));
+        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class));
         ServiceException ex = assertThrows(ServiceException.class, () -> svc.payInvoice(invoiceId));
         assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
     }
@@ -96,13 +96,13 @@ class BillingHardeningTest {
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(inv));
         when(invRepo.save(any())).thenAnswer(a -> a.getArgument(0));
 
-        BillingService svc = serviceWith(invRepo, outbox, mock(OrderClient.class));
+        BillingService svc = serviceWith(invRepo, outbox);
         svc.payInvoice(invoiceId);
 
         verify(outbox, times(1)).enqueue(eq("InvoicePaid"), any());
     }
 
-    // ── §3: Void invoice enqueues InvoiceVoided ──
+    // Section 3: Void invoice enqueues InvoiceVoided
 
     @Test
     void voidInvoiceEnqueuesInvoiceVoidedWithCustomerId() {
@@ -111,13 +111,12 @@ class BillingHardeningTest {
         UUID customerId = UUID.randomUUID();
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
-        OrderClient orderClient = mock(OrderClient.class);
         Invoice inv = unpaidInvoice(invoiceId, orderId);
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(inv));
         when(invRepo.save(any())).thenAnswer(a -> a.getArgument(0));
-        when(orderClient.getOrderOwner(orderId)).thenReturn(customerId);
+        inv.setCustomerId(customerId);
 
-        BillingService svc = serviceWith(invRepo, outbox, orderClient);
+        BillingService svc = serviceWith(invRepo, outbox);
         InvoiceResponse resp = svc.voidInvoice(invoiceId);
 
         assertEquals(InvoiceStatus.voided, resp.getStatus());
@@ -130,14 +129,10 @@ class BillingHardeningTest {
         UUID orderId = UUID.randomUUID();
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
         OutboxPublisher outbox = mock(OutboxPublisher.class);
-        OrderClient orderClient = mock(OrderClient.class);
         Invoice inv = unpaidInvoice(invoiceId, orderId);
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(inv));
         when(invRepo.save(any())).thenAnswer(a -> a.getArgument(0));
-        when(orderClient.getOrderOwner(orderId))
-                .thenThrow(new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found", null));
-
-        BillingService svc = serviceWith(invRepo, outbox, orderClient);
+        BillingService svc = serviceWith(invRepo, outbox);
         InvoiceResponse resp = svc.voidInvoice(invoiceId);
 
         assertEquals(InvoiceStatus.voided, resp.getStatus());
@@ -152,7 +147,7 @@ class BillingHardeningTest {
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(voidedInvoice(invoiceId, orderId)));
 
-        BillingService svc = serviceWith(invRepo, outbox, mock(OrderClient.class));
+        BillingService svc = serviceWith(invRepo, outbox);
         InvoiceResponse resp = svc.voidInvoice(invoiceId);
 
         assertEquals(InvoiceStatus.voided, resp.getStatus());
@@ -168,13 +163,13 @@ class BillingHardeningTest {
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         when(invRepo.findById(invoiceId)).thenReturn(Optional.of(paidInvoice(invoiceId, orderId)));
 
-        BillingService svc = serviceWith(invRepo, outbox, mock(OrderClient.class));
+        BillingService svc = serviceWith(invRepo, outbox);
         ServiceException ex = assertThrows(ServiceException.class, () -> svc.voidInvoice(invoiceId));
         assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
         verify(outbox, never()).enqueue(any(), any());
     }
 
-    // ── §4: Admin paging ──
+    // Section 4: Admin paging
 
     @Test
     void adminListInvoicesPagedWithStatusFilter() {
@@ -184,7 +179,7 @@ class BillingHardeningTest {
         when(invRepo.findFiltered(eq(InvoiceStatus.unpaid), any()))
                 .thenReturn(new PageImpl<>(List.of(inv1), PageRequest.of(0, 20), 1));
 
-        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class), mock(OrderClient.class));
+        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class));
         PageResponse<InvoiceResponse> result = svc.adminListInvoicesPaged(InvoiceStatus.unpaid,
                 PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt")));
 
@@ -202,7 +197,7 @@ class BillingHardeningTest {
         when(invRepo.findFiltered(eq(null), any()))
                 .thenReturn(new PageImpl<>(List.of(inv1, inv2), PageRequest.of(0, 20), 2));
 
-        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class), mock(OrderClient.class));
+        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class));
         PageResponse<InvoiceResponse> result = svc.adminListInvoicesPaged(null,
                 PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt")));
 
@@ -210,36 +205,48 @@ class BillingHardeningTest {
         assertEquals(2, result.getTotalElements());
     }
 
-    // ── §6: Split endpoints — verify service methods work ──
+    // Section 6: Split endpoints verify service methods
 
     @Test
     void getInvoiceByOrderReturnsInvoiceWhenOwnerMatches() {
         UUID orderId = UUID.randomUUID();
         UUID customerId = UUID.randomUUID();
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
-        OrderClient orderClient = mock(OrderClient.class);
         Invoice inv = unpaidInvoice(UUID.randomUUID(), orderId);
+        inv.setCustomerId(customerId);
         when(invRepo.findByOrderId(orderId)).thenReturn(Optional.of(inv));
-        when(orderClient.getOrderOwner(orderId)).thenReturn(customerId);
 
-        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class), orderClient);
+        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class));
         InvoiceResponse resp = svc.getInvoiceByOrder(orderId, customerId);
 
         assertEquals(inv.getInvoiceId(), resp.getInvoiceId());
     }
 
     @Test
+    void getInvoiceByOrderUsesPersistedCustomerIdWithoutOrderLookup() {
+        UUID orderId = UUID.randomUUID();
+        UUID customerId = UUID.randomUUID();
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        Invoice inv = unpaidInvoice(UUID.randomUUID(), orderId);
+        inv.setCustomerId(customerId);
+        when(invRepo.findByOrderId(orderId)).thenReturn(Optional.of(inv));
+
+        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class));
+        InvoiceResponse resp = svc.getInvoiceByOrder(orderId, customerId);
+
+        assertEquals(inv.getInvoiceId(), resp.getInvoiceId());
+    }
+
     void getInvoiceByOrderThrowsForbiddenWhenOwnerMismatch() {
         UUID orderId = UUID.randomUUID();
         InvoiceRepository invRepo = mock(InvoiceRepository.class);
-        OrderClient orderClient = mock(OrderClient.class);
         Invoice inv = unpaidInvoice(UUID.randomUUID(), orderId);
         when(invRepo.findByOrderId(orderId)).thenReturn(Optional.of(inv));
-        when(orderClient.getOrderOwner(orderId)).thenReturn(UUID.randomUUID());
 
-        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class), orderClient);
+        BillingService svc = serviceWith(invRepo, mock(OutboxPublisher.class));
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.getInvoiceByOrder(orderId, UUID.randomUUID()));
         assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
     }
 }
+
