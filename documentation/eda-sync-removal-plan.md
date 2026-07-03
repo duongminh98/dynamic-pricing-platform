@@ -144,7 +144,7 @@ Remove claims-service synchronous policy and exposure-segment reads from order-s
 
 ### Status
 
-Implemented pending final operational rollout/backfill strategy.
+Implemented and live-verified.
 
 ### Event-driven replacement
 
@@ -188,7 +188,7 @@ Remove order-service synchronous invoice void calls into billing-service.
 
 ### Status
 
-Implemented pending final operational rollout/backfill strategy.
+Implemented and live-verified.
 
 ### Event-driven replacement
 
@@ -243,9 +243,20 @@ Remove order-service synchronous credit calculation and credit read calls into b
   - `CreditApplicationRejected`
 - Order-service transitions endorsement or renewal flow only after confirmation.
 
+### Status
+
+Implemented in order-service runtime. Billing remains the money authority for actual credit mutation.
+
+### Implemented path
+
+- Removed order-service runtime calls to billing credit quote/read endpoints.
+- Endorsement AP and renewal decisions use gross amount in order-service.
+- Billing applies customer-scoped credit when it creates invoices from events.
+- Policy cancellation no longer synchronously enriches refundable credit; billing creates refunds from `PolicyCancelled`.
+
 ### Recommendation
 
-- Prefer Option B for money correctness.
+- Continue toward Option B reservation semantics for future precise pre-invoice UX, but keep billing as the money authority.
 
 ### Risk
 
@@ -266,19 +277,16 @@ Remove order-service synchronous quote fetches from pricing-service.
 
 - `order-service -> pricing-service GET /pricing/quote/{quoteId}`
 
-### Work
+### Status
 
-- Emit `QuoteCreated` from pricing-service with the full order-needed snapshot:
-  - `quote_id`
-  - `customer_id`
-  - `product_id`
-  - `line`
-  - `final_premium_vnd`
-  - `expires_at`
-  - `profile`
-- Build an order-side quote projection.
-- Make order creation read local quote projection data.
-- Define behavior when a client submits an order before the quote projection is available.
+Implemented and live-verified.
+
+### Event-driven replacement
+
+- Pricing service emits `QuoteCreated` from the transactional outbox after quote persistence.
+- Order service consumes `QuoteCreated` into the local `quote_snapshot` projection.
+- Order creation reads `quote_snapshot` locally and no longer calls pricing-service for quote detail.
+- If the client submits an order before projection catch-up, order-service returns not-ready/not-found for the local quote snapshot; the client can retry after the event projection catches up.
 
 ### Risk
 
@@ -286,7 +294,7 @@ Remove order-service synchronous quote fetches from pricing-service.
 
 ### Notes
 
-- This phase is feasible, but it requires strong guarantees around quote publication and consumption order.
+- Live verify confirmed quote -> `QuoteCreated` -> order projection -> order creation, with `quote.created.order.queue` drained.
 
 ## Phase 7 - Move Repricing to Fully Async Workflow
 
@@ -298,18 +306,44 @@ Remove order-service synchronous rerating calls into pricing-service.
 
 - `order-service -> pricing-service POST /pricing/quote`
 
-### Work
+### Status
 
-- Replace request/response rerating with an async workflow:
-  - order-service emits `QuoteRequested` or `RepriceRequested`
-  - pricing-service consumes and computes premium
-  - pricing-service emits `QuoteCreated` or `RepriceCompleted`
-- Introduce async business states such as:
-  - `PRICING_PENDING`
-  - `PRICED`
-  - `REVIEW_PENDING`
-  - `PAYMENT_PENDING`
-- Update frontend/API behavior so clients poll or subscribe for status instead of receiving immediate pricing synchronously.
+Implemented in order-service and pricing-service runtime. Live Docker verification still pending.
+
+### Event-driven replacement
+
+- Order-service no longer performs runtime rerate HTTP calls.
+- Order-service emits `RepriceRequested` for:
+  - endorsement preview
+  - endorsement submit
+  - renewal preview
+  - renewal submit
+- Pricing-service consumes `RepriceRequested` on `pricing.reprice.requested.queue`.
+- Pricing-service computes premium asynchronously and emits `RepriceCompleted`.
+- Order-service consumes `RepriceCompleted` on `reprice.completed.order.queue`.
+- Endorsement submit now transitions:
+  - `PRICING_PENDING` -> `PENDING_REVIEW` on successful `RepriceCompleted`
+  - `PRICING_PENDING` -> `PRICING_FAILED` on failed `RepriceCompleted`
+- Renewal submit now creates the renewal policy in `pricing_pending`, then transitions on `RepriceCompleted` to:
+  - `pending_payment` when payment is required
+  - `active` when gross premium is below the settle threshold
+  - `pricing_failed` when pricing returns a failed completion
+
+### API behavior change
+
+- Endorsement preview/submit responses now return async state immediately instead of a final rerate result.
+- Renewal preview/submit responses now return async pricing state immediately.
+- Clients must poll existing policy/endorsement resources for eventual priced state, or subscribe through an external notification channel if added later.
+
+### Verification requirements
+
+- `rg` shows no runtime `pricingClient.rerate(...)` usage inside order-service business flows.
+- `:services:order-service:test` passes.
+- Pricing quote/outbox tests pass.
+- Docker live event flow should prove:
+  - renewal submit -> `RepriceRequested` -> pricing consumes -> `RepriceCompleted` -> renewal policy leaves `pricing_pending` (`pending_payment`, `active`, or `pricing_failed`)
+  - endorsement submit -> `RepriceRequested` -> `RepriceCompleted` -> endorsement leaves `PRICING_PENDING`
+  - both queues drain
 
 ### Risk
 
@@ -317,8 +351,8 @@ Remove order-service synchronous rerating calls into pricing-service.
 
 ### Notes
 
-- This is the biggest product and workflow change in the migration.
-- It should come last unless the platform explicitly accepts async quote UX.
+- This phase changes customer/API UX from immediate pricing to status-driven pricing.
+- `PricingClient` remains only as a compatibility shim for legacy unit-test wiring; runtime no longer uses it for repricing.
 
 ## Recommended Execution Order
 
@@ -349,5 +383,4 @@ Remove order-service synchronous rerating calls into pricing-service.
   - dual-run period if needed
   - observability checks
 - Treat money flows and policy-state transitions as the highest integrity domains.
-
 

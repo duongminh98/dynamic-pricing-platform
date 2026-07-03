@@ -64,27 +64,4 @@ public class BillingClient {
             throw new ServiceException(ErrorCode.INTERNAL_ERROR, "Failed to create invoice: " + e.getMessage(), null);
         }
     }
-
-    public Map<String, Object> applyCreditAndQuote(UUID customerId, long amountVnd) {
-        String url = baseUrl + "/internal/credits/apply-and-quote?customer_id=" + customerId + "&amount_vnd=" + amountVnd;
-        try {
-            return restTemplate.postForObject(url, null, Map.class);
-        } catch (Exception e) {
-            throw new ServiceException(ErrorCode.INTERNAL_ERROR, "Failed to apply credit: " + e.getMessage(), null);
-        }
-    }
-
-    public long getRefundableCredit(UUID policyId) {
-        String url = baseUrl + "/internal/credits/refundable?policy_id=" + policyId;
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> resp = restTemplate.getForObject(url, Map.class);
-            if (resp != null && resp.get("refundable_credit_vnd") != null) {
-                return Long.parseLong(String.valueOf(resp.get("refundable_credit_vnd")));
-            }
-            return 0L;
-        } catch (Exception e) {
-            return 0L;
-        }
-    }
 }
