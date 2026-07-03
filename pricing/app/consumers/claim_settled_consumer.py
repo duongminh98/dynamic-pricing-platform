@@ -2,7 +2,7 @@
 
 Pricing-service was previously publish-only (outbox). This module adds
 a consumer that listens on `claim.settled.queue` and upserts the
-`claim_outcome` read-model table. Idempotent by `claim_id` PK —
+`claim_outcome` read-model table. Idempotent by `claim_id` PK Ã¢â‚¬â€
 re-emitted events (e.g. from misrepresentation adjustment) update the
 existing row.
 """
@@ -14,12 +14,33 @@ import os
 import datetime
 import threading
 
-from ..database import SessionLocal, ClaimOutcome
+from ..database import SessionLocal, ClaimOutcome, Quote
+from ..services.quote_ready_profile import rebuild_quote_ready_profile
+from ..services.quote_ready_profile import rebuild_quote_ready_profile
 
 logger = logging.getLogger(__name__)
 
 _consumer_thread: threading.Thread | None = None
 _stop_event: threading.Event | None = None
+
+EVENTS_EXCHANGE = os.environ.get("RABBITMQ_EVENTS_EXCHANGE", "platform.events")
+CLAIM_SETTLED_QUEUE = os.environ.get("PRICING_CLAIM_SETTLED_QUEUE", "claim.settled.queue")
+
+def _parse_dt(value):
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+def _int_or_none(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def upsert_claim_outcome(payload: dict) -> None:
@@ -40,35 +61,59 @@ def upsert_claim_outcome(payload: dict) -> None:
         ).first()
 
         now = datetime.datetime.now(datetime.timezone.utc)
-        settled_at_str = payload.get("settled_at")
-        settled_at = None
-        if settled_at_str:
-            try:
-                settled_at = datetime.datetime.fromisoformat(
-                    settled_at_str.replace("Z", "+00:00")
-                )
-            except (ValueError, TypeError):
-                settled_at = now
+        quote_id = str(payload.get("quote_id")) if payload.get("quote_id") else None
+        customer_id = str(payload.get("customer_id")) if payload.get("customer_id") else None
+        line = payload.get("line")
 
-        actual_loss = payload.get("paid_amount_vnd")
+        if quote_id and (not customer_id or not line):
+            quote = db.query(Quote).filter(Quote.quote_id == quote_id).first()
+            if quote:
+                customer_id = customer_id or quote.customer_id
+                line = line or quote.line
+
+        settled_at = _parse_dt(payload.get("settled_at")) or now
+        occurrence_date = _parse_dt(payload.get("occurrence_date"))
+        reported_at = _parse_dt(payload.get("reported_at") or payload.get("report_date"))
+
+        incurred_amount = _int_or_none(payload.get("incurred_amount_vnd"))
+        paid_amount = _int_or_none(payload.get("paid_amount_vnd"))
+        actual_loss = paid_amount
 
         if existing:
-            existing.quote_id = str(payload.get("quote_id")) if payload.get("quote_id") else existing.quote_id
+            existing.customer_id = customer_id or existing.customer_id
+            existing.quote_id = quote_id or existing.quote_id
             existing.policy_id = str(payload.get("policy_id")) if payload.get("policy_id") else existing.policy_id
-            existing.line = payload.get("line") or existing.line
+            existing.exposure_segment_seq = _int_or_none(payload.get("exposure_segment_seq")) if payload.get("exposure_segment_seq") is not None else existing.exposure_segment_seq
+            existing.line = line or existing.line
+            existing.loss_type = payload.get("loss_type") or existing.loss_type
+            existing.incurred_amount_vnd = incurred_amount if incurred_amount is not None else existing.incurred_amount_vnd
+            existing.paid_amount_vnd = paid_amount if paid_amount is not None else existing.paid_amount_vnd
             existing.actual_loss_vnd = actual_loss if actual_loss is not None else existing.actual_loss_vnd
+            existing.claim_status = payload.get("claim_status") or payload.get("status") or existing.claim_status
+            existing.occurrence_date = occurrence_date or existing.occurrence_date
+            existing.reported_at = reported_at or existing.reported_at
             existing.settled_at = settled_at or existing.settled_at
             existing.recorded_at = now
         else:
             db.add(ClaimOutcome(
                 claim_id=str(claim_id),
-                quote_id=str(payload.get("quote_id")) if payload.get("quote_id") else None,
+                customer_id=customer_id,
+                quote_id=quote_id,
                 policy_id=str(payload.get("policy_id")) if payload.get("policy_id") else None,
-                line=payload.get("line"),
+                exposure_segment_seq=_int_or_none(payload.get("exposure_segment_seq")),
+                line=line,
+                loss_type=payload.get("loss_type"),
+                incurred_amount_vnd=incurred_amount,
+                paid_amount_vnd=paid_amount,
                 actual_loss_vnd=actual_loss if actual_loss is not None else None,
+                claim_status=payload.get("claim_status") or payload.get("status"),
+                occurrence_date=occurrence_date,
+                reported_at=reported_at,
                 settled_at=settled_at,
                 recorded_at=now,
             ))
+        if customer_id and line:
+            rebuild_quote_ready_profile(db, customer_id, line, last_claim_event_id=str(claim_id))
         db.commit()
         logger.info(f"Upserted claim_outcome for claim_id={claim_id}")
     except Exception:
@@ -108,8 +153,8 @@ def _consume_loop(stop_event: threading.Event) -> None:
                     logger.exception("Error processing ClaimSettled message")
                     ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
-            channel.basic_consume(queue="claim.settled.queue", on_message_callback=on_message)
-            logger.info("ClaimSettled consumer started on claim.settled.queue")
+            channel.basic_consume(queue=CLAIM_SETTLED_QUEUE, on_message_callback=on_message)
+            logger.info("ClaimSettled consumer started on %s", CLAIM_SETTLED_QUEUE)
 
             while not stop_event.is_set():
                 connection.process_data_events(time_limit=1)
@@ -143,3 +188,5 @@ def stop_consumer() -> None:
         _consumer_thread.join(timeout=10)
         _consumer_thread = None
     _stop_event = None
+
+

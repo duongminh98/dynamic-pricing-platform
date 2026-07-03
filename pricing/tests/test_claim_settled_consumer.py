@@ -22,6 +22,7 @@ class TestUpsertClaimOutcome:
 
         payload = {
             "claim_id": "claim-001",
+            "customer_id": "customer-001",
             "policy_id": "pol-001",
             "quote_id": "quote-001",
             "line": "car",
@@ -35,6 +36,7 @@ class TestUpsertClaimOutcome:
         mock_db.add.assert_called_once()
         added_obj = mock_db.add.call_args[0][0]
         assert added_obj.claim_id == "claim-001"
+        assert added_obj.customer_id == "customer-001"
         assert added_obj.quote_id == "quote-001"
         assert added_obj.line == "car"
         assert added_obj.actual_loss_vnd == 5000000
@@ -53,6 +55,7 @@ class TestUpsertClaimOutcome:
 
         payload = {
             "claim_id": "claim-001",
+            "customer_id": "customer-001",
             "policy_id": "pol-001",
             "quote_id": "quote-001",
             "line": "car",
@@ -64,8 +67,34 @@ class TestUpsertClaimOutcome:
             upsert_claim_outcome(payload)
 
         mock_db.add.assert_not_called()
+        assert mock_existing.customer_id == "customer-001"
         assert mock_existing.actual_loss_vnd == 3000000
         mock_db.commit.assert_called_once()
+
+    def test_t2b_fills_missing_customer_and_line_from_quote(self):
+        from app.consumers.claim_settled_consumer import upsert_claim_outcome
+
+        mock_quote = MagicMock()
+        mock_quote.customer_id = "customer-from-quote"
+        mock_quote.line = "health"
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.side_effect = [None, mock_quote]
+        mock_session_local = MagicMock(return_value=mock_db)
+
+        payload = {
+            "claim_id": "claim-003",
+            "policy_id": "pol-003",
+            "quote_id": "quote-003",
+            "paid_amount_vnd": 7000000,
+            "settled_at": "2026-06-28T12:00:00+00:00",
+        }
+
+        with patch("app.consumers.claim_settled_consumer.SessionLocal", mock_session_local):
+            upsert_claim_outcome(payload)
+
+        added_obj = mock_db.add.call_args[0][0]
+        assert added_obj.customer_id == "customer-from-quote"
+        assert added_obj.line == "health"
 
     def test_t3_skips_missing_claim_id(self):
         from app.consumers.claim_settled_consumer import upsert_claim_outcome

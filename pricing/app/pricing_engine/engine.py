@@ -20,8 +20,18 @@ from .loader import (
 from .features import build_features, feature_set_for_audit
 from .selection import select_model
 from .explain import explain
+from ..feature_store import get_reference_versions
 
 QUOTE_VALIDITY_DAYS = 7
+
+LINE_SOFT_CAP_START_RATIO = {
+    "health": 0.45,
+    "motorbike": 0.35,
+    "car": 0.35,
+    "home": 0.30,
+    "accident": 0.40,
+    "travel": 0.40,
+}
 
 def _quote_audit_enabled() -> bool:
     """Read the bonus flag dynamically so tests/deployments can toggle it at runtime."""
@@ -152,6 +162,49 @@ def compute_final_premium(pure_premium: float, loading_factor: float,
     pure = int(round(pp))
     final = int(round(pp * lf + af))
     return max(0, pure), max(0, final)
+
+def _premium_bounds(line: str, prod: dict, admin_fee: float) -> tuple[int | None, int | None]:
+    coverage = int(prod.get("coverage_amount_vnd", 0) or 0)
+    lower = None
+    upper = coverage if coverage > 0 else None
+    return lower, upper
+
+def _soft_cap_final_premium(line: str, prod: dict, raw_final: int) -> tuple[int, dict]:
+    return raw_final, {"applied": False, "reason": None, "soft_cap_start_final_premium_vnd": None}
+
+def apply_quote_calibration(line: str, prod: dict, pure_premium: float,
+                            loading_factor: float, admin_fee: float) -> dict:
+    """Apply automatic premium bounds without manual-review branching.
+
+    The raw model score is preserved for audit while the served quote remains an
+    automatic bounded price. Bounds are product-driven and never use claim
+    outcomes from the quoted period.
+    """
+    raw_pure, raw_final = compute_final_premium(pure_premium, loading_factor, admin_fee)
+    lower, upper = _premium_bounds(line, prod, admin_fee)
+    calibrated_final, soft_cap = _soft_cap_final_premium(line, prod, raw_final)
+    reasons = [soft_cap["reason"]] if soft_cap["applied"] else []
+
+    lf = max(0.0, float(loading_factor))
+    af = max(0.0, float(admin_fee))
+    if reasons and lf > 0:
+        calibrated_pure = max(0, int(round((calibrated_final - af) / lf)))
+    else:
+        calibrated_pure = raw_pure
+
+    return {
+        "pure_premium_vnd": calibrated_pure,
+        "final_premium_vnd": max(0, int(calibrated_final)),
+        "calibration": {
+            "applied": bool(reasons),
+            "reasons": reasons,
+            "raw_pure_premium_vnd": raw_pure,
+            "raw_final_premium_vnd": raw_final,
+            "min_final_premium_vnd": lower,
+            "max_final_premium_vnd": upper,
+            "soft_cap_start_final_premium_vnd": soft_cap["soft_cap_start_final_premium_vnd"],
+        },
+    }
 
 
 def _predict_pure_premium(selection: dict, feature_df) -> float:
@@ -302,7 +355,9 @@ def quote(db, product_id: str, profile: dict,
         loading_factor = get_loading_factor(line)
 
     admin_fee = prod.get("admin_fee_vnd", 0)
-    pure_int, final_int = compute_final_premium(pure_premium, loading_factor, admin_fee)
+    calibration = apply_quote_calibration(line, prod, pure_premium, loading_factor, admin_fee)
+    pure_int = calibration["pure_premium_vnd"]
+    final_int = calibration["final_premium_vnd"]
 
     created_at = datetime.datetime.now(datetime.timezone.utc)
     expires_at = created_at + datetime.timedelta(days=QUOTE_VALIDITY_DAYS)
@@ -313,6 +368,7 @@ def quote(db, product_id: str, profile: dict,
 
     explanation = explain(selection["model"], feature_df)
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
+    geo_risk_version_id, cost_index_version_id = get_reference_versions()
 
     if db is not None and _quote_audit_enabled():
         from ..services.audit import record_audit
@@ -336,8 +392,11 @@ def quote(db, product_id: str, profile: dict,
         "model_version": selection["model_version"],
         "rate_version": rate_version_id,
         "product_rate_version_id": get_current_rate_version_id(),
+        "geo_risk_version_id": geo_risk_version_id,
+        "cost_index_version_id": cost_index_version_id,
         "loading_factor": float(loading_factor),
         "admin_fee_vnd": int(admin_fee),
+        "calibration": calibration["calibration"],
     }
 
 
@@ -375,7 +434,9 @@ def quote_freq_sev(db, product_id: str, profile: dict,
         loading_factor = get_loading_factor(line)
 
     admin_fee = prod.get("admin_fee_vnd", 0)
-    pure_int, final_int = compute_final_premium(pure_premium, loading_factor, admin_fee)
+    calibration = apply_quote_calibration(line, prod, pure_premium, loading_factor, admin_fee)
+    pure_int = calibration["pure_premium_vnd"]
+    final_int = calibration["final_premium_vnd"]
 
     created_at = datetime.datetime.now(datetime.timezone.utc)
     expires_at = created_at + datetime.timedelta(days=QUOTE_VALIDITY_DAYS)
@@ -383,6 +444,7 @@ def quote_freq_sev(db, product_id: str, profile: dict,
     rate_version_id = str(uuid.uuid4())
     explanation = explain({"freq": freq_model, "sev": sev_model}, feature_df)
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
+    geo_risk_version_id, cost_index_version_id = get_reference_versions()
     if db is not None and _quote_audit_enabled():
         from ..services.audit import record_audit
         record_audit(db, quote_id, feature_set, "freq_sev", rate_version_id)
@@ -404,6 +466,10 @@ def quote_freq_sev(db, product_id: str, profile: dict,
         "model_version": "freq_sev",
         "rate_version": rate_version_id,
         "product_rate_version_id": get_current_rate_version_id(),
+        "geo_risk_version_id": geo_risk_version_id,
+        "cost_index_version_id": cost_index_version_id,
         "loading_factor": float(loading_factor),
         "admin_fee_vnd": int(admin_fee),
+        "calibration": calibration["calibration"],
     }
+

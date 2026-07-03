@@ -32,7 +32,7 @@ VALIDATION_ENDPOINTS_ENABLED = _bool_env(
     "PRICING_BONUS_VALIDATION_ENDPOINTS_ENABLED", False)
 
 
-# ── Monotonic-exemption registry (BR-19 travel exemption, task 20.8b) ───────
+# â”€â”€ Monotonic-exemption registry (BR-19 travel exemption, task 20.8b) â”€â”€â”€â”€â”€â”€â”€
 # Lines whose champion is a GLM are exempt from the artifact-level monotonic
 # gate enforced in pricing_engine/governance.py. The GLM linear form does not
 # carry LightGBM-style monotone_constraints; instead the coefficient signs are
@@ -55,8 +55,6 @@ def is_monotonic_exempt(line: str, algorithm: str) -> bool:
     return line in MONOTONIC_EXEMPT_LINES and is_glm
 
 
-# ── Product-service integration (master data for catalog + loading factors) ─
-PRODUCT_SERVICE_BASE_URL = os.environ.get(
-    "PRODUCT_SERVICE_BASE_URL", "http://product-service-1:8080").rstrip("/")
+# Product catalog and loading factors are maintained as pricing read-models via product events.
 PRODUCT_HTTP_TIMEOUT_SECONDS = float(os.environ.get("PRODUCT_HTTP_TIMEOUT_SECONDS", "3"))
 PRODUCT_CACHE_TTL_SECONDS = float(os.environ.get("PRODUCT_CACHE_TTL_SECONDS", "300"))

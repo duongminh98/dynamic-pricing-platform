@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import pandas as pd
 
+from ..feature_store import get_cost_indices, get_geo_features
+
 from . import loader
+from .feature_buckets import add_health_bucket_features
 
 # Default prior-claim history: no prior claims, sentinel "no claim" date.
 PRIOR_DEFAULTS = {
@@ -20,6 +23,9 @@ PRIOR_DEFAULTS = {
     "total_incurred_36m_prior": 0.0,
     "avg_incurred_36m_prior": 0.0,
     "max_incurred_36m_prior": 0.0,
+    "large_claim_count_36m_prior": 0,
+    "severe_claim_count_36m_prior": 0,
+    "avg_incurred_score_prior": 0.0,
     "days_since_last_claim_prior": 9999,
     "claim_severity_score_prior": 0.0,
     "policy_count_prior": 0,
@@ -145,9 +151,15 @@ def build_features(line: str, product_id: str, profile: dict,
     """
     loader.ensure_loaded()
     line_attrs = profile.get("line_attributes", {}) or {}
+    derived_bucket_features = {}
+    if line == "health":
+        bucket_source = dict(line_attrs)
+        bucket_source.update(profile)
+        derived_bucket_features = add_health_bucket_features(bucket_source)
     province = profile.get("province", CATEGORICAL_DEFAULTS["province"])
-    geo = loader.geo_by_province.get(province, {})
+    geo = get_geo_features(province)
     prod = loader.get_product(product_id)
+    cost_indices = get_cost_indices()
 
     row: dict = {}
     for name in feature_names:
@@ -159,19 +171,22 @@ def build_features(line: str, product_id: str, profile: dict,
             row[name] = _cast_value(name, profile[name])
         elif name in line_attrs:
             row[name] = _cast_value(name, line_attrs[name])
-        # 2. derived geo features
+        # 2. deterministic bucket features
+        elif name in derived_bucket_features:
+            row[name] = derived_bucket_features[name]
+        # 3. derived geo features
         elif name in geo:
             row[name] = geo[name]
-        # 3. derived cost indices (reference = latest)
-        elif name in loader.cost_indices_latest:
-            row[name] = loader.cost_indices_latest[name]
-        # 4. prior-claim history defaults (point-in-time safe)
+        # 4. derived cost indices (reference = latest)
+        elif name in cost_indices:
+            row[name] = cost_indices[name]
+        # 5. prior-claim history defaults (point-in-time safe)
         elif name in PRIOR_DEFAULTS:
             row[name] = PRIOR_DEFAULTS[name]
-        # 5. numeric defaults
+        # 6. numeric defaults
         elif name in NUMERIC_DEFAULTS:
             row[name] = NUMERIC_DEFAULTS[name]
-        # 6. categorical defaults
+        # 7. categorical defaults
         elif name in CATEGORICAL_DEFAULTS:
             row[name] = CATEGORICAL_DEFAULTS[name]
         else:
@@ -183,8 +198,9 @@ def build_features(line: str, product_id: str, profile: dict,
 
     df = pd.DataFrame([row], columns=feature_names)
 
-    # LightGBM expects object columns cast to category.
-    for c in df.select_dtypes(include="object").columns:
+    # LightGBM categorical metadata must match training. The training pipeline
+    # converts object columns only; boolean flags remain boolean/numeric.
+    for c in df.select_dtypes(include=["object"]).columns:
         df[c] = df[c].astype("category")
     return df
 
@@ -203,3 +219,6 @@ def feature_set_for_audit(line: str, product_id: str, profile: dict,
         else:
             out[c] = val
     return out
+
+
+

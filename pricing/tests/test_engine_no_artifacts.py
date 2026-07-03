@@ -1,4 +1,4 @@
-"""Tests for app.pricing_engine.engine — functions that don't need model artifacts.
+"""Tests for app.pricing_engine.engine - functions that don't need model artifacts.
 
 Covers validate_profile, compute_final_premium, _rate_version_for,
 and quote() with mocked loader/selection.
@@ -16,6 +16,7 @@ from app.pricing_engine import engine
 from app.pricing_engine.engine import (
     validate_profile,
     compute_final_premium,
+    apply_quote_calibration,
     _rate_version_for,
     _quote_audit_enabled,
     PROFILE_RANGES,
@@ -24,7 +25,7 @@ from app.pricing_engine.engine import (
 from common.errors import ErrorCode, ServiceException
 
 
-# ── _rate_version_for ──
+# _rate_version_for
 
 def test_rate_version_for_is_deterministic():
     v1 = _rate_version_for("health", "v1.0")
@@ -44,7 +45,7 @@ def test_rate_version_for_differs_by_version():
     assert v1 != v2
 
 
-# ── _quote_audit_enabled ──
+# _quote_audit_enabled
 
 def test_quote_audit_enabled_reads_config():
     with patch("app.config.QUOTE_AUDIT_ENABLED", True):
@@ -53,7 +54,7 @@ def test_quote_audit_enabled_reads_config():
         assert _quote_audit_enabled() is False
 
 
-# ── compute_final_premium ──
+# compute_final_premium
 
 def test_compute_final_premium_basic():
     pure, final = compute_final_premium(500_000, 1.2, 10_000)
@@ -79,8 +80,37 @@ def test_compute_final_premium_rounding():
     pure2, _ = compute_final_premium(500_000.6, 1.0, 0)
     assert pure2 == 500_001
 
+def test_apply_quote_calibration_preserves_raw_premium_without_runtime_cap():
+    prod = {
+        "coverage_amount_vnd": 100_000_000,
+        "base_premium_vnd": 2_200_000,
+        "admin_fee_vnd": 500_000,
+    }
 
-# ── validate_profile ──
+    result = apply_quote_calibration("health", prod, 600_000_000, 1.0, 500_000)
+
+    assert result["final_premium_vnd"] == 600_500_000
+    assert result["pure_premium_vnd"] == 600_000_000
+    assert result["calibration"]["applied"] is False
+    assert result["calibration"]["reasons"] == []
+    assert result["calibration"]["raw_final_premium_vnd"] == 600_500_000
+    assert result["calibration"]["soft_cap_start_final_premium_vnd"] is None
+
+def test_apply_quote_calibration_does_not_floor_to_base_premium():
+    prod = {
+        "coverage_amount_vnd": 100_000_000,
+        "base_premium_vnd": 2_200_000,
+        "admin_fee_vnd": 500_000,
+    }
+
+    result = apply_quote_calibration("health", prod, 100_000, 1.0, 500_000)
+
+    assert result["final_premium_vnd"] == 600_000
+    assert result["pure_premium_vnd"] == 100_000
+    assert result["calibration"]["reasons"] == []
+
+
+# validate_profile
 
 def _valid_profile():
     return {
@@ -153,7 +183,7 @@ def test_validate_profile_accepts_in_range():
     validate_profile(prof)
 
 
-# ── quote() with mocked loader ──
+# quote() with mocked loader
 
 def test_quote_with_mocked_loader():
     mock_model = MagicMock()

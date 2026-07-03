@@ -24,7 +24,7 @@ CATS_PATH = PRICING_DIR / "tests" / "line_categories.json"
 # from loader.py (i.e. the repo root), NOT relative to pricing/.
 _REPO_ROOT = PRICING_DIR.parent
 CHAMPION_CONFIG_PATH = _REPO_ROOT / "reports" / "modeling" / "models" / "champion_config.json"
-METADATA_PATH = _REPO_ROOT / "data" / "synthetic_real" / "pricing_modeling_metadata.json"
+METADATA_PATH = _REPO_ROOT / "data" / "synthetic_real_1m_history_lift_v2" / "pricing_modeling_metadata.json"
 
 ARTIFACTS_AVAILABLE = CHAMPION_CONFIG_PATH.exists() and METADATA_PATH.exists()
 
@@ -83,6 +83,9 @@ _ARTIFACT_FREE_TESTS = frozenset({
     "test_routers_reports.py",
     "test_routers_admin.py",
     "test_claim_settled_consumer.py",
+    "test_claim_history_enrichment.py",
+    "test_quote_claim_enrichment_no_artifacts.py",
+    "test_product_read_model.py",
 })
 
 

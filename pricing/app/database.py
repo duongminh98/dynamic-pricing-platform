@@ -1,6 +1,6 @@
+import datetime
 import os
 import uuid
-import datetime
 from sqlalchemy import create_engine, Column, String, Integer, BigInteger, Boolean, DateTime, Float, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -23,7 +23,6 @@ Base = declarative_base()
 
 class Quote(Base):
     __tablename__ = 'quote'
-    
     quote_id = Column(String, primary_key=True)
     customer_id = Column(String, nullable=False)
     product_id = Column(String, nullable=False)
@@ -31,6 +30,8 @@ class Quote(Base):
     trip_duration_days = Column(Integer, nullable=True)
     coverage_amount_vnd = Column(BigInteger, nullable=True)
     deductible_vnd = Column(BigInteger, nullable=True)
+    geo_risk_version_id = Column(String, nullable=True)
+    cost_index_version_id = Column(String, nullable=True)
     profile = Column(JSON, nullable=True)
     pure_premium_vnd = Column(Integer, nullable=False)
     final_premium_vnd = Column(Integer, nullable=False)
@@ -40,7 +41,6 @@ class Quote(Base):
 
 class AuditTrail(Base):
     __tablename__ = 'audit_trail'
-    
     audit_id = Column(String, primary_key=True)
     quote_id = Column(String, nullable=True)
     feature_set = Column(JSON, nullable=True)
@@ -53,7 +53,6 @@ class AuditTrail(Base):
 
 class ModelVersion(Base):
     __tablename__ = 'model_version'
-    
     model_version_id = Column(String, primary_key=True)
     line = Column(String, nullable=False)
     algorithm = Column(String, nullable=False)
@@ -80,7 +79,6 @@ class ModelVersion(Base):
 
 class TrainingDatasetVersion(Base):
     __tablename__ = 'training_dataset_version'
-
     dataset_version_id = Column(String, primary_key=True)
     source_type = Column(String, nullable=False)
     artifact_uri = Column(String, nullable=False)
@@ -101,7 +99,6 @@ class TrainingDatasetVersion(Base):
 
 class TrainingDatasetFile(Base):
     __tablename__ = 'training_dataset_file'
-
     file_id = Column(String, primary_key=True)
     dataset_version_id = Column(String, ForeignKey('training_dataset_version.dataset_version_id'), nullable=False)
     line = Column(String, nullable=True)
@@ -113,17 +110,14 @@ class TrainingDatasetFile(Base):
 
 class ChampionAssignment(Base):
     __tablename__ = 'champion_assignment'
-
     assignment_id = Column(String, primary_key=True)
     line = Column(String, nullable=False)
     model_version_id = Column(String, nullable=False)
     is_current = Column(Boolean, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=True)
 
-
 class EventOutbox(Base):
     __tablename__ = 'event_outbox'
-
     event_id = Column(String, primary_key=True)
     event_type = Column(String, nullable=False)
     routing_key = Column(String, nullable=False)
@@ -133,7 +127,6 @@ class EventOutbox(Base):
 
 class ModelDriftFlag(Base):
     __tablename__ = 'model_drift_flag'
-
     flag_id = Column(String, primary_key=True)
     line = Column(String, nullable=False)
     metric = Column(String, nullable=False)
@@ -142,10 +135,8 @@ class ModelDriftFlag(Base):
     needs_recalibration = Column(Boolean, nullable=False, default=False)
     computed_at = Column(DateTime(timezone=True), nullable=False)
 
-
 class ClaimOutcome(Base):
     __tablename__ = 'claim_outcome'
-
     claim_id = Column(String, primary_key=True)
     customer_id = Column(String, nullable=True)
     quote_id = Column(String, nullable=True)
@@ -164,7 +155,6 @@ class ClaimOutcome(Base):
 
 class QuoteFeatureSnapshot(Base):
     __tablename__ = 'quote_feature_snapshot'
-
     quote_id = Column(String, primary_key=True)
     customer_id = Column(String, nullable=False)
     product_id = Column(String, nullable=False)
@@ -178,7 +168,6 @@ class QuoteFeatureSnapshot(Base):
 
 class PolicyExposure(Base):
     __tablename__ = 'policy_exposure'
-
     exposure_id = Column(String, primary_key=True)
     policy_id = Column(String, nullable=False)
     quote_id = Column(String, nullable=True)
@@ -199,7 +188,6 @@ class PolicyExposure(Base):
 
 class CustomerRiskProfile(Base):
     __tablename__ = 'customer_risk_profile'
-
     customer_id = Column(String, primary_key=True)
     profile_version = Column(Integer, nullable=False)
     effective_at = Column(DateTime(timezone=True), nullable=False)
@@ -210,7 +198,6 @@ class CustomerRiskProfile(Base):
 
 class QuoteReadyProfile(Base):
     __tablename__ = 'quote_ready_profile'
-
     customer_id = Column(String, primary_key=True)
     line = Column(String, primary_key=True)
     profile_version = Column(Integer, nullable=False)
@@ -219,9 +206,9 @@ class QuoteReadyProfile(Base):
     last_profile_event_id = Column(String, nullable=True)
     last_claim_event_id = Column(String, nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=False)
+
 class ProductCatalogItem(Base):
     __tablename__ = 'product_catalog_item'
-
     product_id = Column(String, primary_key=True)
     category = Column(String, nullable=False)
     product_name = Column(String, nullable=True)
@@ -235,10 +222,46 @@ class ProductCatalogItem(Base):
 
 class ProductLoadingFactor(Base):
     __tablename__ = 'product_loading_factor'
-
     line = Column(String, primary_key=True)
     rate_version_id = Column(String, nullable=True)
     loading_value = Column(Float, nullable=False, default=1.0)
     last_event_id = Column(String, nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
+class GeoRiskReferenceRow(Base):
+    __tablename__ = 'geo_risk_reference_row'
+    version_id = Column(String, primary_key=True)
+    province = Column(String, primary_key=True)
+    region = Column(String, nullable=True)
+    urban_tier_geo = Column(String, nullable=True)
+    traffic_density_score = Column(Float, nullable=False, default=0.0)
+    vehicle_theft_risk_score = Column(Float, nullable=False, default=0.0)
+    accident_frequency_index = Column(Float, nullable=False, default=0.0)
+    flood_risk_score = Column(Float, nullable=False, default=0.0)
+    storm_risk_score = Column(Float, nullable=False, default=0.0)
+    fire_risk_score = Column(Float, nullable=False, default=0.0)
+    crime_risk_score = Column(Float, nullable=False, default=0.0)
+    healthcare_access_score = Column(Float, nullable=False, default=0.0)
+    hospital_cost_index = Column(Float, nullable=False, default=0.0)
+    repair_cost_index = Column(Float, nullable=False, default=0.0)
+    construction_cost_index = Column(Float, nullable=False, default=0.0)
+    status = Column(String, nullable=False, default='ACTIVE')
+    checksum = Column(String, nullable=True)
+    last_event_id = Column(String, nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+class CostIndexReferenceRow(Base):
+    __tablename__ = 'cost_index_reference_row'
+    version_id = Column(String, primary_key=True)
+    month_start = Column(String, primary_key=True)
+    year = Column(Integer, nullable=False)
+    month = Column(Integer, nullable=False)
+    medical_inflation_index = Column(Float, nullable=False, default=1.0)
+    vehicle_repair_inflation_index = Column(Float, nullable=False, default=1.0)
+    construction_inflation_index = Column(Float, nullable=False, default=1.0)
+    travel_medical_cost_index = Column(Float, nullable=False, default=1.0)
+    general_expense_index = Column(Float, nullable=False, default=1.0)
+    status = Column(String, nullable=False, default='ACTIVE')
+    checksum = Column(String, nullable=True)
+    last_event_id = Column(String, nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
