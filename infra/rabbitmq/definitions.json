@@ -9,7 +9,9 @@
       "name": "platform_user",
       "password_hash": "yIlR8oJQXhFfOnQHyYblUm5Z/IreUcRq2sG2jp357U1NVX3h",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
-      "tags": ["administrator"]
+      "tags": [
+        "administrator"
+      ]
     }
   ],
   "permissions": [
@@ -239,7 +241,7 @@
       "arguments": {
         "x-queue-type": "quorum",
         "x-dead-letter-exchange": "platform.events.dlx",
-        "x-dead-letter-routing-key": "EndorsementApplied",
+        "x-dead-letter-routing-key": "endorsement.applied.billing.dlq",
         "x-delivery-limit": 3
       }
     },
@@ -251,7 +253,7 @@
       "arguments": {
         "x-queue-type": "quorum",
         "x-dead-letter-exchange": "platform.events.dlx",
-        "x-dead-letter-routing-key": "PolicyCancelled",
+        "x-dead-letter-routing-key": "policy.cancelled.billing.dlq",
         "x-delivery-limit": 3
       }
     },
@@ -263,7 +265,7 @@
       "arguments": {
         "x-queue-type": "quorum",
         "x-dead-letter-exchange": "platform.events.dlx",
-        "x-dead-letter-routing-key": "EndorsementCreditIssued",
+        "x-dead-letter-routing-key": "endorsement.credit.issued.billing.dlq",
         "x-delivery-limit": 3
       }
     },
@@ -275,7 +277,7 @@
       "arguments": {
         "x-queue-type": "quorum",
         "x-dead-letter-exchange": "platform.events.dlx",
-        "x-dead-letter-routing-key": "PolicyRenewed",
+        "x-dead-letter-routing-key": "policy.renewed.billing.dlq",
         "x-delivery-limit": 3
       }
     },
@@ -287,7 +289,7 @@
       "arguments": {
         "x-queue-type": "quorum",
         "x-dead-letter-exchange": "platform.events.dlx",
-        "x-dead-letter-routing-key": "OrderApproved",
+        "x-dead-letter-routing-key": "order.approved.billing.dlq",
         "x-delivery-limit": 3
       }
     },
@@ -299,7 +301,7 @@
       "arguments": {
         "x-queue-type": "quorum",
         "x-dead-letter-exchange": "platform.events.dlx",
-        "x-dead-letter-routing-key": "EndorsementPendingPayment",
+        "x-dead-letter-routing-key": "endorsement.pending.payment.billing.dlq",
         "x-delivery-limit": 3
       }
     },
@@ -503,6 +505,308 @@
     },
     {
       "name": "invoice.created.order.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "pricing.customer.profile.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-dead-letter-exchange": "platform.events.dlx",
+        "x-dead-letter-routing-key": "CustomerProfileUpdated",
+        "x-delivery-limit": 3
+      }
+    },
+    {
+      "name": "pricing.policy.events.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-dead-letter-exchange": "platform.events.dlx",
+        "x-delivery-limit": 3,
+        "x-dead-letter-routing-key": "pricing.policy.events.dlq"
+      }
+    },
+    {
+      "name": "pricing.product.events.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-dead-letter-exchange": "platform.events.dlx",
+        "x-delivery-limit": 3
+      }
+    },
+    {
+      "name": "pricing.customer.profile.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "pricing.policy.events.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "pricing.product.events.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "pricing.reprice.requested.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-dead-letter-exchange": "platform.events.dlx",
+        "x-dead-letter-routing-key": "RepriceRequested",
+        "x-delivery-limit": 3
+      }
+    },
+    {
+      "name": "reprice.completed.order.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-dead-letter-exchange": "platform.events.dlx",
+        "x-dead-letter-routing-key": "RepriceCompleted",
+        "x-delivery-limit": 3
+      }
+    },
+    {
+      "name": "order.submitted.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "order.rejected.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "endorsement.submitted.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "endorsement.rejected.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "endorsement.cancelled.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "endorsement.overdue.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "refund.requested.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "refund.completed.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "refund.rejected.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "invoice.voided.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "pricing.reprice.requested.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "reprice.completed.order.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "claim.submitted.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "customer.created.notification.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "customer.email.updated.notification.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "quote.created.order.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "endorsement.invoice.void.requested.billing.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "order.approved.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "endorsement.credit.issued.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "endorsement.pending.payment.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "claims.policy.issued.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "claims.policy.renewed.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "claims.policy.cancelled.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "claims.endorsement.applied.dlq",
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
@@ -803,9 +1107,281 @@
     {
       "source": "platform.events.dlx",
       "vhost": "/",
-      "destination": "endorsement.applied.billing.dlq",
+      "destination": "invoice.created.order.dlq",
+      "destination_type": "queue",
+      "routing_key": "InvoiceCreated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.customer.profile.queue",
+      "destination_type": "queue",
+      "routing_key": "CustomerProfileUpdated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.policy.events.queue",
+      "destination_type": "queue",
+      "routing_key": "PolicyIssued",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.policy.events.queue",
+      "destination_type": "queue",
+      "routing_key": "PolicyRenewed",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.policy.events.queue",
       "destination_type": "queue",
       "routing_key": "EndorsementApplied",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.policy.events.queue",
+      "destination_type": "queue",
+      "routing_key": "PolicyCancelled",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.product.events.queue",
+      "destination_type": "queue",
+      "routing_key": "ProductUpdated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.product.events.queue",
+      "destination_type": "queue",
+      "routing_key": "RateVersionActivated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.product.events.queue",
+      "destination_type": "queue",
+      "routing_key": "GeoRiskVersionActivated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.product.events.queue",
+      "destination_type": "queue",
+      "routing_key": "CostIndexVersionActivated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "pricing.customer.profile.dlq",
+      "destination_type": "queue",
+      "routing_key": "CustomerProfileUpdated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "pricing.product.events.dlq",
+      "destination_type": "queue",
+      "routing_key": "ProductUpdated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "pricing.product.events.dlq",
+      "destination_type": "queue",
+      "routing_key": "RateVersionActivated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "pricing.product.events.dlq",
+      "destination_type": "queue",
+      "routing_key": "GeoRiskVersionActivated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "pricing.product.events.dlq",
+      "destination_type": "queue",
+      "routing_key": "CostIndexVersionActivated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "pricing.reprice.requested.queue",
+      "destination_type": "queue",
+      "routing_key": "RepriceRequested",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events",
+      "vhost": "/",
+      "destination": "reprice.completed.order.queue",
+      "destination_type": "queue",
+      "routing_key": "RepriceCompleted",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "order.submitted.dlq",
+      "destination_type": "queue",
+      "routing_key": "OrderSubmitted",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "order.rejected.dlq",
+      "destination_type": "queue",
+      "routing_key": "OrderRejected",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "endorsement.submitted.dlq",
+      "destination_type": "queue",
+      "routing_key": "EndorsementSubmitted",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "endorsement.rejected.dlq",
+      "destination_type": "queue",
+      "routing_key": "EndorsementRejected",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "endorsement.cancelled.dlq",
+      "destination_type": "queue",
+      "routing_key": "EndorsementCancelled",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "endorsement.overdue.dlq",
+      "destination_type": "queue",
+      "routing_key": "EndorsementOverdue",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "refund.requested.dlq",
+      "destination_type": "queue",
+      "routing_key": "RefundRequested",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "refund.completed.dlq",
+      "destination_type": "queue",
+      "routing_key": "RefundCompleted",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "refund.rejected.dlq",
+      "destination_type": "queue",
+      "routing_key": "RefundRejected",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "invoice.voided.dlq",
+      "destination_type": "queue",
+      "routing_key": "InvoiceVoided",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "pricing.reprice.requested.dlq",
+      "destination_type": "queue",
+      "routing_key": "RepriceRequested",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "reprice.completed.order.dlq",
+      "destination_type": "queue",
+      "routing_key": "RepriceCompleted",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "claim.submitted.dlq",
+      "destination_type": "queue",
+      "routing_key": "ClaimSubmitted",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "customer.created.notification.dlq",
+      "destination_type": "queue",
+      "routing_key": "CustomerCreated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "customer.email.updated.notification.dlq",
+      "destination_type": "queue",
+      "routing_key": "CustomerEmailUpdated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "quote.created.order.dlq",
+      "destination_type": "queue",
+      "routing_key": "QuoteCreated",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "endorsement.invoice.void.requested.billing.dlq",
+      "destination_type": "queue",
+      "routing_key": "EndorsementInvoiceVoidRequested",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "endorsement.applied.billing.dlq",
+      "destination_type": "queue",
+      "routing_key": "endorsement.applied.billing.dlq",
       "arguments": {}
     },
     {
@@ -813,15 +1389,7 @@
       "vhost": "/",
       "destination": "policy.cancelled.billing.dlq",
       "destination_type": "queue",
-      "routing_key": "PolicyCancelled",
-      "arguments": {}
-    },
-    {
-      "source": "platform.events.dlx",
-      "vhost": "/",
-      "destination": "endorsement.credit.issued.billing.dlq",
-      "destination_type": "queue",
-      "routing_key": "EndorsementCreditIssued",
+      "routing_key": "policy.cancelled.billing.dlq",
       "arguments": {}
     },
     {
@@ -829,7 +1397,7 @@
       "vhost": "/",
       "destination": "policy.renewed.billing.dlq",
       "destination_type": "queue",
-      "routing_key": "PolicyRenewed",
+      "routing_key": "policy.renewed.billing.dlq",
       "arguments": {}
     },
     {
@@ -837,7 +1405,15 @@
       "vhost": "/",
       "destination": "order.approved.billing.dlq",
       "destination_type": "queue",
-      "routing_key": "OrderApproved",
+      "routing_key": "order.approved.billing.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "endorsement.credit.issued.billing.dlq",
+      "destination_type": "queue",
+      "routing_key": "endorsement.credit.issued.billing.dlq",
       "arguments": {}
     },
     {
@@ -845,15 +1421,71 @@
       "vhost": "/",
       "destination": "endorsement.pending.payment.billing.dlq",
       "destination_type": "queue",
+      "routing_key": "endorsement.pending.payment.billing.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "pricing.policy.events.dlq",
+      "destination_type": "queue",
+      "routing_key": "pricing.policy.events.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "order.approved.dlq",
+      "destination_type": "queue",
+      "routing_key": "OrderApproved",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "endorsement.credit.issued.dlq",
+      "destination_type": "queue",
+      "routing_key": "EndorsementCreditIssued",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "endorsement.pending.payment.dlq",
+      "destination_type": "queue",
       "routing_key": "EndorsementPendingPayment",
       "arguments": {}
     },
     {
       "source": "platform.events.dlx",
       "vhost": "/",
-      "destination": "invoice.created.order.dlq",
+      "destination": "claims.policy.issued.dlq",
       "destination_type": "queue",
-      "routing_key": "InvoiceCreated",
+      "routing_key": "claims.policy.issued.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "claims.policy.renewed.dlq",
+      "destination_type": "queue",
+      "routing_key": "claims.policy.renewed.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "claims.policy.cancelled.dlq",
+      "destination_type": "queue",
+      "routing_key": "claims.policy.cancelled.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "platform.events.dlx",
+      "vhost": "/",
+      "destination": "claims.endorsement.applied.dlq",
+      "destination_type": "queue",
+      "routing_key": "claims.endorsement.applied.dlq",
       "arguments": {}
     }
   ]

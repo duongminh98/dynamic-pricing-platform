@@ -18,22 +18,22 @@ public class RabbitConfig {
                 .build();
     }
 
-    @Bean public Queue endorsementQueue() { return billingQueue("endorsement.applied.billing.queue", "EndorsementApplied"); }
+    @Bean public Queue endorsementQueue() { return billingQueue("endorsement.applied.billing.queue", "endorsement.applied.billing.dlq"); }
     @Bean public Binding endorsementBinding() { return BindingBuilder.bind(endorsementQueue()).to(eventsExchange()).with("EndorsementApplied"); }
 
-    @Bean public Queue cancellationQueue() { return billingQueue("policy.cancelled.billing.queue", "PolicyCancelled"); }
+    @Bean public Queue cancellationQueue() { return billingQueue("policy.cancelled.billing.queue", "policy.cancelled.billing.dlq"); }
     @Bean public Binding cancellationBinding() { return BindingBuilder.bind(cancellationQueue()).to(eventsExchange()).with("PolicyCancelled"); }
 
-    @Bean public Queue creditIssuedQueue() { return billingQueue("endorsement.credit.issued.billing.queue", "EndorsementCreditIssued"); }
+    @Bean public Queue creditIssuedQueue() { return billingQueue("endorsement.credit.issued.billing.queue", "endorsement.credit.issued.billing.dlq"); }
     @Bean public Binding creditIssuedBinding() { return BindingBuilder.bind(creditIssuedQueue()).to(eventsExchange()).with("EndorsementCreditIssued"); }
 
-    @Bean public Queue renewalQueue() { return billingQueue("policy.renewed.billing.queue", "PolicyRenewed"); }
+    @Bean public Queue renewalQueue() { return billingQueue("policy.renewed.billing.queue", "policy.renewed.billing.dlq"); }
     @Bean public Binding renewalBinding() { return BindingBuilder.bind(renewalQueue()).to(eventsExchange()).with("PolicyRenewed"); }
 
-    @Bean public Queue orderApprovedQueue() { return billingQueue("order.approved.billing.queue", "OrderApproved"); }
+    @Bean public Queue orderApprovedQueue() { return billingQueue("order.approved.billing.queue", "order.approved.billing.dlq"); }
     @Bean public Binding orderApprovedBinding() { return BindingBuilder.bind(orderApprovedQueue()).to(eventsExchange()).with("OrderApproved"); }
 
-    @Bean public Queue endorsementPendingPaymentQueue() { return billingQueue("endorsement.pending.payment.billing.queue", "EndorsementPendingPayment"); }
+    @Bean public Queue endorsementPendingPaymentQueue() { return billingQueue("endorsement.pending.payment.billing.queue", "endorsement.pending.payment.billing.dlq"); }
     @Bean public Binding endorsementPendingPaymentBinding() { return BindingBuilder.bind(endorsementPendingPaymentQueue()).to(eventsExchange()).with("EndorsementPendingPayment"); }
 
     @Bean public Queue endorsementInvoiceVoidRequestedQueue() { return billingQueue("endorsement.invoice.void.requested.billing.queue", "EndorsementInvoiceVoidRequested"); }
