@@ -2,7 +2,8 @@
 
 These tests run fully OFFLINE and never touch a live database or the serving
 quote path. The retrain pipeline steps (train / validate / monotonic gate /
-register candidate) are monkeypatched so we can assert the *control flow*:
+smoothness gate / register candidate) are monkeypatched so we can assert the
+*control flow*:
 
   * a candidate Model_Version is registered, and it is NEVER auto-promoted;
   * the monotonic gate MUST pass before the candidate is registered (a failing
@@ -27,10 +28,10 @@ from offline.drift_monitor import (
 )
 
 
-# ───────────────────────── Retrain trigger ─────────────────────────────────
+# Retrain trigger
 class TestRetrainTriggerPipeline:
 
-    def _patch_steps(self, monkeypatch, calls, *, gate_ok=True):
+    def _patch_steps(self, monkeypatch, calls, *, gate_ok=True, smoothness_ok=True):
         """Patch every pipeline step to record call order, without side effects.
 
         register_candidate is patched to return a fake candidate id and is
@@ -43,6 +44,9 @@ class TestRetrainTriggerPipeline:
         monkeypatch.setattr(rt, "run_monotonic_gate",
                             lambda line: (calls.append("gate"),
                                           (gate_ok, "ok" if gate_ok else "violation"))[1])
+        monkeypatch.setattr(rt, "run_smoothness_gate",
+                            lambda line: (calls.append("smoothness"),
+                                          (smoothness_ok, "ok" if smoothness_ok else "cliff"))[1])
 
         def _fake_register(line):
             calls.append("register")
@@ -61,8 +65,8 @@ class TestRetrainTriggerPipeline:
         # The trigger must NEVER auto-promote.
         assert result["promoted"] is False
         # Full chain ran in order.
-        assert calls == ["train", "validate", "gate", "register"]
-        assert result["steps"] == ["train", "validate", "monotonic_gate", "register_candidate"]
+        assert calls == ["train", "validate", "gate", "smoothness", "register"]
+        assert result["steps"] == ["train", "validate", "monotonic_gate", "smoothness_gate", "register_candidate"]
 
     def test_monotonic_gate_must_pass_before_register(self, monkeypatch):
         calls = []
@@ -78,11 +82,24 @@ class TestRetrainTriggerPipeline:
         # Gate ran (after train+validate) but the chain stopped there.
         assert calls == ["train", "validate", "gate"]
 
-    def test_gate_runs_before_register_in_order(self, monkeypatch):
+    def test_smoothness_gate_must_pass_before_register(self, monkeypatch):
         calls = []
-        self._patch_steps(monkeypatch, calls, gate_ok=True)
+        self._patch_steps(monkeypatch, calls, gate_ok=True, smoothness_ok=False)
+
+        result = rt.trigger_retrain("health")
+
+        assert result["status"] == "gate_failed"
+        assert "register" not in calls
+        assert result["candidate_model_version"] is None
+        assert result["promoted"] is False
+        assert calls == ["train", "validate", "gate", "smoothness"]
+        assert "smoothness gate failed" in result["error"]
+
+    def test_gates_run_before_register_in_order(self, monkeypatch):
+        calls = []
+        self._patch_steps(monkeypatch, calls, gate_ok=True, smoothness_ok=True)
         rt.trigger_retrain("car")
-        assert calls.index("gate") < calls.index("register")
+        assert calls.index("gate") < calls.index("smoothness") < calls.index("register")
 
     def test_train_failure_aborts_before_gate_and_register(self, monkeypatch):
         calls = []
@@ -118,7 +135,7 @@ class TestMonotonicGateExemption:
         assert "missing" in msg.lower()
 
 
-# ───────────────────────── Drift monitor ───────────────────────────────────
+# Drift monitor
 class TestDriftFlagging:
 
     def test_injected_feature_drift_sets_flag(self):
@@ -212,7 +229,7 @@ class TestDriftFlagging:
         assert psi_drift > 0.25  # "significant drift" band
 
 
-# ───────────────────────── Drift-driven retrain (T12-T14) ───────────────────
+# Drift-driven retrain (T12-T14)
 class TestDriftDrivenRetrain:
 
     def test_t12_lines_with_drift_reads_needs_recalibration(self, monkeypatch):
@@ -268,6 +285,8 @@ class TestDriftDrivenRetrain:
                             lambda line: (calls.append("validate"), (True, ""))[1])
         monkeypatch.setattr(rt, "run_monotonic_gate",
                             lambda line: (calls.append("gate"), (True, "ok"))[1])
+        monkeypatch.setattr(rt, "run_smoothness_gate",
+                            lambda line: (calls.append("smoothness"), (True, "ok"))[1])
 
         registered = []
 
@@ -282,10 +301,11 @@ class TestDriftDrivenRetrain:
         assert result["status"] == "candidate_registered"
         assert result["promoted"] is False
         assert "register" in calls
+        assert calls == ["train", "validate", "gate", "smoothness", "register"]
         assert registered == ["health"]
 
     def test_t14_drift_trigger_disabled_returns_empty(self, monkeypatch):
-        """T14: drift_trigger_enabled=false → lines_with_drift returns []."""
+        """T14: drift_trigger_enabled=false â†’ lines_with_drift returns []."""
         config = {"drift_trigger_enabled": False}
 
         # Even if _get_db_connection would return data, it should never be called.

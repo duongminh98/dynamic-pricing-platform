@@ -1,4 +1,4 @@
-﻿"""Product/internal lookup + artifact loader for Pricing engine."""
+"""Product/internal lookup + artifact loader for Pricing engine."""
 from __future__ import annotations
 
 import json
@@ -98,7 +98,7 @@ def _load_db_champion_registry() -> dict[str, dict]:
         registry[row.line] = {
             "model_version": row.model_version_id,
             "algorithm": algo,
-            "family": row.family or quality_gates.get("family") or "tw",
+            "family": row.family or quality_gates.get("family"),
             "gini": row.gini,
             "trained_at": row.trained_at.isoformat() if row.trained_at else None,
             "dataset_version": row.dataset_version_id or row.dataset_desc,
@@ -117,7 +117,13 @@ def _resolve_champion_registry() -> dict[str, dict]:
     local_registry = _load_local_champion_registry()
     db_registry = _load_db_champion_registry()
     merged = dict(local_registry)
-    merged.update(db_registry)
+    for line, db_cfg in db_registry.items():
+        local_cfg = local_registry.get(line, {})
+        merged_cfg = dict(local_cfg)
+        merged_cfg.update({k: v for k, v in db_cfg.items() if v is not None})
+        if not merged_cfg.get("family"):
+            merged_cfg["family"] = local_cfg.get("family") or "freqsev"
+        merged[line] = merged_cfg
     return merged
 
 
@@ -198,7 +204,7 @@ def load_artifacts() -> None:
         if cfg is None:
             raise RuntimeError(f"Missing champion registry for line={line}")
         algo = _normalize_algorithm(cfg.get("algorithm", "lgb"))
-        family = cfg.get("family", "tw")
+        family = cfg.get("family") or "freqsev"
         artifacts[line] = {}
         all_artifacts[line] = {name: {} for name in FAMILIES}
         bundle = load_model_bundle(line, algo, family, cfg.get("artifact_uri"))
@@ -355,7 +361,7 @@ def required_columns(line: str) -> list[str]:
     ensure_loaded()
     cfg = get_champion(line)
     algo = _normalize_algorithm(cfg.get("algorithm", "lgb"))
-    family = cfg.get("family", "tw")
+    family = cfg.get("family") or "freqsev"
     if family in ("freqsev", "freq_sev"):
         model = all_artifacts[line]["freq"].get(algo) or artifacts[line]["freq"]
     else:

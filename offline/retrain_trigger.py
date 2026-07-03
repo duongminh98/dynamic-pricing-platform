@@ -46,7 +46,7 @@ import sys
 import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data" / "synthetic_real"
+DATA_DIR = ROOT / "data" / "synthetic_real_1m_history_lift_v2"
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
 CONFIG_PATH = ROOT / "offline" / "retrain_config.json"
 
@@ -73,6 +73,7 @@ MONOTONE_COMMON = {
     "days_since_last_claim_prior": -1,
     "claim_severity_score_prior": 1,
 }
+MONOTONE_HEALTH = {**MONOTONE_COMMON, "age": 1, "bmi": 1}
 MONOTONE_VEHICLE = {**MONOTONE_COMMON, "annual_mileage_km": 1}
 
 
@@ -81,7 +82,7 @@ def load_config() -> dict:
         return json.load(f)
 
 
-# ── Trigger-condition detection ─────────────────────────────────────────────
+# Trigger-condition detection
 def is_scheduled(config: dict, now: datetime.datetime | None = None) -> bool:
     """Check if the current month matches a quarterly schedule month."""
     if not config.get("schedule_quarterly", False):
@@ -155,12 +156,12 @@ def lines_with_drift(config: dict) -> list[str]:
     return result
 
 
-# ── Pipeline steps (each is independently monkeypatchable in tests) ─────────
-def _run_script(script_rel: str) -> tuple[bool, str]:
+# Pipeline steps are independently monkeypatchable in tests
+def _run_script(script_rel: str, *args: str) -> tuple[bool, str]:
     """Run an offline script as a subprocess. Returns (ok, error_message)."""
     try:
         proc = subprocess.run(
-            [sys.executable, str(ROOT / script_rel)],
+            [sys.executable, str(ROOT / script_rel), *args],
             capture_output=True, text=True, timeout=1200,
         )
         if proc.returncode != 0:
@@ -172,7 +173,7 @@ def _run_script(script_rel: str) -> tuple[bool, str]:
 
 def run_training(line: str) -> tuple[bool, str]:
     """Step 1: re-fit champion artifacts (offline/train_pricing_models.py)."""
-    return _run_script("offline/train_pricing_models.py")
+    return _run_script("offline/train_pricing_models.py", "--line", line)
 
 
 def run_validation(line: str) -> tuple[bool, str]:
@@ -180,7 +181,16 @@ def run_validation(line: str) -> tuple[bool, str]:
     return _run_script("scripts/validate_pricing_models.py")
 
 
+def run_smoothness_gate(line: str) -> tuple[bool, str]:
+    """Step 4: validate local premium smoothness before candidate registration."""
+    if line != "health":
+        return True, "not applicable"
+    return _run_script("offline/model_smoothness_gate.py", "--line", line)
+
+
 def _expected_monotone(line: str) -> dict:
+    if line == "health":
+        return MONOTONE_HEALTH
     return MONOTONE_VEHICLE if line in ("car", "motorbike") else MONOTONE_COMMON
 
 
@@ -275,8 +285,8 @@ def register_candidate(line: str) -> dict:
 def trigger_retrain(line: str, dry_run: bool = False) -> dict:
     """Run the re-train cycle for a single line.
 
-    Chain: train -> validate -> monotonic gate -> register CANDIDATE.
-    Stops at the first failing step. The monotonic gate MUST pass before the
+    Chain: train -> validate -> monotonic gate -> smoothness gate -> register
+    CANDIDATE. Stops at the first failing step. Both gates MUST pass before the
     candidate is registered. NEVER promotes (promotion stays governed by BR-23).
 
     Returns a dict with line, status, steps completed, the candidate id (if any),
@@ -309,6 +319,13 @@ def trigger_retrain(line: str, dry_run: bool = False) -> dict:
         # Gate failed -> abort BEFORE registering anything (BR-19).
         result["status"] = "gate_failed"
         result["error"] = f"monotonic gate failed: {gate_msg}"
+        return result
+
+    ok, gate_msg = run_smoothness_gate(line)
+    result["steps"].append("smoothness_gate")
+    if not ok:
+        result["status"] = "gate_failed"
+        result["error"] = f"smoothness gate failed: {gate_msg}"
         return result
 
     candidate = register_candidate(line)

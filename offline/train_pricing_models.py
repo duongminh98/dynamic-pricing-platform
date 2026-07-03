@@ -1,7 +1,7 @@
-﻿"""
+"""
 Offline training script: re-fit Champion LightGBM models with monotone_constraints.
 
-Reads data from data/synthetic_real/ (the authoritative dataset).
+Reads data from data/synthetic_real_1m_history_lift_v2/ (the authoritative dataset).
 For each of the 6 lines, fits freq (Poisson), sev (Gamma), and tw (Tweedie) models
 with monotone_constraints enforcing:
   - coverage_amount_vnd     -> +1 (higher coverage -> higher premium)
@@ -10,7 +10,7 @@ with monotone_constraints enforcing:
   - claim_count_36m_prior   -> +1 (more prior claims -> higher premium)
 
 Actuarial targets (MUST match the established pipeline in scripts/train_pricing_models.py
-and pricing_modeling_metadata.json — final_premium_vnd is a benchmark, NEVER a target):
+and pricing_modeling_metadata.json â€” final_premium_vnd is a benchmark, NEVER a target):
   - freq : claim_count / earned_exposure_years  (claims per exposure-year), weight = exposure
   - sev  : incurred_amount per claim (claims with loss > 0 only), no weight
   - tw   : loss per exposure-year = (sum incurred per exposure_id) / earned_exposure_years,
@@ -38,7 +38,7 @@ WHERE GroupKFold runs:
   * The full validation/comparison pipeline in
     ``scripts/validate_pricing_models.py`` uses the same anti-leakage principle
     via the ``time_based_grouped`` split (group_col=customer_id) declared in
-    ``data/synthetic_real/pricing_modeling_metadata.json``.
+    ``data/synthetic_real_1m_history_lift_v2/pricing_modeling_metadata.json``.
   * See ``offline/README.md`` for the operational note.
 Running ``--cv`` only prints CV metrics; it NEVER overwrites the champion
 artifacts (artifact outputs are produced by the default ``main()`` path).
@@ -49,6 +49,7 @@ Requirements: R12.7, R4.7, R29.5, R30.5, R31.3, R31.4 (design section 6.3, BR-19
 import json
 import os
 import pathlib
+import sys
 import warnings
 
 import joblib
@@ -56,15 +57,20 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+_IMPORT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(_IMPORT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_IMPORT_ROOT))
+
+
 warnings.filterwarnings("ignore")
 
 # Minimum exposure floor to avoid division-by-zero when computing per-year rates
 # (matches scripts/train_pricing_models.py: earned_exposure_years.clip(lower=1e-6)).
 MIN_EXPOSURE = 1e-6
 
-# ── Paths ──────────────────────────────────────────────────────────────────
+# -- Paths ------------------------------------------------------------------
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA_DIR = pathlib.Path(os.environ.get("PRICING_TRAIN_DATA_DIR", ROOT / "data" / "synthetic_real"))
+DATA_DIR = pathlib.Path(os.environ.get("PRICING_TRAIN_DATA_DIR", ROOT / "data" / "synthetic_real_1m_history_lift_v2"))
 if not DATA_DIR.is_absolute():
     DATA_DIR = ROOT / DATA_DIR
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
@@ -73,7 +79,7 @@ BASELINES_DIR = ROOT / "reports" / "modeling" / "baselines"
 
 LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
 
-# ── Monotone variable definitions ──────────────────────────────────────────
+# -- Monotone variable definitions ------------------------------------------
 # Key: feature name -> constraint direction (+1 increasing, -1 decreasing, 0 none)
 # annual_mileage_km only applies to car/motorbike (driving exposure lines)
 MONOTONE_COMMON = {
@@ -85,6 +91,9 @@ MONOTONE_COMMON = {
     "total_incurred_36m_prior": 1,
     "avg_incurred_36m_prior": 1,
     "max_incurred_36m_prior": 1,
+    "large_claim_count_36m_prior": 1,
+    "severe_claim_count_36m_prior": 1,
+    "avg_incurred_score_prior": 1,
     "days_since_last_claim_prior": -1,
     "claim_severity_score_prior": 1,
 }
@@ -92,6 +101,7 @@ MONOTONE_COMMON = {
 MONOTONE_BY_LINE = {
     "health": {
         **MONOTONE_COMMON,
+        "age": 1,
         "bmi": 1,
         "smoker": 1,
         "chronic_disease": 1,
@@ -154,7 +164,7 @@ MONOTONE_VEHICLE = {
     "annual_mileage_km": 1,
 }
 
-# ── Exclusion sets ─────────────────────────────────────────────────────────
+# -- Exclusion sets ---------------------------------------------------------
 with open(METADATA_PATH) as f:
     METADATA = json.load(f)
 
@@ -179,11 +189,34 @@ EXCLUDE_COLS.update([
 ])
 
 
+
+
+
+
+EXTRA_FEATURES_BY_LINE = {
+    "health": [
+        "avg_incurred_36m_prior",
+        "claim_severity_score_prior",
+        "large_claim_count_36m_prior",
+        "severe_claim_count_36m_prior",
+        "avg_incurred_score_prior",
+        "age_disease_bucket",
+        "bmi_disease_bucket",
+    ],
+}
+
+def feature_order_for_training(line: str, df: pd.DataFrame, existing_features: list[str]) -> list[str]:
+    feature_names = list(existing_features)
+    for feature in EXTRA_FEATURES_BY_LINE.get(line, []):
+        if feature in df.columns and feature not in feature_names and feature not in EXCLUDE_COLS:
+            feature_names.append(feature)
+    return feature_names
+
 def build_monotone_constraints(feature_names: list[str], line: str) -> list[int]:
     """Build monotone_constraints list aligned with feature column order.
 
     The constraint list position MUST match the column order used during
-    training (same order as feature_names). This is critical — misalignment
+    training (same order as feature_names). This is critical â€” misalignment
     causes the constraint to apply to the wrong variable (HIGH RISK per design).
     """
     monotone_map = MONOTONE_BY_LINE.get(line, MONOTONE_COMMON)
@@ -209,6 +242,24 @@ def prepare_features(df: pd.DataFrame, existing_features: list[str]) -> pd.DataF
     return feat_df[existing_features]
 
 
+
+PRIOR_HISTORY_WEIGHT_MULTIPLIER = {"freq": 8.0, "sev": 30.0, "tw": 8.0}
+
+def apply_prior_history_weight(df_work: pd.DataFrame, sample_weight, family: str):
+    if "claim_count_36m_prior" not in df_work.columns:
+        return sample_weight
+    weights = (
+        np.ones(len(df_work), dtype=float)
+        if sample_weight is None and family == "sev"
+        else None if sample_weight is None
+        else np.asarray(sample_weight, dtype=float).copy()
+    )
+    if weights is None:
+        return sample_weight
+    prior_mask = df_work["claim_count_36m_prior"].fillna(0).to_numpy() > 0
+    weights[prior_mask] *= PRIOR_HISTORY_WEIGHT_MULTIPLIER.get(family, 1.0)
+    return weights
+
 def retrain_model(line: str, family: str, df: pd.DataFrame) -> lgb.LGBMRegressor | None:
     """Re-train a single LightGBM model with monotone_constraints.
 
@@ -226,7 +277,7 @@ def retrain_model(line: str, family: str, df: pd.DataFrame) -> lgb.LGBMRegressor
         return None
 
     existing = joblib.load(existing_path)
-    existing_features = list(existing.feature_name_)
+    existing_features = feature_order_for_training(line, df, list(existing.feature_name_))
     monotone_constraints = build_monotone_constraints(existing_features, line)
 
     # Subset data for severity (claims > 0 only)
@@ -264,17 +315,26 @@ def retrain_model(line: str, family: str, df: pd.DataFrame) -> lgb.LGBMRegressor
     else:
         raise ValueError(f"Unknown family: {family}")
 
+    sample_weight = apply_prior_history_weight(df_work, sample_weight, family)
+
     # Copy existing hyperparameters, add monotone_constraints
     params = existing.get_params()
     params["monotone_constraints"] = monotone_constraints
     params["verbose"] = -1
+    if line == "health":
+        params.update({
+            "max_depth": 4,
+            "min_child_samples": 500,
+            "min_split_gain": 0.0,
+            "num_leaves": 16,
+        })
 
     model = lgb.LGBMRegressor(**params)
     model.fit(feat_df, target, sample_weight=sample_weight)
     return model
 
 
-# ── Anti-leakage cross-validation (task 20.8a) ──────────────────────────────
+# -- Anti-leakage cross-validation (task 20.8a) ------------------------------
 # Number of folds and the grouping column for GroupKFold. Grouping by
 # customer_id prevents the same customer's rows landing in both train and
 # validation folds (entity leakage).
@@ -567,17 +627,20 @@ def main():
     parser = argparse.ArgumentParser(description="Offline champion training / CV")
     parser.add_argument("--cv", action="store_true",
                         help="Run k=5 GroupKFold (by customer_id) CV only; do not write artifacts")
+    parser.add_argument("--line", choices=LINES, help="Re-fit only one product line")
     args, _ = parser.parse_known_args()
+
+    selected_lines = [args.line] if args.line else LINES
 
     if args.cv:
         print(f"Running GroupKFold k={CV_FOLDS} (grouped by {GROUP_COL}) anti-leakage CV...")
-        run_cv()
+        run_cv(lines=selected_lines)
         return
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     results = []
-    for line in LINES:
+    for line in selected_lines:
         print(f"\n{'='*60}")
         print(f"Re-fitting {line} champion models with monotone_constraints")
         print(f"Data source: {DATA_DIR}")
@@ -645,7 +708,7 @@ def main():
     print("Summary:")
     for r in results:
         print(f"  {r}")
-    print(f"\nAll 18 champion LightGBM models re-fitted with monotone_constraints.")
+    print(f"\nSelected champion LightGBM models re-fitted with monotone_constraints.")
     print(f"{'='*60}")
 
 
