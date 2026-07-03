@@ -18,6 +18,7 @@ build_one() {
   {
     echo "steps:"
     echo "  - name: gcr.io/cloud-builders/docker"
+    echo "    env: ['DOCKER_BUILDKIT=1']"
     echo "    args:"
     echo "      - build"
     echo "      - -f"

@@ -25,10 +25,16 @@ COPY pricing/ /app/
 COPY offline/ /app/offline/
 COPY scripts/ /app/scripts/
 
-# Reference data + champion config are gitignored and normally mounted as
-# volumes in compose; the batch jobs need them baked in (metadata, geo/cost/
-# products CSVs, champion_config.json fallback).
-COPY data/synthetic_real_1m_history_lift_v2/ /app/data/synthetic_real_1m_history_lift_v2/
+# Only the SMALL reference files are baked in (metadata + geo/cost/products +
+# champion_config fallback). The large training tables (pricing_freq_*,
+# policy_exposure_*, policies/claims/customers, *_profiles) are NOT baked — the
+# export job writes datasets to GCS and train/compare read them back via the
+# gs:// object-storage adapter. A repo-root .gcloudignore keeps the big CSVs out
+# of the Cloud Build upload context.
+COPY data/synthetic_real_1m_history_lift_v2/pricing_modeling_metadata.json /app/data/synthetic_real_1m_history_lift_v2/pricing_modeling_metadata.json
+COPY data/synthetic_real_1m_history_lift_v2/geo_risk.csv                   /app/data/synthetic_real_1m_history_lift_v2/geo_risk.csv
+COPY data/synthetic_real_1m_history_lift_v2/cost_indices.csv              /app/data/synthetic_real_1m_history_lift_v2/cost_indices.csv
+COPY data/synthetic_real_1m_history_lift_v2/products.csv                  /app/data/synthetic_real_1m_history_lift_v2/products.csv
 COPY reports/modeling/models/champion_config.json /app/reports/modeling/models/champion_config.json
 
 ENV PYTHONPATH=/app \

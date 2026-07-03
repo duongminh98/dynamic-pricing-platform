@@ -27,7 +27,7 @@ spec:
               name: dpp-secrets
               key: db-password
         - name: SPRING_FLYWAY_ENABLED
-          value: "false"
+          value: "true"
         - name: RABBITMQ_HOST
           value: "rabbitmq.dpp.svc.cluster.local"
         - name: RABBITMQ_PORT

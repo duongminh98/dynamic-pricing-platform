@@ -16,7 +16,7 @@ spec:
       containers:
       - name: keycloak
         image: quay.io/keycloak/keycloak:26.0.7
-        args: ["start", "--optimized", "--import-realm", "--hostname=auth.dpp-pricing.dev", "--proxy-headers=xforwarded", "--http-enabled=true"]
+        args: ["start", "--import-realm", "--hostname=auth.dpp-pricing.dev", "--proxy-headers=xforwarded", "--http-enabled=true"]
         env:
         - name: KC_DB
           value: postgres
@@ -47,9 +47,6 @@ spec:
         resources:
           requests: {cpu: 300m, memory: 640Mi}
           limits: {memory: 1280Mi}
-      volumes:
-      - name: realm
-        configMap: {name: keycloak-realm}
       - name: cloud-sql-proxy
         image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.0
         args:
@@ -61,6 +58,9 @@ spec:
           runAsNonRoot: true
         resources:
           requests: {cpu: 50m, memory: 64Mi}
+      volumes:
+      - name: realm
+        configMap: {name: keycloak-realm}
 ---
 apiVersion: v1
 kind: Service

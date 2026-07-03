@@ -30,11 +30,14 @@ spec:
           value: /etc/rabbitmq/enabled_plugins
         volumeMounts:
         - {name: config, mountPath: /etc/rabbitmq/definitions.json, subPath: definitions.json}
+        - {name: config, mountPath: /etc/rabbitmq/rabbitmq.conf, subPath: rabbitmq.conf}
+        - {name: config, mountPath: /etc/rabbitmq/enabled_plugins, subPath: enabled_plugins}
         - {name: data, mountPath: /var/lib/rabbitmq}
         readinessProbe:
           exec: {command: ["rabbitmq-diagnostics", "-q", "ping"]}
           initialDelaySeconds: 30
           periodSeconds: 15
+          timeoutSeconds: 10
         resources:
           requests: {cpu: 250m, memory: 512Mi}
           limits: {memory: 1Gi}

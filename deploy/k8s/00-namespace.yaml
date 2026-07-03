@@ -60,3 +60,11 @@ metadata:
   namespace: dpp
   annotations:
     iam.gke.io/gcp-service-account: pricing-runtime-sa@dpp-staging-260703.iam.gserviceaccount.com
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keycloak-sa
+  namespace: dpp
+  annotations:
+    iam.gke.io/gcp-service-account: keycloak@dpp-staging-260703.iam.gserviceaccount.com

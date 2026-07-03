@@ -11,8 +11,9 @@ set -a; . deploy/config.env; set +a
 K="kubectl --namespace $K8S_NAMESPACE"
 log() { echo -e "\n\033[1;36m== $* ==\033[0m"; }
 
-log "Fetch cluster credentials"
-gcloud container clusters get-credentials "$GKE_CLUSTER" --region "$REGION" --project "$PROJECT_ID"
+log "Fetch cluster credentials (static-token kubeconfig; avoids gke-gcloud-auth-plugin)"
+bash deploy/kubeconfig.sh
+export KUBECONFIG="$PWD/.deploy/kubeconfig.yaml"
 
 log "Render manifests at current IMAGE_TAG=$IMAGE_TAG"
 python deploy/render_k8s.py
@@ -29,12 +30,12 @@ $K create configmap keycloak-realm        --from-file=realm-export.json=infra/ke
 log "Sync dpp-secrets from Secret Manager"
 sm() { gcloud secrets versions access latest --secret="$1" --project "$PROJECT_ID"; }
 $K create secret generic dpp-secrets \
-  --from-literal=db-password="$(sm dpp-db-password)" \
-  --from-literal=rabbitmq-password="$(sm dpp-rabbitmq-password)" \
-  --from-literal=keycloak-admin="$(sm dpp-keycloak-admin)" \
-  --from-literal=keycloak-admin-password="$(sm dpp-keycloak-admin-password)" \
-  --from-literal=vnp-tmn-code="$(sm dpp-vnp-tmn-code 2>/dev/null || echo '')" \
-  --from-literal=vnp-hash-secret="$(sm dpp-vnp-hash-secret 2>/dev/null || echo '')" \
+  --from-literal=db-password="$(sm db-password)" \
+  --from-literal=rabbitmq-password="$(sm rabbitmq-password)" \
+  --from-literal=keycloak-admin="$(sm keycloak-admin)" \
+  --from-literal=keycloak-admin-password="$(sm keycloak-admin-password)" \
+  --from-literal=vnp-tmn-code="$(sm vnp-tmn-code 2>/dev/null || echo '')" \
+  --from-literal=vnp-hash-secret="$(sm vnp-hash-secret 2>/dev/null || echo '')" \
   --dry-run=client -o yaml | $K apply -f -
 
 log "Infra: RabbitMQ + Keycloak"
@@ -42,13 +43,13 @@ kubectl apply -f deploy/k8s/20-rabbitmq.yaml -f deploy/k8s/21-keycloak.yaml
 $K rollout status statefulset/rabbitmq --timeout=300s
 $K rollout status deployment/keycloak --timeout=420s
 
-log "Migration gate (Flyway x6 + Alembic)"
+log "Migration gate (Alembic for pricing_db)"
+# Java services (Flyway) migrate at serving-pod startup — Flyway's table lock
+# makes concurrent starts safe, and the app process never exits so a migrate
+# Job would hang. Only pricing needs a dedicated one-shot Alembic Job.
 kubectl apply -f deploy/k8s/90-migrations.yaml
-for j in migrate-customer-service migrate-product-service migrate-order-service \
-         migrate-claims-service migrate-billing-service migrate-notification-service migrate-pricing; do
-  echo "waiting for job/$j"
-  $K wait --for=condition=complete "job/$j" --timeout=300s
-done
+echo "waiting for job/migrate-pricing"
+$K wait --for=condition=complete job/migrate-pricing --timeout=300s
 
 log "App services"
 kubectl apply -f deploy/k8s/10-customer-service.yaml -f deploy/k8s/10-product-service.yaml \

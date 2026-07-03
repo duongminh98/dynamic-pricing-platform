@@ -105,7 +105,12 @@ def java_deployment(cfg: dict, svc: str, prefix: str, extra: dict) -> str:
     env_lines = [
         ("POSTGRES_USER", {"value": cfg["DB_USER"]}),
         ("POSTGRES_PASSWORD", {"secret": "db-password"}),
-        ("SPRING_FLYWAY_ENABLED", {"value": "false"}),
+        # v1 "simpler" migration path (GCP_DEPLOYMENT.md §6.4): Flyway runs at
+        # startup — its table lock makes concurrent pod starts safe, and it's
+        # idempotent. (A pre-deploy Job can't be the full app, since the outbox
+        # relay + @RabbitListener threads keep the JVM alive so a Job never
+        # terminates. Alembic/pricing has a proper one-shot job below.)
+        ("SPRING_FLYWAY_ENABLED", {"value": "true"}),
         ("RABBITMQ_HOST", {"value": "rabbitmq.dpp.svc.cluster.local"}),
         ("RABBITMQ_PORT", {"value": "5672"}),
         ("RABBITMQ_USER", {"value": cfg["RABBITMQ_USER"]}),
@@ -286,7 +291,60 @@ def namespace_and_sa(cfg: dict) -> str:
           annotations:
             iam.gke.io/gcp-service-account: pricing-runtime-sa@{cfg['PROJECT_ID']}.iam.gserviceaccount.com
         """))
+    # keycloak uses its own SA (Cloud SQL client via Workload Identity)
+    sa_blocks.append(textwrap.dedent(f"""\
+        ---
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: keycloak-sa
+          namespace: dpp
+          annotations:
+            iam.gke.io/gcp-service-account: keycloak@{cfg['PROJECT_ID']}.iam.gserviceaccount.com
+        """))
     return header("namespace + workload-identity service accounts") + "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: dpp\n" + "".join(sa_blocks)
+
+
+def mailpit_deployment(cfg: dict) -> str:
+    """Dev SMTP sink (compose parity). notification-service points MAIL_HOST at
+    this in-cluster Service; in prod swap for a real SMTP relay (GCP_DEPLOYMENT §5.5)."""
+    return header("Mailpit (dev SMTP capture; replace with real relay in prod)") + textwrap.dedent(f"""\
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: mailpit
+          namespace: dpp
+        spec:
+          replicas: 1
+          selector: {{matchLabels: {{app: mailpit}}}}
+          template:
+            metadata:
+              labels: {{app: mailpit}}
+            spec:
+              containers:
+              - name: mailpit
+                image: axllent/mailpit:latest
+                ports:
+                - {{containerPort: 1025, name: smtp}}
+                - {{containerPort: 8025, name: ui}}
+                env:
+                - {{name: MP_SMTP_AUTH_ACCEPT_ANY, value: "true"}}
+                - {{name: MP_SMTP_AUTH_ALLOW_INSECURE, value: "true"}}
+                resources:
+                  requests: {{cpu: 25m, memory: 64Mi}}
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: mailpit
+          namespace: dpp
+        spec:
+          type: ClusterIP
+          selector: {{app: mailpit}}
+          ports:
+          - {{port: 1025, targetPort: 1025, name: smtp}}
+          - {{port: 8025, targetPort: 8025, name: ui}}
+        """)
 
 
 def rabbitmq_statefulset(cfg: dict) -> str:
@@ -321,11 +379,14 @@ def rabbitmq_statefulset(cfg: dict) -> str:
                   value: /etc/rabbitmq/enabled_plugins
                 volumeMounts:
                 - {{name: config, mountPath: /etc/rabbitmq/definitions.json, subPath: definitions.json}}
+                - {{name: config, mountPath: /etc/rabbitmq/rabbitmq.conf, subPath: rabbitmq.conf}}
+                - {{name: config, mountPath: /etc/rabbitmq/enabled_plugins, subPath: enabled_plugins}}
                 - {{name: data, mountPath: /var/lib/rabbitmq}}
                 readinessProbe:
                   exec: {{command: ["rabbitmq-diagnostics", "-q", "ping"]}}
                   initialDelaySeconds: 30
                   periodSeconds: 15
+                  timeoutSeconds: 10
                 resources:
                   requests: {{cpu: 250m, memory: 512Mi}}
                   limits: {{memory: 1Gi}}
@@ -372,7 +433,7 @@ def keycloak_deployment(cfg: dict) -> str:
               containers:
               - name: keycloak
                 image: quay.io/keycloak/keycloak:26.0.7
-                args: ["start", "--optimized", "--import-realm", "--hostname={cfg['AUTH_HOST']}", "--proxy-headers=xforwarded", "--http-enabled=true"]
+                args: ["start", "--import-realm", "--hostname={cfg['AUTH_HOST']}", "--proxy-headers=xforwarded", "--http-enabled=true"]
                 env:
                 - name: KC_DB
                   value: postgres
@@ -403,10 +464,10 @@ def keycloak_deployment(cfg: dict) -> str:
                 resources:
                   requests: {{cpu: 300m, memory: 640Mi}}
                   limits: {{memory: 1280Mi}}
+              __SQLPROXY__
               volumes:
               - name: realm
                 configMap: {{name: keycloak-realm}}
-              __SQLPROXY__
         ---
         apiVersion: v1
         kind: Service
@@ -422,42 +483,27 @@ def keycloak_deployment(cfg: dict) -> str:
 
 
 def migration_jobs(cfg: dict) -> str:
-    """One Job per Java service (Flyway) + one for pricing (Alembic). Run as a
-    pre-deploy gate; each connects through its own Cloud SQL proxy sidecar."""
-    blocks = []
-    for svc, (prefix, _extra) in JAVA_SERVICES.items():
-        img = f"{cfg['REGION']}-docker.pkg.dev/{cfg['PROJECT_ID']}/{cfg['AR_REPO']}/{svc}:{cfg['IMAGE_TAG']}"
-        blocks.append(_inject(textwrap.dedent(f"""\
-            ---
-            apiVersion: batch/v1
-            kind: Job
-            metadata:
-              name: migrate-{svc}
-              namespace: dpp
-            spec:
-              backoffLimit: 2
-              template:
-                spec:
-                  restartPolicy: Never
-                  serviceAccountName: {svc}-sa
-                  containers:
-                  - name: migrate
-                    image: {img}
-                    env:
-                    - {{name: POSTGRES_USER, value: "{cfg['DB_USER']}"}}
-                    - name: POSTGRES_PASSWORD
-                      valueFrom: {{secretKeyRef: {{name: dpp-secrets, key: db-password}}}}
-                    - {{name: {prefix}_DB_HOST, value: "127.0.0.1"}}
-                    - {{name: {prefix}_DB_PORT, value: "5432"}}
-                    - {{name: {prefix}_DB_NAME, value: "{DB_NAMES[prefix]}"}}
-                    - {{name: SPRING_FLYWAY_ENABLED, value: "true"}}
-                    - {{name: SPRING_MAIN_WEB_APPLICATION_TYPE, value: "none"}}
-                  __SQLPROXY__
-            """), "__SQLPROXY__", sqlproxy_job_sidecar(cfg)))
-    # pricing alembic
+    """Pricing Alembic migration Job (pre-deploy gate).
+
+    The 6 Java services migrate via **Flyway at serving-pod startup**
+    (SPRING_FLYWAY_ENABLED=true) — the plan's "simpler v1" path (§6.4). Flyway
+    takes a table lock so concurrent pod starts are safe, and running the app as
+    its own migrator avoids a separate Job whose container never exits (the
+    Spring Boot app keeps its @Scheduled relay + @RabbitListener threads alive
+    even with web-application-type=none, so a Job would hang forever).
+
+    Only pricing gets a dedicated Job: Alembic is a one-shot `alembic upgrade
+    head` that exits cleanly, and the pricing serving pod sets RUN_MIGRATIONS=
+    false so autoscaled cold starts never race on the schema.
+
+    The Cloud SQL proxy runs as a **native sidecar** (initContainer +
+    restartPolicy: Always) so the kubelet auto-terminates it once `migrate`
+    exits — otherwise a plain proxy container keeps the pod running and
+    `kubectl wait --for=complete` hangs."""
     pimg = f"{cfg['REGION']}-docker.pkg.dev/{cfg['PROJECT_ID']}/{cfg['AR_REPO']}/pricing-service:{cfg['IMAGE_TAG']}"
-    blocks.append(_inject(textwrap.dedent(f"""\
-        ---
+    # POSTGRES_PASSWORD must be declared BEFORE DATABASE_URL: k8s `$(VAR)`
+    # dependent-env substitution only resolves vars defined earlier in the list.
+    body = _inject(textwrap.dedent(f"""\
         apiVersion: batch/v1
         kind: Job
         metadata:
@@ -469,30 +515,32 @@ def migration_jobs(cfg: dict) -> str:
             spec:
               restartPolicy: Never
               serviceAccountName: pricing-runtime-sa-ksa
+              initContainers:
+              __SQLPROXY__
               containers:
               - name: migrate
                 image: {pimg}
                 command: ["alembic", "upgrade", "head"]
                 env:
-                - name: DATABASE_URL
-                  value: "postgresql+psycopg2://{cfg['DB_USER']}:$(POSTGRES_PASSWORD)@127.0.0.1:5432/pricing_db"
                 - name: POSTGRES_PASSWORD
                   valueFrom: {{secretKeyRef: {{name: dpp-secrets, key: db-password}}}}
-              __SQLPROXY__
-        """), "__SQLPROXY__", sqlproxy_job_sidecar(cfg)))
-    return header("DB migration Jobs (Flyway x6 + Alembic) — pre-deploy gate") + "".join(blocks)
+                - name: DATABASE_URL
+                  value: "postgresql+psycopg2://{cfg['DB_USER']}:$(POSTGRES_PASSWORD)@127.0.0.1:5432/pricing_db"
+        """), "__SQLPROXY__", sqlproxy_job_sidecar(cfg))
+    return header("Pricing Alembic migration Job (pre-deploy gate; Java uses startup Flyway)") + body
 
 
 def sqlproxy_job_sidecar(cfg: dict) -> str:
-    """Proxy sidecar for Jobs — Job pods have no native sidecar lifecycle, so the
-    proxy is a normal container and the migrate container exits, ending the pod.
-    We use the 'quitquitquit' pattern via a shared process namespace is overkill;
-    instead the migrate container's completion + restartPolicy Never bounds it."""
+    """Cloud SQL proxy as a k8s **native sidecar**: an initContainer with
+    restartPolicy: Always. It starts before `migrate`, stays up during it, and
+    is auto-terminated by the kubelet when the main container exits — so the Job
+    reaches Complete instead of hanging on a never-exiting proxy container."""
     inst = f"{cfg['PROJECT_ID']}:{cfg['REGION']}:{cfg['SQL_INSTANCE']}"
     return f"""\
 - name: cloud-sql-proxy
   image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.0
-  args: ["--private-ip", "--port=5432", "--quitquitquit-timeout=5s", "{inst}"]
+  restartPolicy: Always
+  args: ["--private-ip", "--port=5432", "{inst}"]
   resources:
     requests: {{cpu: 50m, memory: 64Mi}}
 """
@@ -715,6 +763,9 @@ def main() -> None:
 
     (OUT / "20-rabbitmq.yaml").write_text(rabbitmq_statefulset(cfg), encoding="utf-8")
     written.append("20-rabbitmq.yaml")
+
+    (OUT / "22-mailpit.yaml").write_text(mailpit_deployment(cfg), encoding="utf-8")
+    written.append("22-mailpit.yaml")
 
     (OUT / "21-keycloak.yaml").write_text(keycloak_deployment(cfg), encoding="utf-8")
     written.append("21-keycloak.yaml")
