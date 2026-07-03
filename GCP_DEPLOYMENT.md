@@ -1014,8 +1014,11 @@ gke: { cluster: projects/dpp-prod/locations/asia-southeast1/clusters/dpp }
 
 **Cost**
 - Cloud SQL is the main fixed cost — start with one small instance + multiple DBs.
-- GKE Autopilot bills per pod resource; set tight requests. Cloud Run alt scales
-  to zero except `pricing-worker`/`pricing-service` min-instances.
+- GKE Autopilot bills per pod resource; set tight requests. On the Cloud Run alt,
+  **no service scales to zero until Pub/Sub push lands**
+  ([§7](#7-alternative-all-cloud-run-online-tier),
+  [§14.1](#141-messaging-rabbitmq--pubsub-highest-leverage)) — every service (or
+  its worker split) holds `min-instances≥1`, so budget for 7 warm services.
 - GCS lifecycle rules to Nearline/Coldline for old datasets/candidates.
 - Offline Jobs are scale-to-zero (pay per run).
 
@@ -1107,7 +1110,7 @@ My §1 lean toward GKE is driven mainly by RabbitMQ + background threads. **Remo
 those (via §14.1) and the calculus flips:** a **fully-serverless Cloud Run**
 platform (all 7 services scale-to-zero, no worker split, no cluster to run)
 becomes the cleaner, cheaper end-state. So:
-- **v1:** GKE lift-and-shift (or Cloud Run + always-on `pricing-worker`).
+- **v1:** GKE lift-and-shift (or Cloud Run with **all services** at `min-instances≥1` / per-service always-on workers).
 - **v2 (recommended end-state):** Cloud Run + Pub/Sub push. Cloud Run stays the
   serving layer; Eventarc/Pub/Sub deliver events; no always-on pods.
 
@@ -1200,15 +1203,17 @@ if export/analytics volume or HA targets demand it. Migration is low-risk
 
 ### 14.9 Phased migration roadmap
 
-- **Phase 0 — Ship (v1).** GKE lift-and-shift *or* Cloud Run + always-on
-  `pricing-worker`; Cloud SQL, GCS, Secret Manager, Artifact Registry; offline on
+- **Phase 0 — Ship (v1).** GKE lift-and-shift *or* Cloud Run with **every service**
+  always-on (`min-instances≥1`, no CPU throttling) or per-service workers;
+  Cloud SQL, GCS, Secret Manager, Artifact Registry; offline on
   Cloud Run Jobs + Workflows + Scheduler. Land the [§6](#6-required-code--config-changes)
   changes. **Outcome:** platform live on GCP.
 - **Phase 1 — Pub/Sub (unlock serverless).** (a) Switch the two outbox relays to
   publish to Pub/Sub (feature-flagged, dual-write optional). (b) Migrate
   consumers to push endpoints, one bounded context at a time (notification →
-  billing → order → pricing). (c) Drop RabbitMQ + the `pricing-worker` split;
-  move all services to Cloud Run scale-to-zero. **Outcome:** v2 compute.
+  billing → order → claims → pricing). (c) Drop RabbitMQ + the per-service
+  always-on workers; move all services to Cloud Run scale-to-zero.
+  **Outcome:** v2 compute.
 - **Phase 2 — ML orchestration & reactivity.** Wrap offline scripts as **Vertex
   AI Pipelines** for lineage; add **Eventarc** GCS-triggered training. **Outcome:**
   reproducible, event-driven lifecycle.
