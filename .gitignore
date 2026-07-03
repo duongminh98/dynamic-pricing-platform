@@ -103,3 +103,6 @@ live_*.txt
 
 # Claude workflow handoff artifacts
 .claude-workflows/
+
+# Deploy scratch: contains PII (domain registrant contacts) and live GCP scratch
+.deploy/

@@ -1,0 +1,48 @@
+# Per-Dockerfile ignore for the lifecycle image (BuildKit uses
+# <dockerfile>.dockerignore in preference to the root .dockerignore).
+#
+# The root .dockerignore excludes data/, reports/, offline/, scripts/ because
+# the SERVING images mount them as volumes. The lifecycle image is the exception
+# — it must bake them in — so this file re-includes exactly what it needs while
+# still trimming the heavy/irrelevant parts of the context.
+
+# VCS / tooling / local scratch
+.git/
+.gradle/
+.idea/
+.kiro/
+.agents/
+.venv/
+.pytest_cache/
+.hypothesis/
+node_modules/
+frontend/
+build/
+bin/
+logs/
+notebooks/
+docs-html/
+documentation/
+**/__pycache__/
+**/*.pyc
+.env
+.env.*
+*.md
+
+# Java services are not part of the lifecycle image
+services/
+
+# Trim the raw source CSVs the batch jobs never read: keep ONLY the reference
+# tree the loader needs (metadata + geo/cost/products) is under
+# data/synthetic_real_1m_history_lift_v2/ — but the training jobs DO read the
+# pricing_freq_*/pricing_sev_* tables, so keep the whole dataset dir.
+data/*
+!data/synthetic_real_1m_history_lift_v2/
+
+# Keep only champion_config.json out of reports/ (models artifacts come from GCS)
+reports/*
+!reports/modeling/
+reports/modeling/*
+!reports/modeling/models/
+reports/modeling/models/*
+!reports/modeling/models/champion_config.json

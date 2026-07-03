@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Deploy the platform to the GKE staging cluster. Assumes provision.sh +
+# build_images.sh already ran. Idempotent. Reads deploy/config.env.
+#
+# Steps: creds -> ConfigMaps (kong/rabbitmq/keycloak) -> k8s Secret from Secret
+# Manager -> namespace+SAs -> infra (rabbitmq/keycloak) -> migration Jobs (gate)
+# -> app services -> edge (kong/frontend/ingress). Serving pods never migrate.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+set -a; . deploy/config.env; set +a
+K="kubectl --namespace $K8S_NAMESPACE"
+log() { echo -e "\n\033[1;36m== $* ==\033[0m"; }
+
+log "Fetch cluster credentials"
+gcloud container clusters get-credentials "$GKE_CLUSTER" --region "$REGION" --project "$PROJECT_ID"
+
+log "Render manifests at current IMAGE_TAG=$IMAGE_TAG"
+python deploy/render_k8s.py
+
+log "Namespace + service accounts"
+kubectl apply -f deploy/k8s/00-namespace.yaml
+
+log "ConfigMaps from source files"
+$K create configmap kong-prod-config      --from-file=kong.yml=infra/kong/kong.prod.yml            --dry-run=client -o yaml | $K apply -f -
+$K create configmap rabbitmq-definitions  --from-file=definitions.json=infra/rabbitmq/definitions.json --dry-run=client -o yaml | $K apply -f -
+$K create configmap keycloak-realm        --from-file=realm-export.json=infra/keycloak/realm-export.json --dry-run=client -o yaml | $K apply -f -
+
+# The k8s Secret is synced from Secret Manager (provision.sh created the secrets).
+log "Sync dpp-secrets from Secret Manager"
+sm() { gcloud secrets versions access latest --secret="$1" --project "$PROJECT_ID"; }
+$K create secret generic dpp-secrets \
+  --from-literal=db-password="$(sm dpp-db-password)" \
+  --from-literal=rabbitmq-password="$(sm dpp-rabbitmq-password)" \
+  --from-literal=keycloak-admin="$(sm dpp-keycloak-admin)" \
+  --from-literal=keycloak-admin-password="$(sm dpp-keycloak-admin-password)" \
+  --from-literal=vnp-tmn-code="$(sm dpp-vnp-tmn-code 2>/dev/null || echo '')" \
+  --from-literal=vnp-hash-secret="$(sm dpp-vnp-hash-secret 2>/dev/null || echo '')" \
+  --dry-run=client -o yaml | $K apply -f -
+
+log "Infra: RabbitMQ + Keycloak"
+kubectl apply -f deploy/k8s/20-rabbitmq.yaml -f deploy/k8s/21-keycloak.yaml
+$K rollout status statefulset/rabbitmq --timeout=300s
+$K rollout status deployment/keycloak --timeout=420s
+
+log "Migration gate (Flyway x6 + Alembic)"
+kubectl apply -f deploy/k8s/90-migrations.yaml
+for j in migrate-customer-service migrate-product-service migrate-order-service \
+         migrate-claims-service migrate-billing-service migrate-notification-service migrate-pricing; do
+  echo "waiting for job/$j"
+  $K wait --for=condition=complete "job/$j" --timeout=300s
+done
+
+log "App services"
+kubectl apply -f deploy/k8s/10-customer-service.yaml -f deploy/k8s/10-product-service.yaml \
+  -f deploy/k8s/10-order-service.yaml -f deploy/k8s/10-claims-service.yaml \
+  -f deploy/k8s/10-billing-service.yaml -f deploy/k8s/10-notification-service.yaml \
+  -f deploy/k8s/11-pricing-service.yaml
+for d in customer-service product-service order-service claims-service billing-service notification-service pricing-service; do
+  $K rollout status "deployment/$d" --timeout=300s
+done
+
+log "Edge: Kong + frontend + Ingress + NetworkPolicy"
+kubectl apply -f deploy/k8s/30-edge.yaml
+$K rollout status deployment/kong --timeout=300s
+$K rollout status deployment/frontend --timeout=180s
+
+log "Done. Ingress IP (managed cert may take 10-60m to go ACTIVE):"
+$K get ingress dpp-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
+echo "Run deploy/smoke.sh once the cert is ACTIVE and DNS resolves."

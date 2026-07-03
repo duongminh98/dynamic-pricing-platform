@@ -628,6 +628,11 @@ def main():
     parser.add_argument("--cv", action="store_true",
                         help="Run k=5 GroupKFold (by customer_id) CV only; do not write artifacts")
     parser.add_argument("--line", choices=LINES, help="Re-fit only one product line")
+    parser.add_argument("--output-uri", default=os.environ.get("TRAIN_OUTPUT_URI"),
+                        help="Object-storage URI (gs://… or s3://…) to upload the trained "
+                             "model/baseline artifacts to after local write. Decomposed Cloud "
+                             "Run Jobs are stateless, so this hands artifacts off to GCS for "
+                             "the downstream compare/register steps.")
     args, _ = parser.parse_known_args()
 
     selected_lines = [args.line] if args.line else LINES
@@ -710,6 +715,39 @@ def main():
         print(f"  {r}")
     print(f"\nSelected champion LightGBM models re-fitted with monotone_constraints.")
     print(f"{'='*60}")
+
+    if args.output_uri:
+        _upload_artifacts(args.output_uri, selected_lines)
+
+
+def _upload_artifacts(output_uri: str, selected_lines: list[str]) -> None:
+    """Upload the freshly-written model + baseline artifacts to object storage.
+
+    Cloud Run Jobs are stateless, so the downstream compare/register jobs read
+    the models back from this URI. Only the artifacts for the trained lines are
+    pushed; each model keeps its ``<line>__lgb_<family>.joblib`` name under the
+    URI so ``register_candidate_model.py --artifact-uri`` can address it directly.
+    """
+    from offline.object_storage import is_object_uri, upload_file
+
+    if not is_object_uri(output_uri):
+        print(f"  --output-uri '{output_uri}' is not an object-storage URI; skipping upload")
+        return
+
+    prefix = output_uri.rstrip("/")
+    families = ["freq", "sev", "tw"]
+    uploaded = 0
+    for line in selected_lines:
+        for family in families:
+            local = MODELS_DIR / f"{line}__lgb_{family}.joblib"
+            if local.is_file():
+                upload_file(local, f"{prefix}/models/{local.name}")
+                uploaded += 1
+        baseline = BASELINES_DIR / f"{line}_baseline.json"
+        if baseline.is_file():
+            upload_file(baseline, f"{prefix}/baselines/{baseline.name}")
+            uploaded += 1
+    print(f"  Uploaded {uploaded} artifact(s) to {prefix}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,698 @@
+# GENERATED from kong.yml by render_prod_config.py — do not edit by hand.
+# issuer=https://auth.dpp-pricing.dev/realms/dynamic-pricing namespace=dpp spa_origin=https://app.dpp-pricing.dev
+_format_version: '3.0'
+_transform: true
+plugins:
+- name: prometheus
+  config:
+    per_consumer: false
+    status_code_metrics: true
+    latency_metrics: true
+    bandwidth_metrics: true
+    upstream_health_metrics: true
+- name: cors
+  config:
+    origins:
+    - https://app.dpp-pricing.dev
+    methods:
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS
+    headers:
+    - Accept
+    - Authorization
+    - Content-Type
+    - X-Correlation-Id
+    - X-Authenticated-User-Sub
+    - X-Authenticated-User-Roles
+    - X-Authenticated-User-Issuer
+    - X-Authenticated-Client-Id
+    - X-Authenticated-User-Email
+    - X-Authenticated-User-Name-B64
+    exposed_headers:
+    - X-Correlation-Id
+    credentials: true
+    max_age: 3600
+    preflight_continue: false
+consumers:
+- username: keycloak-realm
+  jwt_secrets:
+  - key: https://auth.dpp-pricing.dev/realms/dynamic-pricing
+    algorithm: RS256
+    rsa_public_key: '-----BEGIN PUBLIC KEY-----
+
+      MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyint2Dm+NR4eSQHdGMZP
+
+      0DoX6D1M59a51+YmyGYKmNgcmr64a2lji7hFgxZNFkarT66KfWu+Z7Ly/GN+f0Fz
+
+      ZpeG3WHWlFMdU91GqB59MoAXQV1efDQtJ1YEPgOZbjlWolqL0AeyQDjQKZBUCzYB
+
+      FEFCCsD8AW9SXzLSXoFogPKGdXIsh/yW0+8elzPJvzeFoDpVHJDcbvgdrgmRqEiv
+
+      vrn41Op3fZWkIjFDrI8f5mQIEuPMyOAohuTLHAmrN4uIaCfWXIAF6H4dnzlSK42u
+
+      GtgPax86z8z2o7c91zV7BX6Hw0O4gE5ETxyM4pv+wcDOGfsJvCRn/eBYUPEEwIiO
+
+      pwIDAQAB
+
+      -----END PUBLIC KEY-----
+
+      '
+services:
+- name: customer-service
+  protocol: http
+  host: customer-service-upstream
+  port: 80
+  connect_timeout: 5000
+  read_timeout: 30000
+  write_timeout: 30000
+  retries: 0
+  routes:
+  - name: customer-public-routes
+    paths:
+    - /customers/register
+    - /customers/login
+    strip_path: false
+    preserve_host: false
+  - name: customer-protected-routes
+    paths:
+    - /customers/me
+    - /customers/me/
+    - /admin/customers
+    strip_path: false
+    preserve_host: false
+    plugins:
+    - name: jwt
+      config:
+        key_claim_name: iss
+        claims_to_verify:
+        - exp
+        run_on_preflight: false
+    - name: request-transformer
+      config:
+        remove:
+          headers:
+          - X-Authenticated-User-Sub
+          - X-Authenticated-User-Roles
+          - X-Authenticated-User-Issuer
+          - X-Authenticated-Client-Id
+          - X-Authenticated-User-Email
+          - X-Authenticated-User-Name-B64
+    - name: post-function
+      config:
+        access:
+        - "local token = kong.ctx.shared.authenticated_jwt_token\nif token then\n\
+          \  local payload = token:match(\"^[^.]+%.([^.]+)%.\") or \"\"\n  payload\
+          \ = payload:gsub(\"-\", \"+\"):gsub(\"_\", \"/\")\n  payload = payload ..\
+          \ string.rep(\"=\", (4 - #payload % 4) % 4)\n  local claims_json = ngx.decode_base64(payload)\
+          \ or \"{}\"\n  local sub = claims_json:match('\"sub\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local issuer = claims_json:match('\"iss\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local client_id = claims_json:match('\"azp\"%s*:%s*\"([^\"\
+          ]*)\"') or claims_json:match('\"client_id\"%s*:%s*\"([^\"]*)\"') or \"\"\
+          \n  local email = claims_json:match('\"email\"%s*:%s*\"([^\"]*)\"') or claims_json:match('\"\
+          preferred_username\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local name = claims_json:match('\"\
+          name\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local roles_block = claims_json:match('\"\
+          realm_access\"%s*:%s*{%s*\"roles\"%s*:%s*%[(.-)%]') or \"\"\n  local roles\
+          \ = {}\n  for role in roles_block:gmatch('\"([^\"]+)\"') do\n    roles[#roles\
+          \ + 1] = role\n  end\n  kong.service.request.set_header(\"X-Authenticated-User-Sub\"\
+          , sub)\n  kong.service.request.set_header(\"X-Authenticated-User-Roles\"\
+          , table.concat(roles, \",\"))\n  kong.service.request.set_header(\"X-Authenticated-User-Issuer\"\
+          , issuer)\n  kong.service.request.set_header(\"X-Authenticated-Client-Id\"\
+          , client_id)\n  kong.service.request.set_header(\"X-Authenticated-User-Email\"\
+          , email)\n  -- Display name may contain UTF-8 (e.g. Vietnamese diacritics);\
+          \ HTTP headers\n  -- are Latin-1, so raw bytes get mangled downstream. Base64\
+          \ the name instead.\n  kong.service.request.set_header(\"X-Authenticated-User-Name-B64\"\
+          , ngx.encode_base64(name))\nend\n"
+- name: product-service
+  protocol: http
+  host: product-service-upstream
+  port: 80
+  connect_timeout: 5000
+  read_timeout: 30000
+  write_timeout: 30000
+  retries: 0
+  routes:
+  - name: product-public-routes
+    paths:
+    - /products
+    strip_path: false
+    preserve_host: false
+  - name: product-admin-routes
+    paths:
+    - /admin/products
+    - /admin/loading-factors
+    - /admin/rate-versions
+    - /admin/pricing-reference
+    strip_path: false
+    preserve_host: false
+    plugins:
+    - name: jwt
+      config:
+        key_claim_name: iss
+        claims_to_verify:
+        - exp
+        run_on_preflight: false
+    - name: request-transformer
+      config:
+        remove:
+          headers:
+          - X-Authenticated-User-Sub
+          - X-Authenticated-User-Roles
+          - X-Authenticated-User-Issuer
+          - X-Authenticated-Client-Id
+          - X-Authenticated-User-Email
+          - X-Authenticated-User-Name-B64
+    - name: post-function
+      config:
+        access:
+        - "local token = kong.ctx.shared.authenticated_jwt_token\nif token then\n\
+          \  local payload = token:match(\"^[^.]+%.([^.]+)%.\") or \"\"\n  payload\
+          \ = payload:gsub(\"-\", \"+\"):gsub(\"_\", \"/\")\n  payload = payload ..\
+          \ string.rep(\"=\", (4 - #payload % 4) % 4)\n  local claims_json = ngx.decode_base64(payload)\
+          \ or \"{}\"\n  local sub = claims_json:match('\"sub\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local issuer = claims_json:match('\"iss\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local client_id = claims_json:match('\"azp\"%s*:%s*\"([^\"\
+          ]*)\"') or claims_json:match('\"client_id\"%s*:%s*\"([^\"]*)\"') or \"\"\
+          \n  local email = claims_json:match('\"email\"%s*:%s*\"([^\"]*)\"') or claims_json:match('\"\
+          preferred_username\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local name = claims_json:match('\"\
+          name\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local roles_block = claims_json:match('\"\
+          realm_access\"%s*:%s*{%s*\"roles\"%s*:%s*%[(.-)%]') or \"\"\n  local roles\
+          \ = {}\n  for role in roles_block:gmatch('\"([^\"]+)\"') do\n    roles[#roles\
+          \ + 1] = role\n  end\n  kong.service.request.set_header(\"X-Authenticated-User-Sub\"\
+          , sub)\n  kong.service.request.set_header(\"X-Authenticated-User-Roles\"\
+          , table.concat(roles, \",\"))\n  kong.service.request.set_header(\"X-Authenticated-User-Issuer\"\
+          , issuer)\n  kong.service.request.set_header(\"X-Authenticated-Client-Id\"\
+          , client_id)\n  kong.service.request.set_header(\"X-Authenticated-User-Email\"\
+          , email)\n  -- Display name may contain UTF-8 (e.g. Vietnamese diacritics);\
+          \ HTTP headers\n  -- are Latin-1, so raw bytes get mangled downstream. Base64\
+          \ the name instead.\n  kong.service.request.set_header(\"X-Authenticated-User-Name-B64\"\
+          , ngx.encode_base64(name))\nend\n"
+- name: order-service
+  protocol: http
+  host: order-service-upstream
+  port: 80
+  connect_timeout: 5000
+  read_timeout: 30000
+  write_timeout: 30000
+  retries: 0
+  routes:
+  - name: order-routes
+    paths:
+    - /orders
+    - /policies
+    - /admin/orders
+    - /admin/endorsements
+    - /admin/policies
+    strip_path: false
+    preserve_host: false
+    plugins:
+    - name: jwt
+      config:
+        key_claim_name: iss
+        claims_to_verify:
+        - exp
+        run_on_preflight: false
+    - name: request-transformer
+      config:
+        remove:
+          headers:
+          - X-Authenticated-User-Sub
+          - X-Authenticated-User-Roles
+          - X-Authenticated-User-Issuer
+          - X-Authenticated-Client-Id
+          - X-Authenticated-User-Email
+          - X-Authenticated-User-Name-B64
+    - name: post-function
+      config:
+        access:
+        - "local token = kong.ctx.shared.authenticated_jwt_token\nif token then\n\
+          \  local payload = token:match(\"^[^.]+%.([^.]+)%.\") or \"\"\n  payload\
+          \ = payload:gsub(\"-\", \"+\"):gsub(\"_\", \"/\")\n  payload = payload ..\
+          \ string.rep(\"=\", (4 - #payload % 4) % 4)\n  local claims_json = ngx.decode_base64(payload)\
+          \ or \"{}\"\n  local sub = claims_json:match('\"sub\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local issuer = claims_json:match('\"iss\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local client_id = claims_json:match('\"azp\"%s*:%s*\"([^\"\
+          ]*)\"') or claims_json:match('\"client_id\"%s*:%s*\"([^\"]*)\"') or \"\"\
+          \n  local email = claims_json:match('\"email\"%s*:%s*\"([^\"]*)\"') or claims_json:match('\"\
+          preferred_username\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local name = claims_json:match('\"\
+          name\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local roles_block = claims_json:match('\"\
+          realm_access\"%s*:%s*{%s*\"roles\"%s*:%s*%[(.-)%]') or \"\"\n  local roles\
+          \ = {}\n  for role in roles_block:gmatch('\"([^\"]+)\"') do\n    roles[#roles\
+          \ + 1] = role\n  end\n  kong.service.request.set_header(\"X-Authenticated-User-Sub\"\
+          , sub)\n  kong.service.request.set_header(\"X-Authenticated-User-Roles\"\
+          , table.concat(roles, \",\"))\n  kong.service.request.set_header(\"X-Authenticated-User-Issuer\"\
+          , issuer)\n  kong.service.request.set_header(\"X-Authenticated-Client-Id\"\
+          , client_id)\n  kong.service.request.set_header(\"X-Authenticated-User-Email\"\
+          , email)\n  -- Display name may contain UTF-8 (e.g. Vietnamese diacritics);\
+          \ HTTP headers\n  -- are Latin-1, so raw bytes get mangled downstream. Base64\
+          \ the name instead.\n  kong.service.request.set_header(\"X-Authenticated-User-Name-B64\"\
+          , ngx.encode_base64(name))\nend\n"
+- name: claims-service
+  protocol: http
+  host: claims-service-upstream
+  port: 80
+  connect_timeout: 5000
+  read_timeout: 30000
+  write_timeout: 30000
+  retries: 0
+  routes:
+  - name: claims-routes
+    paths:
+    - /claims
+    - /admin/claims
+    strip_path: false
+    preserve_host: false
+    plugins:
+    - name: jwt
+      config:
+        key_claim_name: iss
+        claims_to_verify:
+        - exp
+        run_on_preflight: false
+    - name: request-transformer
+      config:
+        remove:
+          headers:
+          - X-Authenticated-User-Sub
+          - X-Authenticated-User-Roles
+          - X-Authenticated-User-Issuer
+          - X-Authenticated-Client-Id
+          - X-Authenticated-User-Email
+          - X-Authenticated-User-Name-B64
+    - name: post-function
+      config:
+        access:
+        - "local token = kong.ctx.shared.authenticated_jwt_token\nif token then\n\
+          \  local payload = token:match(\"^[^.]+%.([^.]+)%.\") or \"\"\n  payload\
+          \ = payload:gsub(\"-\", \"+\"):gsub(\"_\", \"/\")\n  payload = payload ..\
+          \ string.rep(\"=\", (4 - #payload % 4) % 4)\n  local claims_json = ngx.decode_base64(payload)\
+          \ or \"{}\"\n  local sub = claims_json:match('\"sub\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local issuer = claims_json:match('\"iss\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local client_id = claims_json:match('\"azp\"%s*:%s*\"([^\"\
+          ]*)\"') or claims_json:match('\"client_id\"%s*:%s*\"([^\"]*)\"') or \"\"\
+          \n  local email = claims_json:match('\"email\"%s*:%s*\"([^\"]*)\"') or claims_json:match('\"\
+          preferred_username\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local name = claims_json:match('\"\
+          name\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local roles_block = claims_json:match('\"\
+          realm_access\"%s*:%s*{%s*\"roles\"%s*:%s*%[(.-)%]') or \"\"\n  local roles\
+          \ = {}\n  for role in roles_block:gmatch('\"([^\"]+)\"') do\n    roles[#roles\
+          \ + 1] = role\n  end\n  kong.service.request.set_header(\"X-Authenticated-User-Sub\"\
+          , sub)\n  kong.service.request.set_header(\"X-Authenticated-User-Roles\"\
+          , table.concat(roles, \",\"))\n  kong.service.request.set_header(\"X-Authenticated-User-Issuer\"\
+          , issuer)\n  kong.service.request.set_header(\"X-Authenticated-Client-Id\"\
+          , client_id)\n  kong.service.request.set_header(\"X-Authenticated-User-Email\"\
+          , email)\n  -- Display name may contain UTF-8 (e.g. Vietnamese diacritics);\
+          \ HTTP headers\n  -- are Latin-1, so raw bytes get mangled downstream. Base64\
+          \ the name instead.\n  kong.service.request.set_header(\"X-Authenticated-User-Name-B64\"\
+          , ngx.encode_base64(name))\nend\n"
+- name: billing-service
+  protocol: http
+  host: billing-service-upstream
+  port: 80
+  connect_timeout: 5000
+  read_timeout: 30000
+  write_timeout: 30000
+  retries: 0
+  routes:
+  - name: billing-public-callback-routes
+    paths:
+    - /billing/vnpay/return
+    - /billing/vnpay/ipn
+    strip_path: false
+    preserve_host: false
+  - name: billing-protected-routes
+    paths:
+    - /billing
+    - /admin/billing
+    - /admin/refunds
+    strip_path: false
+    preserve_host: false
+    plugins:
+    - name: jwt
+      config:
+        key_claim_name: iss
+        claims_to_verify:
+        - exp
+        run_on_preflight: false
+    - name: request-transformer
+      config:
+        remove:
+          headers:
+          - X-Authenticated-User-Sub
+          - X-Authenticated-User-Roles
+          - X-Authenticated-User-Issuer
+          - X-Authenticated-Client-Id
+          - X-Authenticated-User-Email
+          - X-Authenticated-User-Name-B64
+    - name: post-function
+      config:
+        access:
+        - "local token = kong.ctx.shared.authenticated_jwt_token\nif token then\n\
+          \  local payload = token:match(\"^[^.]+%.([^.]+)%.\") or \"\"\n  payload\
+          \ = payload:gsub(\"-\", \"+\"):gsub(\"_\", \"/\")\n  payload = payload ..\
+          \ string.rep(\"=\", (4 - #payload % 4) % 4)\n  local claims_json = ngx.decode_base64(payload)\
+          \ or \"{}\"\n  local sub = claims_json:match('\"sub\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local issuer = claims_json:match('\"iss\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local client_id = claims_json:match('\"azp\"%s*:%s*\"([^\"\
+          ]*)\"') or claims_json:match('\"client_id\"%s*:%s*\"([^\"]*)\"') or \"\"\
+          \n  local email = claims_json:match('\"email\"%s*:%s*\"([^\"]*)\"') or claims_json:match('\"\
+          preferred_username\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local name = claims_json:match('\"\
+          name\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local roles_block = claims_json:match('\"\
+          realm_access\"%s*:%s*{%s*\"roles\"%s*:%s*%[(.-)%]') or \"\"\n  local roles\
+          \ = {}\n  for role in roles_block:gmatch('\"([^\"]+)\"') do\n    roles[#roles\
+          \ + 1] = role\n  end\n  kong.service.request.set_header(\"X-Authenticated-User-Sub\"\
+          , sub)\n  kong.service.request.set_header(\"X-Authenticated-User-Roles\"\
+          , table.concat(roles, \",\"))\n  kong.service.request.set_header(\"X-Authenticated-User-Issuer\"\
+          , issuer)\n  kong.service.request.set_header(\"X-Authenticated-Client-Id\"\
+          , client_id)\n  kong.service.request.set_header(\"X-Authenticated-User-Email\"\
+          , email)\n  -- Display name may contain UTF-8 (e.g. Vietnamese diacritics);\
+          \ HTTP headers\n  -- are Latin-1, so raw bytes get mangled downstream. Base64\
+          \ the name instead.\n  kong.service.request.set_header(\"X-Authenticated-User-Name-B64\"\
+          , ngx.encode_base64(name))\nend\n"
+- name: notification-service
+  protocol: http
+  host: notification-service-upstream
+  port: 80
+  connect_timeout: 5000
+  read_timeout: 30000
+  write_timeout: 30000
+  retries: 0
+  routes:
+  - name: notification-routes
+    paths:
+    - /notifications
+    strip_path: false
+    preserve_host: false
+    plugins:
+    - name: jwt
+      config:
+        key_claim_name: iss
+        claims_to_verify:
+        - exp
+        run_on_preflight: false
+    - name: request-transformer
+      config:
+        remove:
+          headers:
+          - X-Authenticated-User-Sub
+          - X-Authenticated-User-Roles
+          - X-Authenticated-User-Issuer
+          - X-Authenticated-Client-Id
+          - X-Authenticated-User-Email
+          - X-Authenticated-User-Name-B64
+    - name: post-function
+      config:
+        access:
+        - "local token = kong.ctx.shared.authenticated_jwt_token\nif token then\n\
+          \  local payload = token:match(\"^[^.]+%.([^.]+)%.\") or \"\"\n  payload\
+          \ = payload:gsub(\"-\", \"+\"):gsub(\"_\", \"/\")\n  payload = payload ..\
+          \ string.rep(\"=\", (4 - #payload % 4) % 4)\n  local claims_json = ngx.decode_base64(payload)\
+          \ or \"{}\"\n  local sub = claims_json:match('\"sub\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local issuer = claims_json:match('\"iss\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local client_id = claims_json:match('\"azp\"%s*:%s*\"([^\"\
+          ]*)\"') or claims_json:match('\"client_id\"%s*:%s*\"([^\"]*)\"') or \"\"\
+          \n  local email = claims_json:match('\"email\"%s*:%s*\"([^\"]*)\"') or claims_json:match('\"\
+          preferred_username\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local name = claims_json:match('\"\
+          name\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local roles_block = claims_json:match('\"\
+          realm_access\"%s*:%s*{%s*\"roles\"%s*:%s*%[(.-)%]') or \"\"\n  local roles\
+          \ = {}\n  for role in roles_block:gmatch('\"([^\"]+)\"') do\n    roles[#roles\
+          \ + 1] = role\n  end\n  kong.service.request.set_header(\"X-Authenticated-User-Sub\"\
+          , sub)\n  kong.service.request.set_header(\"X-Authenticated-User-Roles\"\
+          , table.concat(roles, \",\"))\n  kong.service.request.set_header(\"X-Authenticated-User-Issuer\"\
+          , issuer)\n  kong.service.request.set_header(\"X-Authenticated-Client-Id\"\
+          , client_id)\n  kong.service.request.set_header(\"X-Authenticated-User-Email\"\
+          , email)\n  -- Display name may contain UTF-8 (e.g. Vietnamese diacritics);\
+          \ HTTP headers\n  -- are Latin-1, so raw bytes get mangled downstream. Base64\
+          \ the name instead.\n  kong.service.request.set_header(\"X-Authenticated-User-Name-B64\"\
+          , ngx.encode_base64(name))\nend\n"
+- name: pricing-service
+  protocol: http
+  host: pricing-service-upstream
+  port: 80
+  connect_timeout: 5000
+  read_timeout: 30000
+  write_timeout: 30000
+  retries: 0
+  routes:
+  - name: pricing-routes
+    paths:
+    - /pricing
+    - /admin/champion
+    - /admin/models
+    strip_path: false
+    preserve_host: false
+    plugins:
+    - name: jwt
+      config:
+        key_claim_name: iss
+        claims_to_verify:
+        - exp
+        run_on_preflight: false
+    - name: request-transformer
+      config:
+        remove:
+          headers:
+          - X-Authenticated-User-Sub
+          - X-Authenticated-User-Roles
+          - X-Authenticated-User-Issuer
+          - X-Authenticated-Client-Id
+          - X-Authenticated-User-Email
+          - X-Authenticated-User-Name-B64
+    - name: post-function
+      config:
+        access:
+        - "local token = kong.ctx.shared.authenticated_jwt_token\nif token then\n\
+          \  local payload = token:match(\"^[^.]+%.([^.]+)%.\") or \"\"\n  payload\
+          \ = payload:gsub(\"-\", \"+\"):gsub(\"_\", \"/\")\n  payload = payload ..\
+          \ string.rep(\"=\", (4 - #payload % 4) % 4)\n  local claims_json = ngx.decode_base64(payload)\
+          \ or \"{}\"\n  local sub = claims_json:match('\"sub\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local issuer = claims_json:match('\"iss\"%s*:%s*\"([^\"]*)\"\
+          ') or \"\"\n  local client_id = claims_json:match('\"azp\"%s*:%s*\"([^\"\
+          ]*)\"') or claims_json:match('\"client_id\"%s*:%s*\"([^\"]*)\"') or \"\"\
+          \n  local email = claims_json:match('\"email\"%s*:%s*\"([^\"]*)\"') or claims_json:match('\"\
+          preferred_username\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local name = claims_json:match('\"\
+          name\"%s*:%s*\"([^\"]*)\"') or \"\"\n  local roles_block = claims_json:match('\"\
+          realm_access\"%s*:%s*{%s*\"roles\"%s*:%s*%[(.-)%]') or \"\"\n  local roles\
+          \ = {}\n  for role in roles_block:gmatch('\"([^\"]+)\"') do\n    roles[#roles\
+          \ + 1] = role\n  end\n  kong.service.request.set_header(\"X-Authenticated-User-Sub\"\
+          , sub)\n  kong.service.request.set_header(\"X-Authenticated-User-Roles\"\
+          , table.concat(roles, \",\"))\n  kong.service.request.set_header(\"X-Authenticated-User-Issuer\"\
+          , issuer)\n  kong.service.request.set_header(\"X-Authenticated-Client-Id\"\
+          , client_id)\n  kong.service.request.set_header(\"X-Authenticated-User-Email\"\
+          , email)\n  -- Display name may contain UTF-8 (e.g. Vietnamese diacritics);\
+          \ HTTP headers\n  -- are Latin-1, so raw bytes get mangled downstream. Base64\
+          \ the name instead.\n  kong.service.request.set_header(\"X-Authenticated-User-Name-B64\"\
+          , ngx.encode_base64(name))\nend\n"
+upstreams:
+- name: customer-service-upstream
+  algorithm: round-robin
+  healthchecks:
+    active:
+      type: http
+      http_path: /actuator/health
+      timeout: 5
+      concurrency: 10
+      healthy:
+        interval: 5
+        successes: 2
+        http_statuses:
+        - 200
+        - 302
+      unhealthy:
+        interval: 5
+        tcp_failures: 2
+        timeouts: 3
+        http_failures: 3
+        http_statuses:
+        - 429
+        - 500
+        - 501
+        - 502
+        - 503
+        - 504
+        - 505
+  targets:
+  - target: customer-service.dpp.svc.cluster.local:8080
+    weight: 100
+- name: product-service-upstream
+  algorithm: round-robin
+  healthchecks:
+    active:
+      type: http
+      http_path: /actuator/health
+      timeout: 5
+      concurrency: 10
+      healthy:
+        interval: 5
+        successes: 2
+        http_statuses:
+        - 200
+        - 302
+      unhealthy:
+        interval: 5
+        tcp_failures: 2
+        timeouts: 3
+        http_failures: 3
+        http_statuses:
+        - 429
+        - 500
+        - 501
+        - 502
+        - 503
+        - 504
+        - 505
+  targets:
+  - target: product-service.dpp.svc.cluster.local:8080
+    weight: 100
+- name: order-service-upstream
+  algorithm: round-robin
+  healthchecks:
+    active:
+      type: http
+      http_path: /actuator/health
+      timeout: 5
+      concurrency: 10
+      healthy:
+        interval: 5
+        successes: 2
+        http_statuses:
+        - 200
+        - 302
+      unhealthy:
+        interval: 5
+        tcp_failures: 2
+        timeouts: 3
+        http_failures: 3
+        http_statuses:
+        - 429
+        - 500
+        - 501
+        - 502
+        - 503
+        - 504
+        - 505
+  targets:
+  - target: order-service.dpp.svc.cluster.local:8080
+    weight: 100
+- name: claims-service-upstream
+  algorithm: round-robin
+  healthchecks:
+    active:
+      type: http
+      http_path: /actuator/health
+      timeout: 5
+      concurrency: 10
+      healthy:
+        interval: 5
+        successes: 2
+        http_statuses:
+        - 200
+        - 302
+      unhealthy:
+        interval: 5
+        tcp_failures: 2
+        timeouts: 3
+        http_failures: 3
+        http_statuses:
+        - 429
+        - 500
+        - 501
+        - 502
+        - 503
+        - 504
+        - 505
+  targets:
+  - target: claims-service.dpp.svc.cluster.local:8080
+    weight: 100
+- name: billing-service-upstream
+  algorithm: round-robin
+  healthchecks:
+    active:
+      type: http
+      http_path: /actuator/health
+      timeout: 5
+      concurrency: 10
+      healthy:
+        interval: 5
+        successes: 2
+        http_statuses:
+        - 200
+        - 302
+      unhealthy:
+        interval: 5
+        tcp_failures: 2
+        timeouts: 3
+        http_failures: 3
+        http_statuses:
+        - 429
+        - 500
+        - 501
+        - 502
+        - 503
+        - 504
+        - 505
+  targets:
+  - target: billing-service.dpp.svc.cluster.local:8080
+    weight: 100
+- name: notification-service-upstream
+  algorithm: round-robin
+  healthchecks:
+    active:
+      type: http
+      http_path: /actuator/health
+      timeout: 5
+      concurrency: 10
+      healthy:
+        interval: 5
+        successes: 2
+        http_statuses:
+        - 200
+        - 302
+      unhealthy:
+        interval: 5
+        tcp_failures: 2
+        timeouts: 3
+        http_failures: 3
+        http_statuses:
+        - 429
+        - 500
+        - 501
+        - 502
+        - 503
+        - 504
+        - 505
+  targets:
+  - target: notification-service.dpp.svc.cluster.local:8080
+    weight: 100
+- name: pricing-service-upstream
+  algorithm: round-robin
+  healthchecks:
+    active:
+      type: http
+      http_path: /health
+      timeout: 5
+      concurrency: 10
+      healthy:
+        interval: 5
+        successes: 2
+        http_statuses:
+        - 200
+        - 302
+      unhealthy:
+        interval: 5
+        tcp_failures: 2
+        timeouts: 3
+        http_failures: 3
+        http_statuses:
+        - 429
+        - 500
+        - 501
+        - 502
+        - 503
+        - 504
+        - 505
+  targets:
+  - target: pricing-service.dpp.svc.cluster.local:8000
+    weight: 100

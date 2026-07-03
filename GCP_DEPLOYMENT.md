@@ -90,7 +90,7 @@ Derived from `docker-compose.yml`, `infra/`, `services/`, `pricing/`, `offline/`
 
 | Service | Runtime | Port | DB | Public routes (via Kong) | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `customer-service` | Java 17 / Spring Boot | 8080 | `customer_db` | `/customers/register`, `/customers/login` (public), `/customers/me`, `/admin/customers` (JWT) | IdP-facing login/register; emits `CustomerCreated`/`CustomerEmailUpdated`/`CustomerProfileUpdated`; outbox relay only (no consumers) |
+| `customer-service` | Java 17 / Spring Boot | 8080 | `customer_db` | `/customers/me`, `/customers/me/profile`, `/admin/customers` (JWT via gateway) | JIT-provisions the account from the gateway-forwarded identity on first `/customers/me`; login/register is the SPA↔Keycloak OIDC flow (no backend auth route, **no Keycloak call**); emits `CustomerCreated`/`CustomerEmailUpdated`/`CustomerProfileUpdated`; outbox relay only (no consumers) |
 | `product-service` | Java 17 / Spring Boot | 8080 | `product_db` | `/products` (public), `/admin/products`, `/admin/loading-factors`, `/admin/rate-versions`, `/admin/pricing-reference` | Emits product/rate/geo/cost events |
 | `order-service` | Java 17 / Spring Boot | 8080 | `order_db` | `/orders`, `/policies`, `/admin/orders`, `/admin/endorsements`, `/admin/policies` | **No runtime sync calls** to pricing/billing (quote via local `quote_snapshot`, reprice via events); 4 `@RabbitListener` consumers + outbox relay |
 | `claims-service` | Java 17 / Spring Boot | 8080 | `claims_db` | `/claims`, `/admin/claims` | Emits `ClaimSettled`; consumes policy/endorsement events into local policy + exposure-segment projections (4 consumers); no order-service HTTP |
@@ -334,8 +334,8 @@ Below are the **corrections and gaps** to apply before it is production-true.
    │  customer  product  order  claims  billing  notification   pricing-service         │
    │   (Deployment + ClusterIP each; HPA; /actuator/health probes; internal only)       │
    │                                                                                     │
-   │  Keycloak (Deployment, public login route via Kong)     RabbitMQ (StatefulSet,      │
-   │                                                          quorum queues, PVC)        │
+   │  Keycloak (Deployment; SPA logs in direct via auth.<domain>, not via Kong)  RabbitMQ │
+   │                                                          (StatefulSet, quorum, PVC)  │
    │                                                                                     │
    │  Google Managed Prometheus (scrape /metrics + /actuator/prometheus) → Cloud Monitoring
    └───────────────┬───────────────────────────────┬────────────────────┬──────────────┘
@@ -387,13 +387,63 @@ Below are the **corrections and gaps** to apply before it is production-true.
   GKE **Gateway** (or Ingress) attached to the external HTTPS LB.
 - `Keycloak`: `Deployment` backed by a dedicated Cloud SQL database
   (`keycloak_db`), started in production mode (`start --optimized`), realm
-  imported once via `kc.sh import` Job. Login route (`/realms/...`) exposed
-  through Kong/LB.
+  imported once via `kc.sh import` Job. **The SPA runs the OIDC login/register +
+  PKCE token flow directly against Keycloak's own public hostname**
+  (`VITE_KEYCLOAK_URL/realms/dynamic-pricing/...`, see `frontend/src/auth/oidc.ts`);
+  Kong does **not** proxy `/realms`. Expose Keycloak via its own LB route/hostname
+  (e.g. `auth.<domain>`), not through the API gateway. **No backend service
+  contacts Keycloak** — see [§4.4](#44-authentication-model-trusted-gateway-no-backend-idp-calls).
 - `RabbitMQ`: `StatefulSet` with PVC + the existing
   `infra/rabbitmq/definitions.json` loaded via config, **or** managed CloudAMQP
   (skip self-hosting). Keep quorum queues.
 - HorizontalPodAutoscalers on CPU for each service; PodDisruptionBudgets for
   graceful rollouts.
+
+### 4.4 Authentication model (trusted gateway, no backend IdP calls)
+
+**Important — this differs from an older revision of this doc.** The platform
+does **not** use a "each service validates the Keycloak token" model, and there
+is **no backend login/register endpoint**. The flow is:
+
+1. **The SPA authenticates directly against Keycloak** (OIDC Authorization Code +
+   PKCE) at Keycloak's own public hostname —
+   `VITE_KEYCLOAK_URL/realms/dynamic-pricing/protocol/openid-connect/{auth,token}`
+   (`frontend/src/auth/oidc.ts`). Keycloak is **not** proxied by Kong; expose it
+   on its own hostname/route (e.g. `auth.<domain>`).
+2. **The SPA sends the resulting JWT to the API on every call.** **Kong is the
+   only component that verifies the JWT** (against the realm signing key / JWKS),
+   then **strips all client-supplied `X-Authenticated-*` headers and injects
+   trusted ones** — `X-Authenticated-User-Sub`, `-Roles` (parsed from
+   `realm_access.roles` by the `post-function` Lua), `-Email`, `-Name-B64`,
+   `-Issuer`, `X-Authenticated-Client-Id` (`infra/kong/kong.yml`).
+3. **Every backend service consumes only those trusted headers**, never a JWT and
+   never Keycloak. `services/common/.../TrustedGatewayAuthenticationFilter.java`
+   rebuilds a `JwtAuthenticationToken` from the headers; `GatewaySecurity`
+   wires it into each service's `SecurityConfig`. **No Java service reads
+   `KEYCLOAK_AUTH_SERVER_URL`/`KEYCLOAK_REALM`, and none configures
+   `spring.security.oauth2.resourceserver` / `issuer-uri` / `jwk-set-uri`** —
+   a grep for these returns nothing in `services/*/src/main`.
+4. **`customer-service` has no `/customers/login` or `/customers/register`.** It
+   **JIT-provisions** the local account from the gateway-forwarded identity
+   (sub + email) on first authenticated `/customers/me`
+   (`ProfileService` / `Account`), and exposes `/customers/me`,
+   `/customers/me/profile`, `/admin/customers`. Registration/login is entirely the
+   SPA↔Keycloak OIDC flow.
+
+**Deployment consequences:**
+- The `KEYCLOAK_AUTH_SERVER_URL` / `KEYCLOAK_REALM` env vars in
+  `docker-compose.yml` (top-level `x-` anchor) are **dead** for the backend — no
+  service reads them. They can be dropped from the prod manifests; the only
+  Keycloak coordinates that matter in prod are (a) the **SPA build-time**
+  `VITE_KEYCLOAK_*` vars and (b) **Kong's** issuer/JWKS config
+  ([§6.1](#61-kong-gateway-changes)).
+- The single auth-cutover touch-point for any future IdP swap
+  ([§14.3](#143-identity-keycloak--identity-platform-gcip)) is therefore **Kong's
+  JWT verify + the roles-extraction Lua and the SPA's OIDC config** — *not* N
+  backend services.
+- Smoke/verify steps must obtain the JWT from **Keycloak's token endpoint**
+  (direct grant against the realm), not from a backend login route
+  ([§10.9](#109-stage-5--smoke-tests-gate), [§11](#11-deployment-runbook-staging-first)).
 
 ---
 
@@ -840,10 +890,13 @@ gcloud deploy releases create rel-${SHORT_SHA} \
 
 ### 10.9 Stage 5 — Smoke tests gate
 Automated post-deploy verification against the staging LB (encodes runbook
-[§11](#11-deployment-runbook-staging-first) steps 13–18): login → `/pricing/quote`
-returns a champion `model_version`; admin `/pricing/models`; a Workflow dry-run
-registers a candidate; promote → quote reflects new `model_version` **without
-restart**; rollback restores it. A non-zero exit **blocks promotion**.
+[§11](#11-deployment-runbook-staging-first) steps 13–18): obtain a JWT **from
+Keycloak's token endpoint** (direct grant against the realm — there is **no
+backend login route**, [§4.4](#44-authentication-model-trusted-gateway-no-backend-idp-calls))
+→ `/pricing/quote` returns a champion `model_version`; admin `/pricing/models`;
+a Workflow dry-run registers a candidate; promote → quote reflects new
+`model_version` **without restart**; rollback restores it. A non-zero exit
+**blocks promotion**.
 
 Because internal flows are now **asynchronous**
 ([§2.7](#27-async-migration-sync-http-removed-important)), the smoke suite must
@@ -974,15 +1027,23 @@ gke: { cluster: projects/dpp-prod/locations/asia-southeast1/clusters/dpp }
 9. Run migration Jobs (Flyway ×6 + Alembic ×1) against Cloud SQL.
 10. Deploy the 7 services (private) + Keycloak; deploy Kong (public via LB);
     deploy/serve the frontend (GCS+CDN or Cloud Run).
-11. Point DNS: `api.<domain>` → LB (Kong), `app.<domain>` → SPA.
+11. Point DNS: `api.<domain>` → LB (Kong), `app.<domain>` → SPA,
+    `auth.<domain>` → Keycloak (the SPA hits this directly for OIDC login,
+    [§4.4](#44-authentication-model-trusted-gateway-no-backend-idp-calls)). Set
+    the SPA build's `VITE_KEYCLOAK_URL=https://auth.<domain>` accordingly.
 
 **Deploy offline tier**
 12. Build/push the lifecycle image; create the 6 Cloud Run Jobs; create the
     `pricing-lifecycle` Workflow + Cloud Scheduler trigger.
 
 **Verify (maps to plan §9 steps 7–11)**
-13. `POST /customers/login` → get a customer JWT; `POST /pricing/quote` → returns
-    a quote with a `model_version` (champion).
+13. Get a JWT from **Keycloak's token endpoint**
+    (`POST {KEYCLOAK_URL}/realms/dynamic-pricing/protocol/openid-connect/token`,
+    direct grant — there is **no** `POST /customers/login`,
+    [§4.4](#44-authentication-model-trusted-gateway-no-backend-idp-calls));
+    `POST /pricing/quote` (via Kong, which injects the trusted headers) → returns
+    a quote with a `model_version` (champion). Optionally `GET /customers/me` →
+    confirms the account is JIT-provisioned on first call.
 14. Trigger a staging Workflow run → dataset in GCS, candidate registered.
 15. `GET /pricing/models` (admin JWT) → candidate appears with `is_champion=false`.
 16. `POST /admin/champion/promote` → `promoted=true`; `GET /pricing/models` shows
@@ -1118,17 +1179,25 @@ becomes the cleaner, cheaper end-state. So:
 ### 14.3 Identity: Keycloak → Identity Platform (GCIP)
 
 - **Today:** Keycloak realm `dynamic-pricing`, roles `Customer`/`Administrator`
-  in `realm_access.roles`; Kong verifies RS256 by issuer; `customer-service`
-  owns `/customers/login|register`.
+  in `realm_access.roles`; **the SPA logs in directly against Keycloak** (OIDC +
+  PKCE, `frontend/src/auth/oidc.ts`) and **Kong is the sole JWT verifier**
+  (issuer/JWKS), injecting trusted headers
+  ([§4.4](#44-authentication-model-trusted-gateway-no-backend-idp-calls)).
+  `customer-service` has **no** login/register endpoint — it JIT-provisions the
+  account from the gateway identity on first `/customers/me`.
 - **GCIP (managed Firebase Auth):** no IdP to operate (no Keycloak pod + no
   `keycloak_db`), built-in MFA/social/SAML, Google JWKS. Roles move to **custom
   claims**.
-- **Cost of switch:** user-store migration, token-shape change, frontend login
-  flow, and updating Kong's `post-function` Lua that reads `realm_access.roles`
-  to read the custom-claim path instead. Medium/high risk (it's an auth cutover).
+- **Cost of switch:** user-store migration, token-shape change, the **SPA OIDC
+  config** (`VITE_KEYCLOAK_*` → GCIP), and updating Kong's `post-function` Lua
+  that reads `realm_access.roles` to read the custom-claim path instead.
+  Medium/high risk (it's an auth cutover) — but note the blast radius is **only
+  the SPA + Kong**, since no backend service touches the IdP
+  ([§4.4](#44-authentication-model-trusted-gateway-no-backend-idp-calls)).
 - **Recommendation:** **keep Keycloak short-term** (run it on Cloud Run/GKE with
   a Cloud SQL `keycloak_db`). Move to GCIP only when dropping IdP ops is worth an
-  auth migration; the only cross-cutting edit is the Kong claim mapping + issuer.
+  auth migration; the only cross-cutting edit is the Kong claim mapping + issuer
+  and the SPA's OIDC config.
 
 ### 14.4 Gateway: keep Kong; Apigee/API Gateway as optional layers
 
@@ -1247,6 +1316,7 @@ flowchart TB
     cust -->|app.dpp| cdn
     cdn --> spa
     cust -->|api.dpp| lb
+    cust -->|auth.dpp OIDC+PKCE login| keycloak
     vnp --> lb
 
     subgraph gke["GKE Autopilot - private cluster, ns dpp"]
@@ -1271,7 +1341,7 @@ flowchart TB
     kong --> billing
     kong --> notif
     kong --> pricing
-    kong -->|/realms| keycloak
+    kong -.verify JWT via JWKS.-> keycloak
 
     customer -->|publish| rabbit
     product -->|publish| rabbit
@@ -1315,12 +1385,16 @@ flowchart TB
     prom -.scrape /metrics.-> pricing
 ```
 
-**Key invariants shown:** Kong is the only public workload; all app services are
-private ClusterIP; **there are no inter-service HTTP arrows — all internal
-communication flows through RabbitMQ** (publish via the outbox, consume via
-listeners); `pricing-service` reads the champion from Cloud SQL + GCS; the
-offline tier is fully decoupled (Scheduler → Workflows → Cloud Run Jobs) and
-touches only GCS + `pricing_db`.
+**Key invariants shown:** Kong is the only public **app** workload; all app
+services are private ClusterIP; **the SPA logs in directly against Keycloak**
+(`auth.dpp`, OIDC+PKCE) — Kong does not proxy login, it only **verifies the JWT
+via JWKS** and injects trusted headers, and **no backend service talks to
+Keycloak** ([§4.4](#44-authentication-model-trusted-gateway-no-backend-idp-calls));
+**there are no inter-service HTTP arrows — all internal communication flows
+through RabbitMQ** (publish via the outbox, consume via listeners);
+`pricing-service` reads the champion from Cloud SQL + GCS; the offline tier is
+fully decoupled (Scheduler → Workflows → Cloud Run Jobs) and touches only GCS +
+`pricing_db`.
 
 ### 15.2 GCP-native end-state — v2 (Cloud Run + Pub/Sub push)
 
@@ -1388,7 +1462,7 @@ sequenceDiagram
 | `DATABASE_URL` | pricing | Secret Manager → `postgresql+psycopg2://…/pricing_db` (Cloud SQL private IP) |
 | `<X>_DB_HOST/PORT/NAME`, `POSTGRES_USER/PASSWORD` | Java ×6 | Cloud SQL private IP + Secret Manager |
 | `RABBITMQ_HOST/PORT/USER/PASSWORD` | all | in-cluster `rabbitmq` or CloudAMQP (secrets) |
-| `KEYCLOAK_AUTH_SERVER_URL`, `KEYCLOAK_REALM` | all | `https://<auth-domain>`, `dynamic-pricing` |
+| `VITE_KEYCLOAK_URL`, `VITE_KEYCLOAK_REALM`, `VITE_KEYCLOAK_CLIENT_ID` | frontend (build-time) | `https://<auth-domain>`, `dynamic-pricing`, `mini-app` — the SPA runs the OIDC login/PKCE flow **directly** against Keycloak. **No backend service consumes any `KEYCLOAK_*` var** (trusted-gateway: only Kong verifies the JWT via JWKS, then injects `X-Authenticated-User-*` headers — see [§6.1](#61-kong-gateway-changes)) |
 | `OBJECT_STORAGE_PROVIDER` | pricing + jobs | `gcs` |
 | `OBJECT_STORAGE_{MODEL,REPORT,DATASET}_BUCKET` | pricing + jobs | `dpp-pricing-{models,reports,datasets}-prod` |
 | `MODEL_ARTIFACT_CACHE_DIR` | pricing | `/tmp/model-cache` |
