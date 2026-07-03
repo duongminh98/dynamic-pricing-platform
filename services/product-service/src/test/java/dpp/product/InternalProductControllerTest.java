@@ -42,7 +42,7 @@ class InternalProductControllerTest {
         return new ProductService(repo, mock(CoverageOptionRepository.class));
     }
 
-    // ── GET /internal/products returns all (active + inactive) ──
+    // Ã¢â€â‚¬Ã¢â€â‚¬ GET /internal/products returns all (active + inactive) Ã¢â€â‚¬Ã¢â€â‚¬
 
     @Test
     void listAllProductsReturnsActiveAndInactive() {
@@ -52,7 +52,7 @@ class InternalProductControllerTest {
         when(repo.findAll()).thenReturn(List.of(p1, p2));
 
         ProductService svc = productServiceWith(repo);
-        InternalProductController controller = new InternalProductController(svc, mock(RateVersionService.class));
+        InternalProductController controller = new InternalProductController(svc, mock(RateVersionService.class), mock(dpp.product.service.PricingReferenceDataService.class));
 
         List<ProductResponse> result = controller.listAllProducts();
 
@@ -61,7 +61,7 @@ class InternalProductControllerTest {
         assertTrue(result.stream().anyMatch(r -> r.getProductId().equals("motor-old") && !r.isActive()));
     }
 
-    // ── GET /internal/products/{id} returns 200 ──
+    // Ã¢â€â‚¬Ã¢â€â‚¬ GET /internal/products/{id} returns 200 Ã¢â€â‚¬Ã¢â€â‚¬
 
     @Test
     void getProductReturnsProduct() {
@@ -70,7 +70,7 @@ class InternalProductControllerTest {
         when(repo.findById("car-premium")).thenReturn(Optional.of(p));
 
         ProductService svc = productServiceWith(repo);
-        InternalProductController controller = new InternalProductController(svc, mock(RateVersionService.class));
+        InternalProductController controller = new InternalProductController(svc, mock(RateVersionService.class), mock(dpp.product.service.PricingReferenceDataService.class));
 
         ProductResponse result = controller.getProduct("car-premium");
 
@@ -78,7 +78,7 @@ class InternalProductControllerTest {
         assertEquals("car", result.getCategory());
     }
 
-    // ── GET /internal/products/{id} returns 404 for missing ──
+    // Ã¢â€â‚¬Ã¢â€â‚¬ GET /internal/products/{id} returns 404 for missing Ã¢â€â‚¬Ã¢â€â‚¬
 
     @Test
     void getProductReturns404WhenMissing() {
@@ -86,12 +86,12 @@ class InternalProductControllerTest {
         when(repo.findById("nonexistent")).thenReturn(Optional.empty());
 
         ProductService svc = productServiceWith(repo);
-        InternalProductController controller = new InternalProductController(svc, mock(RateVersionService.class));
+        InternalProductController controller = new InternalProductController(svc, mock(RateVersionService.class), mock(dpp.product.service.PricingReferenceDataService.class));
 
         assertThrows(ServiceException.class, () -> controller.getProduct("nonexistent"));
     }
 
-    // ── GET /internal/products/{id} returns inactive product too ──
+    // Ã¢â€â‚¬Ã¢â€â‚¬ GET /internal/products/{id} returns inactive product too Ã¢â€â‚¬Ã¢â€â‚¬
 
     @Test
     void getProductReturnsInactiveProduct() {
@@ -100,7 +100,7 @@ class InternalProductControllerTest {
         when(repo.findById("home-deprecated")).thenReturn(Optional.of(p));
 
         ProductService svc = productServiceWith(repo);
-        InternalProductController controller = new InternalProductController(svc, mock(RateVersionService.class));
+        InternalProductController controller = new InternalProductController(svc, mock(RateVersionService.class), mock(dpp.product.service.PricingReferenceDataService.class));
 
         ProductResponse result = controller.getProduct("home-deprecated");
 
@@ -108,7 +108,7 @@ class InternalProductControllerTest {
         assertFalse(result.isActive());
     }
 
-    // ── getCurrentLoadingFactors: current version with factors ──
+    // Ã¢â€â‚¬Ã¢â€â‚¬ getCurrentLoadingFactors: current version with factors Ã¢â€â‚¬Ã¢â€â‚¬
 
     @Test
     void getCurrentLoadingFactorsWithExistingFactors() {
@@ -134,7 +134,7 @@ class InternalProductControllerTest {
         when(lfRepo.findByRateVersionId(rvId)).thenReturn(List.of(lfHealth));
 
         RateVersionService rvSvc = new RateVersionService(rvRepo, lfRepo);
-        InternalProductController controller = new InternalProductController(mock(ProductService.class), rvSvc);
+        InternalProductController controller = new InternalProductController(mock(ProductService.class), rvSvc, mock(dpp.product.service.PricingReferenceDataService.class));
 
         List<LoadingFactorResponse> result = controller.getCurrentLoadingFactors();
 
@@ -143,7 +143,7 @@ class InternalProductControllerTest {
         assertTrue(result.stream().allMatch(r -> r.getRateVersionId().equals(rvId)));
     }
 
-    // ── getCurrentLoadingFactors: missing lines default to 1.0 ──
+    // Ã¢â€â‚¬Ã¢â€â‚¬ getCurrentLoadingFactors: missing lines default to 1.0 Ã¢â€â‚¬Ã¢â€â‚¬
 
     @Test
     void getCurrentLoadingFactorsMissingLinesDefaultTo1() {
@@ -163,7 +163,7 @@ class InternalProductControllerTest {
         when(lfRepo.findByRateVersionId(rvId)).thenReturn(List.of());
 
         RateVersionService rvSvc = new RateVersionService(rvRepo, lfRepo);
-        InternalProductController controller = new InternalProductController(mock(ProductService.class), rvSvc);
+        InternalProductController controller = new InternalProductController(mock(ProductService.class), rvSvc, mock(dpp.product.service.PricingReferenceDataService.class));
 
         List<LoadingFactorResponse> result = controller.getCurrentLoadingFactors();
 
@@ -171,7 +171,7 @@ class InternalProductControllerTest {
         assertTrue(result.stream().allMatch(r -> r.getLoadingValue() == 1.0));
     }
 
-    // ── getCurrentLoadingFactors: no current version → 6 lines all 1.0 ──
+    // Ã¢â€â‚¬Ã¢â€â‚¬ getCurrentLoadingFactors: no current version Ã¢â€ â€™ 6 lines all 1.0 Ã¢â€â‚¬Ã¢â€â‚¬
 
     @Test
     void getCurrentLoadingFactorsNoCurrentVersion() {
@@ -181,7 +181,7 @@ class InternalProductControllerTest {
         LoadingFactorRepository lfRepo = mock(LoadingFactorRepository.class);
 
         RateVersionService rvSvc = new RateVersionService(rvRepo, lfRepo);
-        InternalProductController controller = new InternalProductController(mock(ProductService.class), rvSvc);
+        InternalProductController controller = new InternalProductController(mock(ProductService.class), rvSvc, mock(dpp.product.service.PricingReferenceDataService.class));
 
         List<LoadingFactorResponse> result = controller.getCurrentLoadingFactors();
 
@@ -190,3 +190,4 @@ class InternalProductControllerTest {
         assertTrue(result.stream().allMatch(r -> r.getRateVersionId() == null));
     }
 }
+

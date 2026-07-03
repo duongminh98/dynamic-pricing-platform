@@ -2,6 +2,7 @@ package dpp.product.service;
 
 import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
+import dpp.common.outbox.OutboxPublisher;
 import dpp.product.dto.CoverageOptionResponse;
 import dpp.product.dto.ProductDetail;
 import dpp.product.dto.ProductRequest;
@@ -11,20 +12,30 @@ import dpp.product.entity.CoverageOption;
 import dpp.product.entity.Product;
 import dpp.product.repository.CoverageOptionRepository;
 import dpp.product.repository.ProductRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @Service
 @Transactional(readOnly = true)
 @Slf4j
-@RequiredArgsConstructor
 public class ProductService {
+
+    public ProductService(ProductRepository productRepository,
+                          CoverageOptionRepository coverageOptionRepository) {
+        this.productRepository = productRepository;
+        this.coverageOptionRepository = coverageOptionRepository;
+    }
 
     private static final Set<String> VALID_LINES = Set.of(
             "health", "motorbike", "car", "home", "accident", "travel"
@@ -32,6 +43,8 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final CoverageOptionRepository coverageOptionRepository;
+    private OutboxPublisher outboxPublisher;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public List<ProductSummary> listActiveProducts(String line) {
         if (line != null && !line.isBlank()) {
@@ -53,6 +66,16 @@ public class ProductService {
         return productRepository.findAll().stream()
                 .map(ProductService::toProductResponse)
                 .toList();
+    }
+
+    @Transactional
+    public int publishProductCatalogSnapshot() {
+        if (outboxPublisher == null) {
+            return 0;
+        }
+        List<Product> products = productRepository.findAll();
+        products.forEach(this::enqueueProductUpdated);
+        return products.size();
     }
 
     public ProductResponse getProductRaw(String productId) {
@@ -86,6 +109,7 @@ public class ProductService {
                 .active(request.getActive() == null ? Boolean.TRUE : request.getActive())
                 .build();
         Product saved = productRepository.save(product);
+        enqueueProductUpdated(saved);
         return toProductResponse(saved);
     }
 
@@ -145,5 +169,37 @@ public class ProductService {
                 .adminFeeVnd(co.getAdminFeeVnd())
                 .build();
     }
+
+    @Autowired(required = false)
+    public void setOutboxPublisher(OutboxPublisher outboxPublisher) {
+        this.outboxPublisher = outboxPublisher;
+    }
+
+    private void enqueueProductUpdated(Product product) {
+        if (outboxPublisher == null) {
+            return;
+        }
+        String eventId = UUID.randomUUID().toString();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("event_id", eventId);
+        payload.put("event_type", "ProductUpdated");
+        payload.put("schema_version", 1);
+        payload.put("producer", "product-service");
+        payload.put("product_id", product.getProductId());
+        payload.put("category", product.getCategory());
+        payload.put("product_name", product.getProductName());
+        payload.put("coverage_amount_vnd", product.getCoverageAmountVnd());
+        payload.put("deductible_vnd", product.getDeductibleVnd());
+        payload.put("base_premium_vnd", product.getBasePremiumVnd());
+        payload.put("admin_fee_vnd", product.getAdminFeeVnd());
+        payload.put("active", Boolean.TRUE.equals(product.getActive()));
+        payload.put("occurred_at", OffsetDateTime.now().toString());
+        try {
+            outboxPublisher.enqueue(eventId, "ProductUpdated", objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to enqueue ProductUpdated", e);
+        }
+    }
 }
+
 

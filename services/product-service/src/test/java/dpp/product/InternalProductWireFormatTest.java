@@ -4,6 +4,9 @@ import dpp.common.config.CommonAutoConfiguration;
 import dpp.product.controller.InternalProductController;
 import dpp.product.dto.LoadingFactorResponse;
 import dpp.product.dto.ProductResponse;
+import dpp.product.dto.GeoRiskRowResponse;
+import dpp.product.dto.CostIndexRowResponse;
+import dpp.product.dto.ReferenceDataVersionResponse;
 import dpp.product.service.ProductService;
 import dpp.product.service.RateVersionService;
 import org.junit.jupiter.api.Test;
@@ -42,6 +45,9 @@ class InternalProductWireFormatTest {
 
     @MockBean
     RateVersionService rateVersionService;
+
+    @MockBean
+    dpp.product.service.PricingReferenceDataService referenceDataService;
 
     @Test
     void productsEndpointSerializesSnakeCase() throws Exception {
@@ -90,4 +96,42 @@ class InternalProductWireFormatTest {
             .andExpect(jsonPath("$[0].loadingValue").doesNotExist())
             .andExpect(jsonPath("$[0].rateVersionId").doesNotExist());
     }
+    @Test
+    void geoRiskEndpointSerializesSnakeCase() throws Exception {
+        when(referenceDataService.getActiveGeoRisk()).thenReturn(ReferenceDataVersionResponse.<GeoRiskRowResponse>builder()
+                .versionId(UUID.randomUUID())
+                .referenceType("geo_risk")
+                .status("ACTIVE")
+                .rows(List.of(GeoRiskRowResponse.builder().province("Ha Noi").urbanTierGeo("tier1").trafficDensityScore(0.9).build()))
+                .build());
+
+        mockMvc.perform(get("/internal/pricing-reference/geo-risk/active"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.reference_type").value("geo_risk"))
+            .andExpect(jsonPath("$.rows[0].province").value("Ha Noi"))
+            .andExpect(jsonPath("$.rows[0].urban_tier_geo").value("tier1"))
+            .andExpect(jsonPath("$.rows[0].traffic_density_score").value(0.9));
+    }
+
+    @Test
+    void costIndexEndpointSerializesSnakeCase() throws Exception {
+        when(referenceDataService.getActiveCostIndices()).thenReturn(ReferenceDataVersionResponse.<CostIndexRowResponse>builder()
+                .versionId(UUID.randomUUID())
+                .referenceType("cost_indices")
+                .status("ACTIVE")
+                .rows(List.of(CostIndexRowResponse.builder().monthStart("2026-07-01").medicalInflationIndex(1.02).build()))
+                .build());
+
+        mockMvc.perform(get("/internal/pricing-reference/cost-indices/active"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.reference_type").value("cost_indices"))
+            .andExpect(jsonPath("$.rows[0].month_start").value("2026-07-01"))
+            .andExpect(jsonPath("$.rows[0].medical_inflation_index").value(1.02));
+    }
+
 }
+
+
+
+
+
