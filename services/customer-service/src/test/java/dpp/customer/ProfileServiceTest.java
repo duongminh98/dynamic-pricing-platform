@@ -142,7 +142,7 @@ class ProfileServiceTest {
 
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.updateBaseProfile("ghost", validBaseRequest()));
-        assertEquals(ErrorCode.UNAUTHENTICATED, ex.getErrorCode());
+        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
     }
 
     @Test
@@ -197,7 +197,7 @@ class ProfileServiceTest {
 
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> svc.getProfile("ghost"));
-        assertEquals(ErrorCode.UNAUTHENTICATED, ex.getErrorCode());
+        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
     }
 
     @Test

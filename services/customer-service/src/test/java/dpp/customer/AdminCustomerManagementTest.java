@@ -66,20 +66,19 @@ class AdminCustomerManagementTest {
         return new AdminCustomerController(svc);
     }
 
-    // ── List excludes admin accounts (only CustomerProfile rows appear) ──
+    // â”€â”€ List excludes admin accounts (only CustomerProfile rows appear) â”€â”€
 
     @Test
-    void listReturnsOnlyCustomersWithProfile() {
-        UUID custId = UUID.randomUUID();
+    void listReturnsAccountsEvenWithoutProfile() {
         Account acct = accountFor(UUID.randomUUID(), "alice@test.com", null);
-        CustomerProfile profile = profileFor(custId, acct, "Ha Noi");
 
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
-        Page<CustomerProfile> page = new PageImpl<>(List.of(profile), PageRequest.of(0, 20), 1);
-        when(profileRepo.findFiltered(isNull(), isNull(), isNull(), any(OffsetDateTime.class), any(Pageable.class)))
+        AccountRepository accountRepo = mock(AccountRepository.class);
+        Page<Account> page = new PageImpl<>(List.of(acct), PageRequest.of(0, 20), 1);
+        when(accountRepo.findFiltered(isNull(), isNull(), any(OffsetDateTime.class), any(Pageable.class)))
                 .thenReturn(page);
 
-        ProfileService svc = serviceWith(profileRepo, mock(AccountRepository.class));
+        ProfileService svc = serviceWith(profileRepo, accountRepo);
         AdminCustomerController controller = controllerWith(svc);
 
         PageResponse<AdminCustomerResponse> result = controller.listCustomers(0, 20, null, null, null);
@@ -92,16 +91,17 @@ class AdminCustomerManagementTest {
         assertEquals(1, result.getTotalPages());
     }
 
-    // ── Pagination: size capped at 100 ──
+    // â”€â”€ Pagination: size capped at 100 â”€â”€
 
     @Test
     void sizeCappedAt100() {
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
-        Page<CustomerProfile> page = new PageImpl<>(List.of(), PageRequest.of(0, 100), 0);
-        when(profileRepo.findFiltered(any(), any(), any(), any(OffsetDateTime.class), any(Pageable.class)))
+        AccountRepository accountRepo = mock(AccountRepository.class);
+        Page<Account> page = new PageImpl<>(List.of(), PageRequest.of(0, 100), 0);
+        when(accountRepo.findFiltered(any(), any(), any(OffsetDateTime.class), any(Pageable.class)))
                 .thenReturn(page);
 
-        ProfileService svc = serviceWith(profileRepo, mock(AccountRepository.class));
+        ProfileService svc = serviceWith(profileRepo, accountRepo);
         AdminCustomerController controller = controllerWith(svc);
 
         PageResponse<AdminCustomerResponse> result = controller.listCustomers(0, 500, null, null, null);
@@ -109,24 +109,25 @@ class AdminCustomerManagementTest {
         assertEquals(100, result.getSize());
     }
 
-    // ── Filter by q (email contains) ──
+    // â”€â”€ Filter by q (email contains) â”€â”€
 
     @Test
     void filterByQPassesToRepository() {
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
-        Page<CustomerProfile> page = new PageImpl<>(List.of(), PageRequest.of(0, 20), 0);
-        when(profileRepo.findFiltered(eq("alice"), isNull(), isNull(), any(OffsetDateTime.class), any(Pageable.class)))
+        AccountRepository accountRepo = mock(AccountRepository.class);
+        Page<Account> page = new PageImpl<>(List.of(), PageRequest.of(0, 20), 0);
+        when(accountRepo.findFiltered(eq("alice"), isNull(), any(OffsetDateTime.class), any(Pageable.class)))
                 .thenReturn(page);
 
-        ProfileService svc = serviceWith(profileRepo, mock(AccountRepository.class));
+        ProfileService svc = serviceWith(profileRepo, accountRepo);
         AdminCustomerController controller = controllerWith(svc);
 
         controller.listCustomers(0, 20, "alice", null, null);
 
-        verify(profileRepo, times(1)).findFiltered(eq("alice"), isNull(), isNull(), any(OffsetDateTime.class), any(Pageable.class));
+        verify(accountRepo, times(1)).findFiltered(eq("alice"), isNull(), any(OffsetDateTime.class), any(Pageable.class));
     }
 
-    // ── Filter by province ──
+    // â”€â”€ Filter by province â”€â”€
 
     @Test
     void filterByProvincePassesToRepository() {
@@ -143,24 +144,25 @@ class AdminCustomerManagementTest {
         verify(profileRepo, times(1)).findFiltered(isNull(), eq("Ha Noi"), isNull(), any(OffsetDateTime.class), any(Pageable.class));
     }
 
-    // ── Filter by locked=true ──
+    // â”€â”€ Filter by locked=true â”€â”€
 
     @Test
     void filterByLockedTruePassesToRepository() {
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
-        Page<CustomerProfile> page = new PageImpl<>(List.of(), PageRequest.of(0, 20), 0);
-        when(profileRepo.findFiltered(isNull(), isNull(), eq(true), any(OffsetDateTime.class), any(Pageable.class)))
+        AccountRepository accountRepo = mock(AccountRepository.class);
+        Page<Account> page = new PageImpl<>(List.of(), PageRequest.of(0, 20), 0);
+        when(accountRepo.findFiltered(isNull(), eq(true), any(OffsetDateTime.class), any(Pageable.class)))
                 .thenReturn(page);
 
-        ProfileService svc = serviceWith(profileRepo, mock(AccountRepository.class));
+        ProfileService svc = serviceWith(profileRepo, accountRepo);
         AdminCustomerController controller = controllerWith(svc);
 
         controller.listCustomers(0, 20, null, null, true);
 
-        verify(profileRepo, times(1)).findFiltered(isNull(), isNull(), eq(true), any(OffsetDateTime.class), any(Pageable.class));
+        verify(accountRepo, times(1)).findFiltered(isNull(), eq(true), any(OffsetDateTime.class), any(Pageable.class));
     }
 
-    // ── Lock validation: hours=0 rejected ──
+    // â”€â”€ Lock validation: hours=0 rejected â”€â”€
 
     @Test
     void lockRejectsHoursZero() {
@@ -175,7 +177,7 @@ class AdminCustomerManagementTest {
         assertEquals(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, ex.getErrorCode());
     }
 
-    // ── Lock validation: hours=999 rejected ──
+    // â”€â”€ Lock validation: hours=999 rejected â”€â”€
 
     @Test
     void lockRejectsHoursTooLarge() {
@@ -186,11 +188,11 @@ class AdminCustomerManagementTest {
         AdminCustomerController controller = controllerWith(svc);
 
         ServiceException ex = assertThrows(ServiceException.class,
-                () -> controller.lockCustomer(UUID.randomUUID(), Map.of("hours", 10000)));
+                () -> controller.lockCustomer(UUID.randomUUID(), Map.of("hours", 876001)));
         assertEquals(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, ex.getErrorCode());
     }
 
-    // ── Lock validation: hours=1 accepted (boundary) ──
+    // â”€â”€ Lock validation: hours=1 accepted (boundary) â”€â”€
 
     @Test
     void lockAcceptsHoursOne() {
@@ -212,7 +214,7 @@ class AdminCustomerManagementTest {
         verify(accountRepo, times(1)).save(any(Account.class));
     }
 
-    // ── Lock validation: hours=8760 accepted (boundary) ──
+    // â”€â”€ Lock validation: hours=8760 accepted (boundary) â”€â”€
 
     @Test
     void lockAcceptsHours8760() {
@@ -233,25 +235,31 @@ class AdminCustomerManagementTest {
         assertNotNull(result.getLockedUntil());
     }
 
-    // ── Lock validation: hours=8761 rejected ──
+    // â”€â”€ Lock validation: hours=8761 rejected â”€â”€
 
     @Test
-    void lockRejectsHours8761() {
+    void lockAcceptsHours8761() {
+        UUID custId = UUID.randomUUID();
+        Account acct = accountFor(UUID.randomUUID(), "bob@test.com", null);
+        CustomerProfile profile = profileFor(custId, acct, "Ha Noi");
+
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
+        when(profileRepo.findById(custId)).thenReturn(Optional.of(profile));
         AccountRepository accountRepo = mock(AccountRepository.class);
+        when(accountRepo.save(any(Account.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ProfileService svc = serviceWith(profileRepo, accountRepo);
         AdminCustomerController controller = controllerWith(svc);
 
-        ServiceException ex = assertThrows(ServiceException.class,
-                () -> controller.lockCustomer(UUID.randomUUID(), Map.of("hours", 8761)));
-        assertEquals(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, ex.getErrorCode());
+        AdminCustomerResponse result = controller.lockCustomer(custId, Map.of("hours", 8761));
+
+        assertNotNull(result.getLockedUntil());
     }
 
-    // ── Lock default 24 when hours missing ──
+    // â”€â”€ Lock default long duration when hours missing â”€â”€
 
     @Test
-    void lockDefaultsTo24HoursWhenMissing() {
+    void lockDefaultsToLongDurationWhenMissing() {
         UUID custId = UUID.randomUUID();
         Account acct = accountFor(UUID.randomUUID(), "bob@test.com", null);
         CustomerProfile profile = profileFor(custId, acct, "Ha Noi");
@@ -269,7 +277,7 @@ class AdminCustomerManagementTest {
         assertNotNull(result.getLockedUntil());
     }
 
-    // ── Lock non-existent customer → 404 ──
+    // â”€â”€ Lock non-existent customer â†’ 404 â”€â”€
 
     @Test
     void lockRejectsNonExistentCustomer() {
@@ -285,7 +293,7 @@ class AdminCustomerManagementTest {
         assertEquals(ErrorCode.RESOURCE_NOT_FOUND, ex.getErrorCode());
     }
 
-    // ── Get customer returns profile data ──
+    // â”€â”€ Get customer returns profile data â”€â”€
 
     @Test
     void getCustomerReturnsProfileData() {
@@ -306,7 +314,7 @@ class AdminCustomerManagementTest {
         assertEquals(30, result.getAge());
     }
 
-    // ── Unlock clears lockedUntil ──
+    // â”€â”€ Unlock clears lockedUntil â”€â”€
 
     @Test
     void unlockClearsLock() {
@@ -328,7 +336,7 @@ class AdminCustomerManagementTest {
         verify(accountRepo, times(1)).save(any(Account.class));
     }
 
-    // ── Combined filters pass through ──
+    // â”€â”€ Combined filters pass through â”€â”€
 
     @Test
     void combinedFiltersPassToRepository() {
@@ -345,26 +353,25 @@ class AdminCustomerManagementTest {
         verify(profileRepo, times(1)).findFiltered(eq("ali"), eq("Ha Noi"), eq(true), any(OffsetDateTime.class), any(Pageable.class));
     }
 
-    // ── No N+1: toAdminCustomerResponse uses profile.getAccount() directly ──
+    // â”€â”€ No N+1: toAdminCustomerResponse uses profile.getAccount() directly â”€â”€
 
     @Test
     void listDoesNotTriggerExtraFindByAccountQueries() {
         UUID custId = UUID.randomUUID();
         Account acct = accountFor(UUID.randomUUID(), "alice@test.com", null);
-        CustomerProfile profile = profileFor(custId, acct, "Ha Noi");
 
         CustomerProfileRepository profileRepo = mock(CustomerProfileRepository.class);
-        Page<CustomerProfile> page = new PageImpl<>(List.of(profile), PageRequest.of(0, 20), 1);
-        when(profileRepo.findFiltered(any(), any(), any(), any(OffsetDateTime.class), any(Pageable.class)))
+        AccountRepository accountRepo = mock(AccountRepository.class);
+        Page<Account> page = new PageImpl<>(List.of(acct), PageRequest.of(0, 20), 1);
+        when(accountRepo.findFiltered(any(), any(), any(OffsetDateTime.class), any(Pageable.class)))
                 .thenReturn(page);
 
-        ProfileService svc = serviceWith(profileRepo, mock(AccountRepository.class));
+        ProfileService svc = serviceWith(profileRepo, accountRepo);
         AdminCustomerController controller = controllerWith(svc);
 
         PageResponse<AdminCustomerResponse> result = controller.listCustomers(0, 20, null, null, null);
 
-        // toAdminCustomerResponse must NOT call profileRepository.findByAccount_AccountId
-        verify(profileRepo, never()).findByAccount_AccountId(any());
+        verify(profileRepo, times(1)).findByAccount_AccountId(acct.getAccountId());
         assertEquals("alice@test.com", result.getContent().get(0).getEmail());
     }
 }

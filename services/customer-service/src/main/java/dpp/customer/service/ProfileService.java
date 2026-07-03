@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.OffsetDateTime;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -165,30 +166,46 @@ public class ProfileService {
     }
 
     private Account resolveAccount(String keycloakSubject) {
+        // The account is JIT-provisioned at login (see CustomerController#getMe). A miss
+        // here is a data/state problem, not an authentication failure — mapping it to 401
+        // would make the SPA bounce the user back into the Keycloak login loop.
         return accountRepository.findByKeycloakSubject(keycloakSubject)
-                .orElseThrow(() -> new ServiceException(ErrorCode.UNAUTHENTICATED,
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND,
                         "Account not found for subject", null));
     }
 
     private Account resolveOrProvisionAccount(String keycloakSubject, String email) {
+        return resolveOrProvisionAccount(keycloakSubject, email, null);
+    }
+
+    private Account resolveOrProvisionAccount(String keycloakSubject, String email, String fullName) {
         return accountRepository.findByKeycloakSubject(keycloakSubject)
-                .map(account -> syncAccountEmail(account, email))
-                .orElseGet(() -> provisionAccount(keycloakSubject, email));
+                .map(account -> syncAccountIdentity(account, email, fullName))
+                .orElseGet(() -> provisionAccount(keycloakSubject, email, fullName));
     }
 
     @Transactional
     public Account ensureAccount(String keycloakSubject, String email) {
-        return resolveOrProvisionAccount(keycloakSubject, email);
+        return resolveOrProvisionAccount(keycloakSubject, email, null);
     }
 
-    private Account provisionAccount(String keycloakSubject, String email) {
+    @Transactional
+    public Account ensureAccount(String keycloakSubject, String email, String fullName) {
+        return resolveOrProvisionAccount(keycloakSubject, email, fullName);
+    }
+
+    private Account provisionAccount(String keycloakSubject, String email, String fullName) {
         if (email == null || email.isBlank()) {
-            throw new ServiceException(ErrorCode.UNAUTHENTICATED, "Email claim is required", null);
+            // A validated JWT reached us but carries no email/preferred_username claim —
+            // that's a bad request against a mis-scoped token, not an expired session.
+            // Using UNAUTHENTICATED here would trigger the SPA's re-login loop.
+            throw new ServiceException(ErrorCode.BAD_REQUEST, "Email claim is required to provision an account", null);
         }
         Account account = new Account();
         account.setAccountId(UUID.randomUUID());
         account.setKeycloakSubject(keycloakSubject);
         account.setEmail(email);
+        account.setFullName(trimToNull(fullName));
         account.setCreatedAt(OffsetDateTime.now());
         account.setFailedLoginCount(0);
         try {
@@ -197,19 +214,41 @@ public class ProfileService {
             return saved;
         } catch (DataIntegrityViolationException e) {
             return accountRepository.findByKeycloakSubject(keycloakSubject)
-                    .map(existing -> syncAccountEmail(existing, email))
+                    .map(existing -> syncAccountIdentity(existing, email, fullName))
                     .orElseThrow(() -> new ServiceException(ErrorCode.INTERNAL_ERROR));
         }
     }
 
-    private Account syncAccountEmail(Account account, String email) {
-        if (email == null || email.isBlank() || email.equals(account.getEmail())) {
+    /** Keep the locally cached email/name in step with the authoritative Keycloak identity. */
+    private Account syncAccountIdentity(Account account, String email, String fullName) {
+        boolean changed = false;
+        boolean emailChanged = false;
+        if (email != null && !email.isBlank() && !email.equals(account.getEmail())) {
+            account.setEmail(email);
+            changed = true;
+            emailChanged = true;
+        }
+        String name = trimToNull(fullName);
+        if (name != null && !name.equals(account.getFullName())) {
+            account.setFullName(name);
+            changed = true;
+        }
+        if (!changed) {
             return account;
         }
-        account.setEmail(email);
         Account saved = accountRepository.save(account);
-        enqueueCustomerEmailUpdated(saved);
+        if (emailChanged) {
+            enqueueCustomerEmailUpdated(saved);
+        }
         return saved;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private ProfileResponse mapBaseToResponse(CustomerProfile profile) {
@@ -319,42 +358,59 @@ public class ProfileService {
     @Transactional(readOnly = true)
     public PageResponse<AdminCustomerResponse> adminListCustomers(String q, String province, Boolean locked, int page, int size) {
         size = Math.min(size, 100);
-        Pageable pageable = PageRequest.of(page, size, Sort.by("account.createdAt").ascending());
-        Page<CustomerProfile> profiles = profileRepository.findFiltered(q, province, locked, OffsetDateTime.now(), pageable);
-        return PageResponse.from(profiles.map(this::toAdminCustomerResponse));
+        if (province != null && !province.isBlank()) {
+            // createdAt lives on Account, not CustomerProfile — sort via the joined path
+            // or Hibernate throws PathElementException resolving 'createdAt' on the profile.
+            Pageable pageable = PageRequest.of(page, size, Sort.by("account.createdAt").ascending());
+            Page<CustomerProfile> profiles = profileRepository.findFiltered(q, province, locked, OffsetDateTime.now(), pageable);
+            return PageResponse.from(profiles.map(this::toAdminCustomerResponse));
+        }
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").ascending());
+        Page<Account> accounts = accountRepository.findFiltered(q, locked, OffsetDateTime.now(), pageable);
+        return PageResponse.from(accounts.map(this::toAdminCustomerResponse));
     }
 
     @Transactional(readOnly = true)
     public AdminCustomerResponse adminGetCustomer(UUID customerId) {
-        CustomerProfile profile = profileRepository.findById(customerId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Customer not found", null));
-        return toAdminCustomerResponse(profile);
+        return profileRepository.findById(customerId)
+                .map(this::toAdminCustomerResponse)
+                .orElseGet(() -> accountRepository.findById(customerId)
+                        .map(this::toAdminCustomerResponse)
+                        .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Customer not found", null)));
     }
 
     @Transactional
     public AdminCustomerResponse adminLockCustomer(UUID customerId, int hours) {
-        if (hours < 1 || hours > 8760) {
+        if (hours < 1 || hours > 876000) {
             throw new ServiceException(ErrorCode.PROFILE_FIELD_OUT_OF_RANGE, "hours out of range",
-                    java.util.Map.of("field", "hours", "min", 1, "max", 8760));
+                    java.util.Map.of("field", "hours", "min", 1, "max", 876000));
         }
-        CustomerProfile profile = profileRepository.findById(customerId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Customer not found", null));
-        Account account = profile.getAccount();
+        Account account = resolveAdminAccount(customerId);
         account.setLockedUntil(OffsetDateTime.now().plusHours(hours));
-        accountRepository.save(account);
-        return toAdminCustomerResponse(profile);
+        account = accountRepository.save(account);
+        return toAdminCustomerResponse(account);
     }
 
     @Transactional
     public AdminCustomerResponse adminUnlockCustomer(UUID customerId) {
-        CustomerProfile profile = profileRepository.findById(customerId)
-                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Customer not found", null));
-        Account account = profile.getAccount();
+        Account account = resolveAdminAccount(customerId);
         account.setLockedUntil(null);
         account.setFailedLoginCount(0);
         account.setFirstFailedAt(null);
-        accountRepository.save(account);
-        return toAdminCustomerResponse(profile);
+        account = accountRepository.save(account);
+        return toAdminCustomerResponse(account);
+    }
+
+    private Account resolveAdminAccount(UUID id) {
+        return profileRepository.findById(id)
+                .map(CustomerProfile::getAccount)
+                .orElseGet(() -> accountRepository.findById(id)
+                        .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Customer not found", null)));
+    }
+
+    private AdminCustomerResponse toAdminCustomerResponse(Account account) {
+        CustomerProfile profile = profileRepository.findByAccount_AccountId(account.getAccountId());
+        return profile != null ? toAdminCustomerResponse(profile) : toAdminCustomerResponse(account, null);
     }
 
     private AdminCustomerResponse toAdminCustomerResponse(CustomerProfile profile) {
@@ -362,6 +418,7 @@ public class ProfileService {
         AdminCustomerResponse resp = new AdminCustomerResponse();
         resp.setAccountId(account.getAccountId());
         resp.setEmail(account.getEmail());
+        resp.setFullName(account.getFullName());
         resp.setKeycloakSubject(account.getKeycloakSubject());
         resp.setFailedLoginCount(account.getFailedLoginCount());
         resp.setLockedUntil(account.getLockedUntil());
@@ -376,9 +433,27 @@ public class ProfileService {
         resp.setIncomeLevel(profile.getIncomeLevel());
         resp.setMonthlyIncomeVnd(profile.getMonthlyIncomeVnd());
         resp.setMaritalStatus(profile.getMaritalStatus());
+        resp.setLineProfiles(versionRepository.findLatestPerLine(profile.getCustomerId()).stream()
+                .map(this::toLineResponse)
+                .collect(Collectors.toList()));
         resp.setUpdatedAt(profile.getUpdatedAt());
         return resp;
     }
+
+    private AdminCustomerResponse toAdminCustomerResponse(Account account, CustomerProfile profile) {
+        AdminCustomerResponse resp = new AdminCustomerResponse();
+        resp.setAccountId(account.getAccountId());
+        resp.setCustomerId(account.getAccountId());
+        resp.setEmail(account.getEmail());
+        resp.setFullName(account.getFullName());
+        resp.setKeycloakSubject(account.getKeycloakSubject());
+        resp.setFailedLoginCount(account.getFailedLoginCount());
+        resp.setLockedUntil(account.getLockedUntil());
+        resp.setCreatedAt(account.getCreatedAt());
+        resp.setLineProfiles(Collections.emptyList());
+        return resp;
+    }
 }
+
 
 

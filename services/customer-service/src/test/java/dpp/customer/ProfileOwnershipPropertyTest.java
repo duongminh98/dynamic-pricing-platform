@@ -4,7 +4,7 @@ import dpp.common.api.ErrorCode;
 import dpp.common.api.ServiceException;
 import dpp.customer.controller.CustomerController;
 import dpp.customer.entity.Account;
-import dpp.customer.repository.AccountRepository;
+import dpp.customer.service.ProfileService;
 import net.jqwik.api.*;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -29,6 +29,7 @@ class ProfileOwnershipPropertyTest {
     private Jwt jwtFor(String subject) {
         Jwt jwt = mock(Jwt.class);
         when(jwt.getSubject()).thenReturn(subject);
+        when(jwt.getClaimAsString("email")).thenReturn("user@example.com");
         return jwt;
     }
 
@@ -44,10 +45,10 @@ class ProfileOwnershipPropertyTest {
     void getMeResolvesCallerOwnAccount(@ForAll long seed) {
         String subject = "subject-" + seed;
         UUID id = UUID.randomUUID();
-        AccountRepository repo = mock(AccountRepository.class);
-        when(repo.findByKeycloakSubject(subject)).thenReturn(Optional.of(accountFor(id, subject)));
+        ProfileService profileService = mock(ProfileService.class);
+        when(profileService.ensureAccount(subject, "user@example.com", null)).thenReturn(accountFor(id, subject));
 
-        CustomerController controller = new CustomerController(repo);
+        CustomerController controller = new CustomerController(profileService);
         Map<String, Object> result = controller.getMe(jwtFor(subject));
         assertEquals(id, result.get("accountId"));
         assertEquals(subject, result.get("keycloakSubject"));
@@ -59,11 +60,11 @@ class ProfileOwnershipPropertyTest {
         String caller = "caller-" + seed;
         UUID ownerId = UUID.randomUUID();
         UUID callerId = UUID.randomUUID();
-        AccountRepository repo = mock(AccountRepository.class);
-        when(repo.findByKeycloakSubject(owner)).thenReturn(Optional.of(accountFor(ownerId, owner)));
-        when(repo.findByKeycloakSubject(caller)).thenReturn(Optional.of(accountFor(callerId, caller)));
+        ProfileService profileService = mock(ProfileService.class);
+        when(profileService.ensureAccount(owner, "user@example.com", null)).thenReturn(accountFor(ownerId, owner));
+        when(profileService.ensureAccount(caller, "user@example.com", null)).thenReturn(accountFor(callerId, caller));
 
-        CustomerController controller = new CustomerController(repo);
+        CustomerController controller = new CustomerController(profileService);
         Map<String, Object> result = controller.getMe(jwtFor(caller));
         // The caller's own account is returned, never the other owner's.
         assertEquals(callerId, result.get("accountId"));
@@ -71,13 +72,14 @@ class ProfileOwnershipPropertyTest {
     }
 
     @Test
-    void getMeUnknownSubjectRejected() {
-        AccountRepository repo = mock(AccountRepository.class);
-        when(repo.findByKeycloakSubject("ghost")).thenReturn(Optional.empty());
+    void getMePropagatesBootstrapFailure() {
+        ProfileService profileService = mock(ProfileService.class);
+        when(profileService.ensureAccount("ghost", "user@example.com", null))
+                .thenThrow(new ServiceException(ErrorCode.BAD_REQUEST, "Email claim is required", null));
 
-        CustomerController controller = new CustomerController(repo);
+        CustomerController controller = new CustomerController(profileService);
         ServiceException ex = assertThrows(ServiceException.class,
                 () -> controller.getMe(jwtFor("ghost")));
-        assertEquals(ErrorCode.UNAUTHENTICATED, ex.getErrorCode());
+        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
     }
 }

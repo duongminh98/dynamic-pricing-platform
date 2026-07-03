@@ -22,12 +22,12 @@ public class ProfileController {
 
     @PutMapping
     public ProfileResponse updateBaseProfile(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody BaseProfileRequest request) {
-        return profileService.updateBaseProfile(jwt.getSubject(), request);
+        return profileService.updateBaseProfile(jwt.getSubject(), email(jwt), request);
     }
 
     @GetMapping
     public ProfileResponse getProfile(@AuthenticationPrincipal Jwt jwt) {
-        return profileService.getProfile(jwt.getSubject());
+        return profileService.getProfile(jwt.getSubject(), email(jwt));
     }
 
     @PutMapping("/lines/{line}")
@@ -39,5 +39,10 @@ public class ProfileController {
     @GetMapping("/lines/{line}")
     public LineProfileResponse getLineProfile(@AuthenticationPrincipal Jwt jwt, @PathVariable String line) {
         return profileService.getLineProfile(jwt.getSubject(), line);
+    }
+
+    private String email(Jwt jwt) {
+        String email = jwt.getClaimAsString("email");
+        return email != null ? email : jwt.getClaimAsString("preferred_username");
     }
 }

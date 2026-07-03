@@ -25,6 +25,9 @@ public class Account {
     @Column(nullable = false, unique = true, length = 254)
     private String email;
 
+    @Column(name = "full_name", length = 254)
+    private String fullName;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 

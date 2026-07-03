@@ -42,7 +42,7 @@ public class AdminCustomerController {
     @PostMapping("/{id}/lock")
     @PreAuthorize("hasRole('Administrator')")
     public AdminCustomerResponse lockCustomer(@PathVariable UUID id, @RequestBody Map<String, Integer> body) {
-        int hours = body.getOrDefault("hours", 24);
+        int hours = body.getOrDefault("hours", 876000);
         return profileService.adminLockCustomer(id, hours);
     }
 

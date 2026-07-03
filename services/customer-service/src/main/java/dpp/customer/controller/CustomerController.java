@@ -1,9 +1,7 @@
 package dpp.customer.controller;
 
-import dpp.common.api.ErrorCode;
-import dpp.common.api.ServiceException;
 import dpp.customer.entity.Account;
-import dpp.customer.repository.AccountRepository;
+import dpp.customer.service.ProfileService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,16 +16,15 @@ import java.util.Map;
 @RequestMapping("/customers")
 public class CustomerController {
 
-    private final AccountRepository accountRepository;
+    private final ProfileService profileService;
 
-    public CustomerController(AccountRepository accountRepository) {
-        this.accountRepository = accountRepository;
+    public CustomerController(ProfileService profileService) {
+        this.profileService = profileService;
     }
 
     @GetMapping("/me")
     public Map<String, Object> getMe(@AuthenticationPrincipal Jwt jwt) {
-        Account account = accountRepository.findByKeycloakSubject(jwt.getSubject())
-                .orElseThrow(() -> new ServiceException(ErrorCode.UNAUTHENTICATED, "Account not found for subject", null));
+        Account account = profileService.ensureAccount(jwt.getSubject(), email(jwt), fullName(jwt));
 
         Map<String, Object> realmAccess = jwt.getClaim("realm_access");
         List<String> roles = realmAccess != null ? (List<String>) realmAccess.get("roles") : List.of();
@@ -35,9 +32,26 @@ public class CustomerController {
         Map<String, Object> result = new HashMap<>();
         result.put("accountId", account.getAccountId());
         result.put("email", account.getEmail());
+        result.put("fullName", account.getFullName());
         result.put("keycloakSubject", account.getKeycloakSubject());
         result.put("roles", roles);
         return result;
     }
-}
 
+    private String email(Jwt jwt) {
+        String email = jwt.getClaimAsString("email");
+        return email != null ? email : jwt.getClaimAsString("preferred_username");
+    }
+
+    /** Display name from Keycloak: the `name` claim, or given+family, as a fallback. */
+    private String fullName(Jwt jwt) {
+        String name = jwt.getClaimAsString("name");
+        if (name != null && !name.isBlank()) {
+            return name;
+        }
+        String given = jwt.getClaimAsString("given_name");
+        String family = jwt.getClaimAsString("family_name");
+        String combined = ((given != null ? given : "") + " " + (family != null ? family : "")).trim();
+        return combined.isEmpty() ? null : combined;
+    }
+}
