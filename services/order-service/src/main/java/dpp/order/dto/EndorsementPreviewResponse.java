@@ -20,4 +20,6 @@ public class EndorsementPreviewResponse {
     private long termDays;
     private long coverageAmountVnd;
     private long deductibleVnd;
+    private String status;
+    private UUID pricingRequestId;
 }

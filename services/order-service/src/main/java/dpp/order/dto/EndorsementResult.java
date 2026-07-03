@@ -25,6 +25,19 @@ public class EndorsementResult {
     private Long quotedPremiumVnd;
     private Long differenceVnd;
     private OffsetDateTime submittedAt;
+    private UUID pricingRequestId;
+
+    public static EndorsementResult pricingPending(UUID endorsementRequestId, UUID pricingRequestId,
+                                                    OffsetDateTime effectiveDate, OffsetDateTime submittedAt) {
+        EndorsementResult r = new EndorsementResult();
+        r.setEndorsementRequestId(endorsementRequestId);
+        r.setStatus("PRICING_PENDING");
+        r.setMaterialChange(true);
+        r.setEffectiveDate(effectiveDate);
+        r.setSubmittedAt(submittedAt);
+        r.setPricingRequestId(pricingRequestId);
+        return r;
+    }
 
     public static EndorsementResult pendingReview(UUID endorsementRequestId, Long quotedPremiumVnd,
                                                    long differenceVnd, long proRatedChargeVnd,

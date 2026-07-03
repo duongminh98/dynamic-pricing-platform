@@ -108,7 +108,7 @@ class ExposureHistoryPropertyTest {
 
         // All endorsements are material → goes to PENDING_REVIEW, no segment saved at submit.
         EndorsementResult result = svc.endorse(policyId, req, subject);
-        assertEquals("PENDING_REVIEW", result.getStatus());
+        assertEquals("PRICING_PENDING", result.getStatus());
 
         // Segment is NOT saved until admin approves.
         verify(segRepo, never()).save(any(ExposureSegment.class));

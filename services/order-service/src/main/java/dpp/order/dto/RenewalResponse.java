@@ -21,4 +21,6 @@ public class RenewalResponse {
     private boolean paymentRequired;
     private OffsetDateTime newEffectiveDate;
     private OffsetDateTime newExpirationDate;
+    private UUID pricingRequestId;
+    private String pricingFailedReason;
 }

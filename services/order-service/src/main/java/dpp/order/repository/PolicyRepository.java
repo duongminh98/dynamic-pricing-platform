@@ -14,6 +14,7 @@ import java.util.UUID;
 
 public interface PolicyRepository extends JpaRepository<Policy, UUID> {
     Optional<Policy> findByOrderId(UUID orderId);
+    Optional<Policy> findByPricingRequestId(UUID pricingRequestId);
     List<Policy> findByCustomerIdOrderByCreatedAtDesc(UUID customerId);
     List<Policy> findByCustomerIdAndStatus(UUID customerId, PolicyStatus status);
     List<Policy> findByStatusOrderByCreatedAtDesc(PolicyStatus status);

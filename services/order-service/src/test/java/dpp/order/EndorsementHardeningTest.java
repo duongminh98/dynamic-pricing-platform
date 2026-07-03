@@ -162,7 +162,7 @@ class EndorsementHardeningTest {
         PolicyLifecycleService s = newService(policy, endRepo, pricing, mock(BillingClient.class), mock(OutboxPublisher.class));
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), validRequest(policy), SUBJECT);
-        assertEquals("PENDING_REVIEW", result.getStatus());
+        assertEquals("PRICING_PENDING", result.getStatus());
     }
 
     @Test
@@ -181,7 +181,7 @@ class EndorsementHardeningTest {
         PolicyLifecycleService s = newService(policy, endRepo, pricing, mock(BillingClient.class), mock(OutboxPublisher.class));
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), validRequest(policy), SUBJECT);
-        assertEquals("PENDING_REVIEW", result.getStatus());
+        assertEquals("PRICING_PENDING", result.getStatus());
     }
 
     // -- A3: Backdate prevention --

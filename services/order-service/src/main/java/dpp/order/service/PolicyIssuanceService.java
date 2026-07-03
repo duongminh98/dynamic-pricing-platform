@@ -131,9 +131,21 @@ public class PolicyIssuanceService {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("policy_id", policyId.toString());
+        payload.put("order_id", orderId.toString());
+        payload.put("quote_id", order.getQuoteId() != null ? order.getQuoteId().toString() : null);
         payload.put("customer_id", order.getCustomerId().toString());
         payload.put("product_id", order.getProductId());
+        payload.put("line", order.getLine());
+        payload.put("status", policy.getStatus().name());
+        payload.put("exposure_id", segment.getSegmentId().toString());
+        payload.put("exposure_segment_seq", segment.getExposureSegmentSeq());
+        payload.put("segment_start", segment.getSegmentStart().toString());
+        payload.put("segment_end", segment.getSegmentEnd().toString());
+        payload.put("earned_exposure_years", segment.getEarnedExposureYears());
+        payload.put("coverage_amount_vnd", segment.getCoverageAmountVnd());
+        payload.put("deductible_vnd", segment.getDeductibleVnd());
         payload.put("final_premium_vnd", policy.getFinalPremiumVnd());
+        payload.put("risk_snapshot", segment.getRiskSnapshot());
         payload.put("term_days", java.time.temporal.ChronoUnit.DAYS.between(
                 policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate()));
         try {

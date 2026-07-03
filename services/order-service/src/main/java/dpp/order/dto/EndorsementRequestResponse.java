@@ -31,5 +31,7 @@ public class EndorsementRequestResponse {
     private OffsetDateTime createdAt;
     private UUID invoiceId;
     private OffsetDateTime dueDate;
+    private UUID pricingRequestId;
+    private String pricingFailedReason;
     private OffsetDateTime cancelledAt;
 }

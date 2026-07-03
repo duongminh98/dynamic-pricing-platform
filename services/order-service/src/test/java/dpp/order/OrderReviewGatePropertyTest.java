@@ -11,6 +11,7 @@ import dpp.order.entity.OrderStatus;
 import dpp.order.entity.ReviewDecision;
 import dpp.order.repository.OrderRepository;
 import dpp.order.repository.PolicyRepository;
+import dpp.order.repository.QuoteSnapshotRepository;
 import dpp.order.service.OrderService;
 import dpp.order.service.OrderApprovalTransactionService;
 import net.jqwik.api.*;
@@ -137,6 +138,7 @@ class OrderReviewGatePropertyTest {
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         PolicyRepository policyRepo = mock(PolicyRepository.class);
         OrderApprovalTransactionService approvalTx = new OrderApprovalTransactionService(repo, outbox);
-        return new OrderService(repo, pricing, billing, outbox, policyRepo, approvalTx);
+        return new OrderService(repo, pricing, mock(QuoteSnapshotRepository.class), billing, outbox, policyRepo, approvalTx);
     }
 }
+

@@ -9,8 +9,10 @@ import dpp.order.dto.CreateOrderRequest;
 import dpp.order.dto.OrderResponse;
 import dpp.order.entity.OrderEntity;
 import dpp.order.entity.OrderStatus;
+import dpp.order.entity.QuoteSnapshot;
 import dpp.order.repository.OrderRepository;
 import dpp.order.repository.PolicyRepository;
+import dpp.order.repository.QuoteSnapshotRepository;
 import dpp.order.service.OrderService;
 import dpp.order.service.OrderApprovalTransactionService;
 import net.jqwik.api.*;
@@ -30,19 +32,24 @@ import static org.mockito.Mockito.*;
 @Tag("Feature: dynamic-pricing-platform, Property 14")
 class OrderCreationPropertyTest {
 
-    private OrderService newService(OrderRepository repo, PricingClient pricing, BillingClient billing) {
+    private OrderService newService(OrderRepository repo, PricingClient pricing, QuoteSnapshotRepository quoteRepo, BillingClient billing) {
         OutboxPublisher outbox = mock(OutboxPublisher.class);
         PolicyRepository policyRepo = mock(PolicyRepository.class);
         when(policyRepo.existsActivePolicy(any(), any())).thenReturn(false);
         OrderApprovalTransactionService approvalTx = new OrderApprovalTransactionService(repo, outbox);
-        return new OrderService(repo, pricing, billing, outbox, policyRepo, approvalTx);
+        return new OrderService(repo, pricing, quoteRepo, billing, outbox, policyRepo, approvalTx);
     }
 
-    private Map<String, Object> validQuote(long premium) {
-        Map<String, Object> quote = new HashMap<>();
-        quote.put("expires_at", OffsetDateTime.now().plusDays(7).toString());
-        quote.put("final_premium_vnd", premium);
-        quote.put("product_id", "motor-001");
+    private QuoteSnapshot validQuote(UUID quoteId, long premium) {
+        QuoteSnapshot quote = new QuoteSnapshot();
+        quote.setQuoteId(quoteId);
+        quote.setCustomerId(UUID.nameUUIDFromBytes("subject-abc".getBytes()));
+        quote.setExpiresAt(OffsetDateTime.now().plusDays(7));
+        quote.setCreatedAt(OffsetDateTime.now());
+        quote.setReceivedAt(OffsetDateTime.now());
+        quote.setFinalPremiumVnd(premium);
+        quote.setProductId("motor-001");
+        quote.setProfile("{}");
         return quote;
     }
 
@@ -52,11 +59,12 @@ class OrderCreationPropertyTest {
         OrderRepository repo = mock(OrderRepository.class);
         PricingClient pricing = mock(PricingClient.class);
         BillingClient billing = mock(BillingClient.class);
-        OrderService svc = newService(repo, pricing, billing);
+        QuoteSnapshotRepository quoteRepo = mock(QuoteSnapshotRepository.class);
+        OrderService svc = newService(repo, pricing, quoteRepo, billing);
 
         UUID quoteId = UUID.randomUUID();
         when(repo.findByQuoteId(quoteId)).thenReturn(Optional.empty());
-        when(pricing.getQuote(quoteId)).thenReturn(validQuote(premium));
+        when(quoteRepo.findById(quoteId)).thenReturn(Optional.of(validQuote(quoteId, premium)));
         when(repo.save(any(OrderEntity.class))).thenAnswer(inv -> inv.getArgument(0));
 
         CreateOrderRequest req = new CreateOrderRequest();
@@ -74,7 +82,8 @@ class OrderCreationPropertyTest {
         OrderRepository repo = mock(OrderRepository.class);
         PricingClient pricing = mock(PricingClient.class);
         BillingClient billing = mock(BillingClient.class);
-        OrderService svc = newService(repo, pricing, billing);
+        QuoteSnapshotRepository quoteRepo = mock(QuoteSnapshotRepository.class);
+        OrderService svc = newService(repo, pricing, quoteRepo, billing);
 
         UUID quoteId = UUID.randomUUID();
         OrderEntity existing = new OrderEntity();
@@ -94,15 +103,14 @@ class OrderCreationPropertyTest {
         OrderRepository repo = mock(OrderRepository.class);
         PricingClient pricing = mock(PricingClient.class);
         BillingClient billing = mock(BillingClient.class);
-        OrderService svc = newService(repo, pricing, billing);
+        QuoteSnapshotRepository quoteRepo = mock(QuoteSnapshotRepository.class);
+        OrderService svc = newService(repo, pricing, quoteRepo, billing);
 
         UUID quoteId = UUID.randomUUID();
         when(repo.findByQuoteId(quoteId)).thenReturn(Optional.empty());
-        Map<String, Object> quote = new HashMap<>();
-        quote.put("expires_at", OffsetDateTime.now().minusDays(1).toString());
-        quote.put("final_premium_vnd", 500_000L);
-        quote.put("product_id", "motor-001");
-        when(pricing.getQuote(quoteId)).thenReturn(quote);
+        QuoteSnapshot quote = validQuote(quoteId, 500_000L);
+        quote.setExpiresAt(OffsetDateTime.now().minusDays(1));
+        when(quoteRepo.findById(quoteId)).thenReturn(Optional.of(quote));
 
         CreateOrderRequest req = new CreateOrderRequest();
         req.setQuoteId(quoteId);
@@ -116,11 +124,12 @@ class OrderCreationPropertyTest {
         OrderRepository repo = mock(OrderRepository.class);
         PricingClient pricing = mock(PricingClient.class);
         BillingClient billing = mock(BillingClient.class);
-        OrderService svc = newService(repo, pricing, billing);
+        QuoteSnapshotRepository quoteRepo = mock(QuoteSnapshotRepository.class);
+        OrderService svc = newService(repo, pricing, quoteRepo, billing);
 
         UUID quoteId = UUID.randomUUID();
         when(repo.findByQuoteId(quoteId)).thenReturn(Optional.empty());
-        when(pricing.getQuote(quoteId)).thenReturn(validQuote(1_000_000L));
+        when(quoteRepo.findById(quoteId)).thenReturn(Optional.of(validQuote(quoteId, 1_000_000L)));
         when(repo.save(any(OrderEntity.class))).thenAnswer(inv -> inv.getArgument(0));
 
         CreateOrderRequest req = new CreateOrderRequest();
@@ -129,3 +138,4 @@ class OrderCreationPropertyTest {
         assertEquals(OrderStatus.PENDING_REVIEW, resp.getStatus());
     }
 }
+

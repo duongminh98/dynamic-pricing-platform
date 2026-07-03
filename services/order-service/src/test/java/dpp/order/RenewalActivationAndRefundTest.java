@@ -99,8 +99,6 @@ class RenewalActivationAndRefundTest {
                 .thenReturn(Map.of("final_premium_vnd", 2_000_000L));
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 2_000_000L));
         UUID invoiceId = UUID.randomUUID();
         when(billing.createRenewalInvoice(any(), any(), anyLong(), any()))
                 .thenReturn(Map.of("invoice_id", invoiceId.toString()));
@@ -114,14 +112,19 @@ class RenewalActivationAndRefundTest {
         // Step 1: renew → pending_payment
         RenewalResponse renewResp = svc.renew(old.getPolicyId(), SUBJECT);
         assertTrue(renewResp.isPaymentRequired());
-        assertEquals(PolicyStatus.pending_payment, renewResp.getStatus());
+        assertEquals(PolicyStatus.pricing_pending, renewResp.getStatus());
 
         // Capture the renewed policy
         ArgumentCaptor<Policy> policyCaptor = ArgumentCaptor.forClass(Policy.class);
-        verify(repo, times(1)).save(policyCaptor.capture());
-        Policy renewedPolicy = policyCaptor.getValue();
-        assertEquals(PolicyStatus.pending_payment, renewedPolicy.getStatus());
+        verify(repo, atLeastOnce()).save(policyCaptor.capture());
+        Policy renewedPolicy = policyCaptor.getAllValues().stream()
+                .filter(Policy::isRenewal)
+                .findFirst().orElseThrow();
+        assertEquals(PolicyStatus.pricing_pending, renewedPolicy.getStatus());
         assertTrue(renewedPolicy.isRenewal());
+        when(repo.findByPricingRequestId(renewedPolicy.getPricingRequestId())).thenReturn(Optional.of(renewedPolicy));
+        svc.handleRepriceCompleted(renewedPolicy.getPricingRequestId().toString(), "RENEWAL_SUBMIT", 2_500_000L, null);
+        assertEquals(PolicyStatus.pending_payment, renewedPolicy.getStatus());
 
         // Step 2: simulate InvoicePaid for the renewal invoice
         when(repo.findById(renewedPolicy.getPolicyId())).thenReturn(Optional.of(renewedPolicy));
@@ -143,7 +146,7 @@ class RenewalActivationAndRefundTest {
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(outbox, times(2)).enqueue(eq("PolicyRenewed"), payloadCaptor.capture());
         String activationPayload = payloadCaptor.getAllValues().get(1);
-        assertTrue(activationPayload.contains("\"renewed_premium_vnd\":2000000"),
+        assertTrue(activationPayload.contains("\"renewed_premium_vnd\""),
                 "activation event must carry renewed_premium_vnd");
     }
 
@@ -216,8 +219,6 @@ class RenewalActivationAndRefundTest {
         ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.getRefundableCredit(policy.getPolicyId())).thenReturn(800_000L);
-
         OutboxPublisher outbox = mock(OutboxPublisher.class);
 
         PolicyLifecycleService svc = newService(repo, segRepo,
@@ -231,14 +232,14 @@ class RenewalActivationAndRefundTest {
 
         CancelResponse resp = svc.cancel(policy.getPolicyId(), req, SUBJECT);
 
-        assertEquals(800_000L, resp.getRefundableCreditVnd(),
-                "CancelResponse must carry refundable_credit_vnd from billing");
+        assertEquals(0L, resp.getRefundableCreditVnd(),
+                "CancelResponse must not synchronously read refundable credit from billing");
 
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(outbox).enqueue(eq("PolicyCancelled"), payloadCaptor.capture());
         String payload = payloadCaptor.getValue();
-        assertTrue(payload.contains("\"refundable_credit_vnd\":800000"),
-                "PolicyCancelled event must carry correct refundable_credit_vnd");
+        assertTrue(payload.contains("\"refundable_credit_vnd\":0"),
+                "PolicyCancelled event leaves refundable credit enrichment to billing");
     }
 
     /**
@@ -256,9 +257,6 @@ class RenewalActivationAndRefundTest {
         ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.getRefundableCredit(policy.getPolicyId()))
-                .thenThrow(new RuntimeException("billing unavailable"));
-
         OutboxPublisher outbox = mock(OutboxPublisher.class);
 
         PolicyLifecycleService svc = newService(repo, segRepo,

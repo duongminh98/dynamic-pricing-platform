@@ -9,12 +9,14 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface EndorsementRequestRepository extends JpaRepository<EndorsementRequestEntity, UUID> {
     List<EndorsementRequestEntity> findByStatusOrderByCreatedAtAsc(EndorsementStatus status);
     List<EndorsementRequestEntity> findByPolicyIdOrderByCreatedAtDesc(UUID policyId);
     List<EndorsementRequestEntity> findByStatusOrderByDueDateAsc(EndorsementStatus status);
+    Optional<EndorsementRequestEntity> findByPricingRequestId(UUID pricingRequestId);
 
     Page<EndorsementRequestEntity> findByPolicyIdOrderByCreatedAtDesc(UUID policyId, Pageable pageable);
 

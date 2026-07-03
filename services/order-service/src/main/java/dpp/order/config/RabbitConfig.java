@@ -41,4 +41,34 @@ public class RabbitConfig {
     public Binding invoiceCreatedBinding() {
         return BindingBuilder.bind(invoiceCreatedQueue()).to(eventsExchange()).with("InvoiceCreated");
     }
+
+    @Bean
+    public Queue quoteCreatedQueue() {
+        return QueueBuilder.durable("quote.created.order.queue")
+                .withArgument("x-queue-type", "quorum")
+                .withArgument("x-dead-letter-exchange", "platform.events.dlx")
+                .withArgument("x-dead-letter-routing-key", "QuoteCreated")
+                .withArgument("x-delivery-limit", 3)
+                .build();
+    }
+
+    @Bean
+    public Binding quoteCreatedBinding() {
+        return BindingBuilder.bind(quoteCreatedQueue()).to(eventsExchange()).with("QuoteCreated");
+    }
+
+    @Bean
+    public Queue repriceCompletedQueue() {
+        return QueueBuilder.durable("reprice.completed.order.queue")
+                .withArgument("x-queue-type", "quorum")
+                .withArgument("x-dead-letter-exchange", "platform.events.dlx")
+                .withArgument("x-dead-letter-routing-key", "RepriceCompleted")
+                .withArgument("x-delivery-limit", 3)
+                .build();
+    }
+
+    @Bean
+    public Binding repriceCompletedBinding() {
+        return BindingBuilder.bind(repriceCompletedQueue()).to(eventsExchange()).with("RepriceCompleted");
+    }
 }

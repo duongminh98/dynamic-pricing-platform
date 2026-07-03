@@ -72,8 +72,6 @@ class MaterialChangeEndorsementTest {
         when(endRepo.save(any(EndorsementRequestEntity.class))).thenAnswer(inv -> inv.getArgument(0));
         when(endRepo.findByPolicyIdOrderByCreatedAtDesc(policy.getPolicyId())).thenReturn(List.of());
         BillingClient billing = mock(BillingClient.class);
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 0L));
         return new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, mock(OutboxPublisher.class));
     }
 
@@ -99,21 +97,21 @@ class MaterialChangeEndorsementTest {
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), materialRequest(policy), SUBJECT);
 
-        assertEquals("PENDING_REVIEW", result.getStatus());
+        assertEquals("PRICING_PENDING", result.getStatus());
         assertNotNull(result.getEndorsementRequestId());
-        assertEquals(2_200_000L, result.getQuotedPremiumVnd(),
-                "customer must receive provisional premium at submission time");
+        assertNull(result.getQuotedPremiumVnd(),
+                "customer receives premium after RepriceCompleted event");
         // Re-rate is called for the provisional quote, but the change is NOT applied.
-        verify(pricing, times(1)).rerate(eq("MOTOR_BASIC"), anyMap());
+        verify(pricing, never()).rerate(eq("MOTOR_BASIC"), anyMap());
         verify(segRepo, never()).save(any(ExposureSegment.class));
         assertEquals(1_000_000L, policy.getFinalPremiumVnd(), "premium must not change before admin approval");
         // A PENDING_REVIEW request must be persisted with the quoted premium.
         ArgumentCaptor<EndorsementRequestEntity> captor = ArgumentCaptor.forClass(EndorsementRequestEntity.class);
         verify(endRepo, times(1)).save(captor.capture());
-        assertEquals(EndorsementStatus.PENDING_REVIEW, captor.getValue().getStatus());
+        assertEquals(EndorsementStatus.PRICING_PENDING, captor.getValue().getStatus());
         assertEquals(policy.getPolicyId(), captor.getValue().getPolicyId());
-        assertEquals(2_200_000L, captor.getValue().getQuotedPremiumVnd(),
-                "pending entity must store the provisional premium");
+        assertNull(captor.getValue().getQuotedPremiumVnd(),
+                "pending entity stores premium after RepriceCompleted event");
     }
 
     @Test
@@ -138,7 +136,7 @@ class MaterialChangeEndorsementTest {
 
         assertFalse(result.getEffectiveDate().isBefore(before));
         assertFalse(result.getEffectiveDate().isAfter(after));
-        assertEquals("PENDING_REVIEW", result.getStatus());
+        assertEquals("PRICING_PENDING", result.getStatus());
     }
 
     @Test
@@ -157,17 +155,12 @@ class MaterialChangeEndorsementTest {
 
         EndorsementRequestResponse resp = s.approveEndorsement(pending.getEndorsementRequestId(), ADMIN);
 
-        assertEquals(EndorsementStatus.APPLIED, resp.getStatus());
+        assertEquals(EndorsementStatus.APPROVED_PENDING_PAYMENT, resp.getStatus());
         assertEquals(ADMIN, resp.getReviewedBy());
-        assertEquals(2_200_000L, policy.getFinalPremiumVnd(), "premium must reflect locked quoted premium (price lock)");
+        assertEquals(1_000_000L, policy.getFinalPremiumVnd(), "premium must stay locked until payment");
         verify(pricing, never()).rerate(eq("MOTOR_BASIC"), anyMap());
-        ArgumentCaptor<ExposureSegment> captor = ArgumentCaptor.forClass(ExposureSegment.class);
-        verify(segRepo, times(1)).save(captor.capture());
-        assertEquals(0L, captor.getValue().getCoverageAmountVnd(),
-                "coverage inherited from prior segment (empty in this test = 0)");
-        assertEquals(0L, captor.getValue().getDeductibleVnd(),
-                "deductible inherited from prior segment (empty in this test = 0)");
-        assertEquals(EndorsementStatus.APPLIED, pending.getStatus());
+        verify(segRepo, never()).save(any(ExposureSegment.class));
+        assertEquals(EndorsementStatus.APPROVED_PENDING_PAYMENT, pending.getStatus());
     }
 
     @Test
@@ -254,20 +247,9 @@ class MaterialChangeEndorsementTest {
 
         // With price lock, rerate is NOT called at approve time — the locked quoted premium is used.
         verify(pricing, never()).rerate(eq("MOTOR_BASIC"), anyMap());
-        // The merged profile is still built and persisted in the segment snapshot.
-        // A6: prior segment is closed at eff (1 save) + new segment created (1 save) = 2 saves.
-        ArgumentCaptor<ExposureSegment> segCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
-        verify(segRepo, times(2)).save(segCaptor.capture());
-        ExposureSegment newSeg = segCaptor.getAllValues().get(1);
-        assertEquals(300_000_000L, newSeg.getCoverageAmountVnd(),
-                "coverage inherited from prior segment");
-        assertEquals(500_000L, newSeg.getDeductibleVnd(),
-                "deductible inherited from prior segment");
-        // Verify the merged profile is persisted in the segment's risk snapshot
-        String snapshot = newSeg.getRiskSnapshot();
-        assertNotNull(snapshot);
-        assertTrue(snapshot.contains("\"age\":40"), "segment must preserve base age=40");
-        assertTrue(snapshot.contains("\"vehicle_value_vnd\":500000000"), "segment must carry updated vehicle_value");
+        assertEquals(EndorsementStatus.APPROVED_PENDING_PAYMENT, pending.getStatus(),
+                "premium increase approval waits for billing invoice/payment event");
+        verify(segRepo, never()).save(any(ExposureSegment.class));
     }
 
     @Test
@@ -290,9 +272,9 @@ class MaterialChangeEndorsementTest {
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
 
-        assertEquals("PENDING_REVIEW", result.getStatus(), "any risk attribute change must be material");
+        assertEquals("PRICING_PENDING", result.getStatus(), "any risk attribute change must be material");
         // Re-rate is called for the provisional quote, but the change is not applied.
-        verify(pricing, times(1)).rerate(eq("HEALTH_BASIC"), anyMap());
+        verify(pricing, never()).rerate(eq("HEALTH_BASIC"), anyMap());
         verify(endRepo, times(1)).save(any(EndorsementRequestEntity.class));
     }
 
@@ -368,8 +350,6 @@ class MaterialChangeEndorsementTest {
         when(pricing.rerate(eq("HEALTH_BASIC"), anyMap()))
                 .thenReturn(Map.of("final_premium_vnd", 18_000_000L));
         // Billing net-off quote returns full amount due (no credits available).
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 5_950_685L));
 
         PolicyLifecycleService s = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 
@@ -384,10 +364,10 @@ class MaterialChangeEndorsementTest {
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
 
-        assertEquals("PENDING_REVIEW", result.getStatus(),
+        assertEquals("PRICING_PENDING", result.getStatus(),
                 "smoker + bmi change must be material and go to admin review");
-        assertEquals(18_000_000L, result.getQuotedPremiumVnd(),
-                "customer must receive provisional premium at submission time");
+        assertNull(result.getQuotedPremiumVnd(),
+                "customer receives premium after RepriceCompleted event");
         assertEquals(12_000_000L, policy.getFinalPremiumVnd(),
                 "policy premium must not change before admin approval");
 
@@ -397,6 +377,8 @@ class MaterialChangeEndorsementTest {
         ArgumentCaptor<EndorsementRequestEntity> endCaptor = ArgumentCaptor.forClass(EndorsementRequestEntity.class);
         verify(endRepo).save(endCaptor.capture());
         EndorsementRequestEntity pending = endCaptor.getValue();
+        when(endRepo.findByPricingRequestId(pending.getPricingRequestId())).thenReturn(Optional.of(pending));
+        s.handleRepriceCompleted(pending.getPricingRequestId().toString(), "ENDORSEMENT_SUBMIT", 18_000_000L, null);
         when(endRepo.findById(pending.getEndorsementRequestId())).thenReturn(Optional.of(pending));
 
         EndorsementRequestResponse approveResp = s.approveEndorsement(pending.getEndorsementRequestId(), ADMIN);
@@ -412,7 +394,7 @@ class MaterialChangeEndorsementTest {
                 "premium must reflect locked quoted premium after payment triggers apply");
 
         // --- Verify: rerate called once (provisional at submit only; approve uses price lock) ---
-        verify(pricing, times(1)).rerate(eq("HEALTH_BASIC"), anyMap());
+        verify(pricing, never()).rerate(eq("HEALTH_BASIC"), anyMap());
 
         // --- Verify: new segment has merged profile ---
         // A6: prior segment closed (1 save) + new segment (1 save) = 2 saves.
@@ -538,10 +520,7 @@ class MaterialChangeEndorsementTest {
         when(endRepo.save(any(EndorsementRequestEntity.class))).thenAnswer(inv -> inv.getArgument(0));
         when(endRepo.findByPolicyIdOrderByCreatedAtDesc(policy.getPolicyId())).thenReturn(List.of());
 
-        // Billing: no credits available, net due = full additional charge
-        // (applyCreditAndQuote is still called synchronously for the waive decision)
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 1_197_260L));
+        // Billing net-off is asynchronous in billing when the invoice is created
 
         PolicyLifecycleService s = new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
 
@@ -554,14 +533,16 @@ class MaterialChangeEndorsementTest {
 
         EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
 
-        assertEquals("PENDING_REVIEW", result.getStatus());
-        assertEquals(2_200_000L, result.getQuotedPremiumVnd(),
+        assertEquals("PRICING_PENDING", result.getStatus());
+        assertNull(result.getQuotedPremiumVnd(),
                 "customer must receive provisional premium at submission");
 
         // Capture pending entity
         ArgumentCaptor<EndorsementRequestEntity> endCaptor = ArgumentCaptor.forClass(EndorsementRequestEntity.class);
         verify(endRepo).save(endCaptor.capture());
         EndorsementRequestEntity pending = endCaptor.getValue();
+        when(endRepo.findByPricingRequestId(pending.getPricingRequestId())).thenReturn(Optional.of(pending));
+        s.handleRepriceCompleted(pending.getPricingRequestId().toString(), "ENDORSEMENT_SUBMIT", 2_200_000L, null);
         when(endRepo.findById(pending.getEndorsementRequestId())).thenReturn(Optional.of(pending));
 
         // --- Step 2: admin approves → AP path (premium increase) ---
@@ -587,13 +568,12 @@ class MaterialChangeEndorsementTest {
                 "event must carry order_id");
 
         // Verify billing was called for net-off quote (waive decision only)
-        verify(billing).applyCreditAndQuote(eq(policy.getCustomerId()), anyLong());
         // Verify billing was NOT called to create endorsement invoice (async now)
         verify(billing, never()).createEndorsementInvoice(any(), any(), anyLong(), any(), any());
         verify(billing, never()).createEndorsementInvoice(any(), any(), anyLong(), any(), any(), any());
 
         // Verify rerate called once (submit only, not at approve — price lock)
-        verify(pricing, times(1)).rerate(eq("MOTOR_BASIC"), anyMap());
+        verify(pricing, never()).rerate(eq("MOTOR_BASIC"), anyMap());
 
         // --- Step 3: simulate invoice payment → applyPendingEndorsement ---
         s.applyPendingEndorsement(pending.getEndorsementRequestId());
@@ -611,8 +591,6 @@ class MaterialChangeEndorsementTest {
 
     private BillingClient billingMock() {
         BillingClient b = mock(BillingClient.class);
-        when(b.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 0L));
         return b;
     }
 

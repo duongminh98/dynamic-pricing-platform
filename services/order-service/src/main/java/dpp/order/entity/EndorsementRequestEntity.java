@@ -70,6 +70,12 @@ public class EndorsementRequestEntity {
     @Column(name = "quoted_premium_vnd")
     private Long quotedPremiumVnd;
 
+    @Column(name = "pricing_request_id")
+    private UUID pricingRequestId;
+
+    @Column(name = "pricing_failed_reason", length = 500)
+    private String pricingFailedReason;
+
     /** Invoice ID for the additional charge when status = APPROVED_PENDING_PAYMENT. */
     @Column(name = "invoice_id")
     private UUID invoiceId;

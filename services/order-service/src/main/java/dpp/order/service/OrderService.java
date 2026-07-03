@@ -6,12 +6,14 @@ import dpp.common.api.ServiceException;
 import dpp.common.outbox.OutboxPublisher;
 import dpp.order.dto.*;
 import dpp.order.entity.*;
-import dpp.order.client.*;
+import dpp.order.client.BillingClient;
+import dpp.order.client.PricingClient;
 import dpp.order.repository.*;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,7 +32,7 @@ import java.util.stream.Collectors;
 public class OrderService {
 
     private final OrderRepository orderRepository;
-    private final PricingClient pricingClient;
+    private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final BillingClient billingClient;
     private final OutboxPublisher outboxPublisher;
     private final PolicyRepository policyRepository;
@@ -40,15 +42,22 @@ public class OrderService {
 
     private static final Set<String> INDEMNITY_LINES = Set.of("motorbike", "car", "home", "health", "travel");
 
-    public OrderService(OrderRepository orderRepository, PricingClient pricingClient, BillingClient billingClient,
-                        OutboxPublisher outboxPublisher, PolicyRepository policyRepository,
+    @Autowired
+    public OrderService(OrderRepository orderRepository, QuoteSnapshotRepository quoteSnapshotRepository,
+                        BillingClient billingClient, OutboxPublisher outboxPublisher, PolicyRepository policyRepository,
                         OrderApprovalTransactionService approvalTxService) {
         this.orderRepository = orderRepository;
-        this.pricingClient = pricingClient;
+        this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.billingClient = billingClient;
         this.outboxPublisher = outboxPublisher;
         this.policyRepository = policyRepository;
         this.approvalTxService = approvalTxService;
+    }
+
+    public OrderService(OrderRepository orderRepository, PricingClient ignoredPricingClient, QuoteSnapshotRepository quoteSnapshotRepository,
+                        BillingClient billingClient, OutboxPublisher outboxPublisher, PolicyRepository policyRepository,
+                        OrderApprovalTransactionService approvalTxService) {
+        this(orderRepository, quoteSnapshotRepository, billingClient, outboxPublisher, policyRepository, approvalTxService);
     }
 
     @Transactional
@@ -57,37 +66,28 @@ public class OrderService {
         if (orderRepository.findByQuoteId(quoteId).isPresent()) {
             throw new ServiceException(ErrorCode.QUOTE_ALREADY_USED);
         }
-        Map<String, Object> quote = pricingClient.getQuote(quoteId);
-        String expiresAtStr = String.valueOf(quote.get("expires_at"));
-        OffsetDateTime expiresAt = OffsetDateTime.parse(expiresAtStr);
-        if (expiresAt.isBefore(OffsetDateTime.now())) {
+        QuoteSnapshot quote = quoteSnapshotRepository.findById(quoteId)
+                .orElseThrow(() -> new ServiceException(ErrorCode.RESOURCE_NOT_FOUND,
+                        "Quote snapshot not ready", Map.of("quote_id", quoteId.toString())));
+        if (quote.getExpiresAt().isBefore(OffsetDateTime.now())) {
             throw new ServiceException(ErrorCode.QUOTE_EXPIRED);
         }
-        long finalPremiumVnd = ((Number) quote.get("final_premium_vnd")).longValue();
-        String productId = String.valueOf(quote.get("product_id"));
+        long finalPremiumVnd = quote.getFinalPremiumVnd();
+        String productId = quote.getProductId();
         OrderEntity order = new OrderEntity();
         order.setOrderId(UUID.randomUUID());
         order.setQuoteId(quoteId);
         order.setCustomerId(resolveCustomerId(keycloakSubject));
         order.setProductId(productId);
         order.setFinalPremiumVnd(finalPremiumVnd);
-        order.setLine(quote.get("line") != null ? String.valueOf(quote.get("line")) : null);
-        Object tripDays = quote.get("trip_duration_days");
-        order.setTripDurationDays(tripDays instanceof Number ? ((Number) tripDays).intValue() : null);
-        Object coverage = quote.get("coverage_amount_vnd");
-        order.setCoverageAmountVnd(coverage instanceof Number ? ((Number) coverage).longValue() : null);
-        Object deductible = quote.get("deductible_vnd");
-        order.setDeductibleVnd(deductible instanceof Number ? ((Number) deductible).longValue() : null);
+        order.setLine(quote.getLine());
+        order.setTripDurationDays(quote.getTripDurationDays());
+        order.setCoverageAmountVnd(quote.getCoverageAmountVnd());
+        order.setDeductibleVnd(quote.getDeductibleVnd());
         // Persist the full risk profile that was priced so it can be propagated to the
         // issued policy and used as the re-rate base for endorsements (R23.2/R23.8).
-        Object profile = quote.get("profile");
-        if (profile instanceof Map<?, ?> profileMap && !profileMap.isEmpty()) {
-            try {
-                order.setRiskProfile(objectMapper.writeValueAsString(profileMap));
-            } catch (Exception e) {
-                order.setRiskProfile(null);
-            }
-        }
+        Object profile = parseRiskProfile(quote.getProfile());
+        order.setRiskProfile(quote.getProfile());
 
         // Duplicate active policy check for indemnity-based lines.
         String line = order.getLine();

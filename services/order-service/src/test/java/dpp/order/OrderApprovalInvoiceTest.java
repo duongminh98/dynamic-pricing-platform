@@ -11,6 +11,7 @@ import dpp.order.entity.OrderStatus;
 import dpp.order.entity.ReviewDecision;
 import dpp.order.repository.OrderRepository;
 import dpp.order.repository.PolicyRepository;
+import dpp.order.repository.QuoteSnapshotRepository;
 import dpp.order.service.OrderApprovalTransactionService;
 import dpp.order.service.OrderService;
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,7 @@ class OrderApprovalInvoiceTest {
         PricingClient pricing = mock(PricingClient.class);
         PolicyRepository policyRepo = mock(PolicyRepository.class);
         OrderApprovalTransactionService approvalTx = new OrderApprovalTransactionService(repo, outbox);
-        return new OrderService(repo, pricing, billing, outbox, policyRepo, approvalTx);
+        return new OrderService(repo, pricing, mock(QuoteSnapshotRepository.class), billing, outbox, policyRepo, approvalTx);
     }
 
     @Test
@@ -136,3 +137,4 @@ class OrderApprovalInvoiceTest {
         verify(billing, never()).createInvoice(any(), any(), anyLong());
     }
 }
+

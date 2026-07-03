@@ -20,4 +20,6 @@ public class RenewalPreviewResponse {
     private long coverageAmountVnd;
     private long deductibleVnd;
     private boolean paymentRequired;
+    private String status;
+    private UUID pricingRequestId;
 }

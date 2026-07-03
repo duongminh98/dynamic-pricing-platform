@@ -59,6 +59,12 @@ public class Policy {
     @Column(name = "line", length = 20)
     private String line;
 
+    @Column(name = "pricing_request_id")
+    private UUID pricingRequestId;
+
+    @Column(name = "pricing_failed_reason", length = 500)
+    private String pricingFailedReason;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 }

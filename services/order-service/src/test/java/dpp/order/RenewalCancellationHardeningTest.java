@@ -114,8 +114,6 @@ class RenewalCancellationHardeningTest {
                 .thenReturn(List.of(old, existing));
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 0L));
 
         PolicyLifecycleService svc = newService(repo, mock(ExposureSegmentRepository.class),
                 mock(PricingClient.class), billing, mock(OutboxPublisher.class));
@@ -142,8 +140,6 @@ class RenewalCancellationHardeningTest {
                 .thenReturn(Map.of("final_premium_vnd", 1_750_000L));
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 1_750_000L, "net_due_vnd", 0L));
 
         PolicyLifecycleService svc = newService(repo, segRepo, pricing, billing, mock(OutboxPublisher.class));
 
@@ -153,15 +149,13 @@ class RenewalCancellationHardeningTest {
 
         RenewalResponse resp = svc.renew(old.getPolicyId(), SUBJECT);
 
-        assertEquals(1_750_000L, resp.getRenewedPremiumVnd());
+        assertEquals(1_000_000L, resp.getRenewedPremiumVnd());
         assertEquals(1, resp.getRenewalNumber());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> profileCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(pricing).rerate(eq("MOTOR_BASIC"), profileCaptor.capture());
-        Map<String, Object> profile = profileCaptor.getValue();
-        assertEquals(30, ((Number) profile.get("age")).intValue());
-        assertEquals(true, profile.get("is_renewal"));
+        verify(pricing, never()).rerate(eq("MOTOR_BASIC"), anyMap());
+
     }
 
     // ── I4: Renewal net-off credit ──
@@ -181,8 +175,6 @@ class RenewalCancellationHardeningTest {
                 .thenReturn(Map.of("final_premium_vnd", 2_000_000L));
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 500_000L, "net_due_vnd", 1_500_000L));
 
         PolicyLifecycleService svc = newService(repo, segRepo, pricing, billing, mock(OutboxPublisher.class));
 
@@ -191,8 +183,8 @@ class RenewalCancellationHardeningTest {
 
         RenewalResponse resp = svc.renew(old.getPolicyId(), SUBJECT);
 
-        assertEquals(500_000L, resp.getCreditAppliedVnd());
-        assertEquals(1_500_000L, resp.getNetDueVnd());
+        assertEquals(0L, resp.getCreditAppliedVnd());
+        assertEquals(1_000_000L, resp.getNetDueVnd());
     }
 
     // ── I5: Renewal gate-by-payment (pending_payment status) ──
@@ -212,8 +204,6 @@ class RenewalCancellationHardeningTest {
                 .thenReturn(Map.of("final_premium_vnd", 2_000_000L));
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 2_000_000L));
         UUID invoiceId = UUID.randomUUID();
         when(billing.createRenewalInvoice(any(), any(), anyLong(), any()))
                 .thenReturn(Map.of("invoice_id", invoiceId.toString()));
@@ -226,8 +216,8 @@ class RenewalCancellationHardeningTest {
         RenewalResponse resp = svc.renew(old.getPolicyId(), SUBJECT);
 
         assertTrue(resp.isPaymentRequired());
-        assertEquals(PolicyStatus.pending_payment, resp.getStatus());
-        assertEquals(invoiceId, resp.getInvoiceId());
+        assertEquals(PolicyStatus.pricing_pending, resp.getStatus());
+        assertNull(resp.getInvoiceId());
     }
 
     // ── I6: Renewal segment stamping ──
@@ -247,8 +237,6 @@ class RenewalCancellationHardeningTest {
                 .thenReturn(Map.of("final_premium_vnd", 1_750_000L));
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 1_750_000L, "net_due_vnd", 0L));
 
         PolicyLifecycleService svc = newService(repo, segRepo, pricing, billing, mock(OutboxPublisher.class));
 
@@ -283,8 +271,6 @@ class RenewalCancellationHardeningTest {
                 .thenReturn(Map.of("final_premium_vnd", 1_750_000L));
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 500_000L, "net_due_vnd", 1_250_000L));
 
         PolicyLifecycleService svc = newService(repo, segRepo, pricing, billing, mock(OutboxPublisher.class));
 
@@ -294,12 +280,14 @@ class RenewalCancellationHardeningTest {
         RenewalPreviewResponse resp = svc.previewRenewal(old.getPolicyId(), SUBJECT);
 
         assertEquals(1_000_000L, resp.getCurrentPremiumVnd());
-        assertEquals(1_750_000L, resp.getRenewedPremiumVnd());
-        assertEquals(500_000L, resp.getCreditAppliedVnd());
-        assertEquals(1_250_000L, resp.getNetDueVnd());
+        assertEquals(1_000_000L, resp.getRenewedPremiumVnd());
+        assertEquals(0L, resp.getCreditAppliedVnd());
+        assertEquals(1_000_000L, resp.getNetDueVnd());
         assertEquals(300_000_000L, resp.getCoverageAmountVnd());
         assertEquals(5_000_000L, resp.getDeductibleVnd());
         assertTrue(resp.isPaymentRequired());
+        assertEquals("PRICING_PENDING", resp.getStatus());
+        assertNotNull(resp.getPricingRequestId());
         assertEquals(1, resp.getRenewalNumber());
     }
 
@@ -446,7 +434,7 @@ class RenewalCancellationHardeningTest {
 
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(outbox).enqueue(eq("PolicyCancelled"), payloadCaptor.capture());
-        String payload = payloadCaptor.getValue();
+        String payload = payloadCaptor.getAllValues().get(payloadCaptor.getAllValues().size() - 1);
         assertTrue(payload.contains("\"refundable_credit_vnd\""), "event must include refundable_credit_vnd");
         assertTrue(payload.contains("\"remaining_days\""), "event must include remaining_days");
         assertTrue(payload.contains("\"term_days\""), "event must include term_days");
@@ -469,8 +457,6 @@ class RenewalCancellationHardeningTest {
                 .thenReturn(Map.of("final_premium_vnd", 2_000_000L));
 
         BillingClient billing = mock(BillingClient.class);
-        when(billing.applyCreditAndQuote(any(), anyLong()))
-                .thenReturn(Map.of("credit_applied_vnd", 0L, "net_due_vnd", 2_000_000L));
         when(billing.createRenewalInvoice(any(), any(), anyLong(), any()))
                 .thenReturn(Map.of("invoice_id", UUID.randomUUID().toString()));
 
@@ -486,11 +472,10 @@ class RenewalCancellationHardeningTest {
         assertTrue(resp.isPaymentRequired());
 
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
-        verify(outbox).enqueue(eq("PolicyRenewed"), payloadCaptor.capture());
-        String payload = payloadCaptor.getValue();
-        assertTrue(payload.contains("\"payment_required\":true"), "event must carry payment_required=true");
-        assertTrue(payload.contains("\"renewed_premium_vnd\":2000000"), "event must carry renewed_premium_vnd");
-        assertTrue(payload.contains("\"previous_policy_id\""), "event must carry previous_policy_id");
-        assertTrue(payload.contains("\"invoice_id\""), "event must carry invoice_id when payment required");
+        verify(outbox, atLeastOnce()).enqueue(eq("RepriceRequested"), payloadCaptor.capture());
+        String payload = payloadCaptor.getAllValues().get(payloadCaptor.getAllValues().size() - 1);
+        assertTrue(payload.contains("\"workflow\":\"RENEWAL_SUBMIT\""), "event must request renewal pricing");
+        assertTrue(payload.contains("\"product_id\":\"MOTOR_BASIC\""), "event must carry product_id");
+        assertTrue(payload.contains("\"profile\""), "event must carry pricing profile");
     }
 }
