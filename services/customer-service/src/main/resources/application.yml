@@ -10,11 +10,6 @@ spring:
     password: ${POSTGRES_PASSWORD:platform_password_dev_only}
     hikari:
       maximum-pool-size: 10
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8080/realms/dynamic-pricing/protocol/openid-connect/certs}
   jpa:
     hibernate:
       ddl-auto: none
@@ -38,16 +33,9 @@ management:
     health:
       show-details: when-authorized
 
-dpp:
-  keycloak:
-    auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:8080}
-    realm: ${KEYCLOAK_REALM:dynamic-pricing}
-    admin-username: ${KEYCLOAK_ADMIN:admin}
-    admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin_dev_only}
-    login-client-id: mini-app
-
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
   api-docs:
     path: /v3/api-docs
+

@@ -22,7 +22,12 @@ def make_token(roles):
 
 
 def auth_header(roles):
-    return {"Authorization": "Bearer " + make_token(roles)}
+    return {
+        "X-Authenticated-User-Sub": "admin-user-123",
+        "X-Authenticated-User-Roles": ",".join(roles),
+        "X-Authenticated-User-Issuer": "http://localhost:8080/realms/dynamic-pricing",
+        "X-Authenticated-Client-Id": "mini-app",
+    }
 
 
 @pytest.fixture

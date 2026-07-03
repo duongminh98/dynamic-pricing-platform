@@ -10,11 +10,6 @@ spring:
     password: ${POSTGRES_PASSWORD:platform_password_dev_only}
     hikari:
       maximum-pool-size: 10
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8080/realms/dynamic-pricing/protocol/openid-connect/certs}
   jpa:
     hibernate:
       ddl-auto: none

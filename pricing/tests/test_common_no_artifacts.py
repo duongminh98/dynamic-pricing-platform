@@ -4,8 +4,6 @@ Does not need model artifacts.
 """
 from __future__ import annotations
 
-import base64
-import json
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -13,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 from httpx import AsyncClient, ASGITransport
 from starlette.requests import Request
 
-from common.auth import _decode_payload, realm_roles, require_role, require_administrator
+from common.auth import gateway_claims, realm_roles, require_role, require_administrator
 from common.correlation import CorrelationIdMiddleware, get_correlation_id, HEADER_NAME
 from common.errors import (
     ErrorCode, ServiceException, _build_error_body, setup_exception_handlers,
@@ -23,92 +21,67 @@ from common.metrics import _metric, setup_metrics, REQUEST_DURATION, REQUEST_COU
 from common.middleware import setup_common_middleware
 
 
-# ── auth ──
+# auth
 
-def _make_jwt(payload: dict) -> str:
-    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b'=').decode()
-    body = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b'=').decode()
-    return f"{header}.{body}.signature"
+def _gateway_request(subject: str = "user123", roles: str = "Customer"):
+    request = MagicMock()
+    request.headers = {
+        "x-authenticated-user-sub": subject,
+        "x-authenticated-user-roles": roles,
+        "x-authenticated-user-issuer": "http://localhost:8080/realms/dynamic-pricing",
+        "x-authenticated-client-id": "mini-app",
+    }
+    return request
 
+def test_gateway_claims_valid():
+    claims = gateway_claims(_gateway_request(roles="Customer,Administrator"))
+    assert claims["sub"] == "user123"
+    assert claims["realm_access"]["roles"] == ["Customer", "Administrator"]
 
-def test_decode_payload_valid():
-    token = _make_jwt({"sub": "user123", "realm_access": {"roles": ["user"]}})
-    payload = _decode_payload(token)
-    assert payload["sub"] == "user123"
-
-
-def test_decode_payload_malformed():
+def test_gateway_claims_missing_subject():
+    request = MagicMock()
+    request.headers = {}
     with pytest.raises(ServiceException) as exc_info:
-        _decode_payload("not.a.token.with.too.many.parts")
+        gateway_claims(request)
     assert exc_info.value.error_code == ErrorCode.UNAUTHENTICATED
-
-
-def test_decode_payload_two_parts():
-    with pytest.raises(ServiceException) as exc_info:
-        _decode_payload("only.one")
-    assert exc_info.value.error_code == ErrorCode.UNAUTHENTICATED
-
-
-def test_decode_payload_invalid_base64():
-    with pytest.raises(ServiceException) as exc_info:
-        _decode_payload("header.!!!@#$.signature")
-    assert exc_info.value.error_code == ErrorCode.UNAUTHENTICATED
-
 
 def test_realm_roles_with_roles():
     claims = {"realm_access": {"roles": ["user", "admin"]}}
     assert realm_roles(claims) == ["user", "admin"]
 
-
 def test_realm_roles_empty():
     claims = {}
     assert realm_roles(claims) == []
-
 
 def test_realm_roles_none():
     claims = {"realm_access": None}
     assert realm_roles(claims) == []
 
-
 def test_realm_roles_no_roles_key():
     claims = {"realm_access": {}}
     assert realm_roles(claims) == []
 
-
 @pytest.mark.asyncio
-async def test_require_role_missing_token():
+async def test_require_role_missing_gateway_identity():
     dep = require_role("Administrator")
     request = MagicMock()
     request.headers = {}
     with pytest.raises(ServiceException) as exc_info:
-        await dep(request, None)
+        await dep(request)
     assert exc_info.value.error_code == ErrorCode.UNAUTHENTICATED
-
 
 @pytest.mark.asyncio
 async def test_require_role_missing_role():
     dep = require_role("Administrator")
-    token = _make_jwt({"realm_access": {"roles": ["user"]}})
-    request = MagicMock()
-    request.headers = {}
-    creds = MagicMock()
-    creds.credentials = token
     with pytest.raises(ServiceException) as exc_info:
-        await dep(request, creds)
+        await dep(_gateway_request(roles="Customer"))
     assert exc_info.value.error_code == ErrorCode.FORBIDDEN_RESOURCE
-
 
 @pytest.mark.asyncio
 async def test_require_role_success():
     dep = require_role("Administrator")
-    token = _make_jwt({"realm_access": {"roles": ["Administrator"]}})
-    request = MagicMock()
-    request.headers = {}
-    creds = MagicMock()
-    creds.credentials = token
-    claims = await dep(request, creds)
+    claims = await dep(_gateway_request(roles="Customer,Administrator"))
     assert "Administrator" in claims["realm_access"]["roles"]
-
 
 # ── errors ──
 

@@ -1,17 +1,10 @@
 package dpp.customer;
 
-import dpp.common.api.ErrorCode;
-import dpp.common.api.ServiceException;
-import dpp.customer.controller.AuthController;
 import dpp.customer.controller.ProfileController;
 import dpp.customer.dto.BaseProfileRequest;
 import dpp.customer.dto.LineProfileRequest;
 import dpp.customer.dto.LineProfileResponse;
-import dpp.customer.dto.LoginRequest;
 import dpp.customer.dto.ProfileResponse;
-import dpp.customer.dto.RegisterRequest;
-import dpp.customer.dto.TokenResponse;
-import dpp.customer.service.AuthService;
 import dpp.customer.service.ProfileService;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -19,52 +12,21 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ControllerCoverageTest {
 
     private Jwt jwtFor(String subject) {
         Jwt jwt = mock(Jwt.class);
         when(jwt.getSubject()).thenReturn(subject);
+        when(jwt.getClaimAsString("email")).thenReturn("test@example.com");
         return jwt;
     }
-
-    // ── AuthController ──
-
-    @Test
-    void authControllerRegisterDelegatesToService() {
-        AuthService authService = mock(AuthService.class);
-        AuthController controller = new AuthController(authService);
-
-        RegisterRequest req = new RegisterRequest();
-        req.setEmail("test@example.com");
-        req.setPassword("password123");
-
-        controller.register(req);
-
-        verify(authService, times(1)).register(req);
-    }
-
-    @Test
-    void authControllerLoginReturnsToken() {
-        AuthService authService = mock(AuthService.class);
-        AuthController controller = new AuthController(authService);
-
-        LoginRequest req = new LoginRequest();
-        req.setEmail("test@example.com");
-        req.setPassword("password123");
-
-        TokenResponse mockToken = new TokenResponse("access-token-123", 3600);
-        when(authService.login(req)).thenReturn(mockToken);
-
-        TokenResponse result = controller.login(req);
-
-        assertEquals("access-token-123", result.getAccessToken());
-        assertEquals(3600, result.getExpiresIn());
-    }
-
-    // ── ProfileController ──
 
     @Test
     void profileControllerUpdateBaseDelegatesToService() {
@@ -81,12 +43,12 @@ class ControllerCoverageTest {
 
         ProfileResponse mockResp = new ProfileResponse();
         mockResp.setCustomerId(UUID.randomUUID());
-        when(profileService.updateBaseProfile("subject-123", req)).thenReturn(mockResp);
+        when(profileService.updateBaseProfile("subject-123", "test@example.com", req)).thenReturn(mockResp);
 
         ProfileResponse result = controller.updateBaseProfile(jwtFor("subject-123"), req);
 
         assertNotNull(result);
-        verify(profileService, times(1)).updateBaseProfile("subject-123", req);
+        verify(profileService, times(1)).updateBaseProfile("subject-123", "test@example.com", req);
     }
 
     @Test
@@ -96,12 +58,12 @@ class ControllerCoverageTest {
 
         ProfileResponse mockResp = new ProfileResponse();
         mockResp.setCustomerId(UUID.randomUUID());
-        when(profileService.getProfile("subject-456")).thenReturn(mockResp);
+        when(profileService.getProfile("subject-456", "test@example.com")).thenReturn(mockResp);
 
         ProfileResponse result = controller.getProfile(jwtFor("subject-456"));
 
         assertNotNull(result);
-        verify(profileService, times(1)).getProfile("subject-456");
+        verify(profileService, times(1)).getProfile("subject-456", "test@example.com");
     }
 
     @Test

@@ -95,7 +95,8 @@ def _mock_quote_result():
 
 @pytest.mark.asyncio
 async def test_post_quote_with_jwt_stores_sub_as_customer_id(app, db_session):
-    token = _make_jwt(sub="customer-123")
+    subject = "customer-123"
+    token = _make_jwt(sub=subject)
     mock_result = _mock_quote_result()
     with patch("app.pricing_engine.engine.quote", return_value=mock_result):
         transport = ASGITransport(app=app)
@@ -103,11 +104,11 @@ async def test_post_quote_with_jwt_stores_sub_as_customer_id(app, db_session):
             resp = await client.post(
                 "/pricing/quote",
                 json={"product_id": "HEALTH_BASIC", "profile": VALID_PROFILE},
-                headers={"Authorization": f"Bearer {token}"},
+                headers={"X-Authenticated-User-Sub": subject},
             )
     assert resp.status_code == 200
     db_row = db_session.query(Quote).first()
-    assert db_row.customer_id == "customer-123"
+    assert db_row.customer_id == quote_router.customer_id_from_subject(subject)
 
 
 @pytest.mark.asyncio
@@ -165,23 +166,25 @@ def _insert_quote(db_session, quote_id: str, customer_id: str):
 
 @pytest.mark.asyncio
 async def test_customer_get_own_quote_200(app, db_session):
-    _insert_quote(db_session, "q-owner", "customer-X")
-    token = _make_jwt(sub="customer-X")
+    subject = "customer-X"
+    _insert_quote(db_session, "q-owner", quote_router.customer_id_from_subject(subject))
+    token = _make_jwt(sub=subject)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/pricing/quote/q-owner", headers={"Authorization": f"Bearer {token}"})
+        resp = await client.get("/pricing/quote/q-owner", headers={"X-Authenticated-User-Sub": subject})
     assert resp.status_code == 200
     assert resp.json()["quote_id"] == "q-owner"
 
 
 @pytest.mark.asyncio
 async def test_customer_get_other_quote_404(app, db_session):
-    _insert_quote(db_session, "q-A", "customer-A")
-    _insert_quote(db_session, "q-B", "customer-B")
-    token = _make_jwt(sub="customer-A")
+    subject = "customer-A"
+    _insert_quote(db_session, "q-A", quote_router.customer_id_from_subject(subject))
+    _insert_quote(db_session, "q-B", quote_router.customer_id_from_subject("customer-B"))
+    token = _make_jwt(sub=subject)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/pricing/quote/q-B", headers={"Authorization": f"Bearer {token}"})
+        resp = await client.get("/pricing/quote/q-B", headers={"X-Authenticated-User-Sub": subject})
     assert resp.status_code == 404
 
 
@@ -191,7 +194,7 @@ async def test_customer_get_internal_quote_404(app, db_session):
     token = _make_jwt(sub="customer-Z")
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/pricing/quote/q-internal", headers={"Authorization": f"Bearer {token}"})
+        resp = await client.get("/pricing/quote/q-internal", headers={"X-Authenticated-User-Sub": "customer-Z"})
     assert resp.status_code == 404
 
 
@@ -216,7 +219,7 @@ async def test_malformed_token_treated_as_internal(app, db_session):
             "/pricing/quote/q-anyone",
             headers={"Authorization": "Bearer not.a.valid.jwt.but.long.enough"},
         )
-    # Malformed token → optional_subject returns None → treated as internal → 200
+    # Bearer-only input is ignored by services; Kong is the only JWT validator.
     assert resp.status_code == 200
 
 
@@ -248,24 +251,60 @@ def test_optional_subject_no_bearer():
     assert optional_subject(req) is None
 
 
-def test_optional_subject_valid_token():
+def test_optional_subject_valid_gateway_header():
     from common.auth import optional_subject
-    token = _make_jwt(sub="user-42")
     req = MagicMock()
-    req.headers = {"Authorization": f"Bearer {token}"}
+    req.headers = {"x-authenticated-user-sub": "user-42"}
     assert optional_subject(req) == "user-42"
 
 
-def test_optional_subject_malformed_token():
+def test_optional_subject_bearer_token_is_ignored():
     from common.auth import optional_subject
     req = MagicMock()
     req.headers = {"Authorization": "Bearer garbage"}
     assert optional_subject(req) is None
 
 
-def test_optional_subject_token_without_sub():
+def test_optional_subject_blank_gateway_header():
     from common.auth import optional_subject
-    token = _make_jwt(sub=None)
     req = MagicMock()
-    req.headers = {"Authorization": f"Bearer {token}"}
+    req.headers = {"x-authenticated-user-sub": ""}
     assert optional_subject(req) is None
+
+@pytest.mark.asyncio
+async def test_post_quote_can_use_cached_customer_profile_without_body_profile(app, db_session):
+    from app.database import CustomerRiskProfile
+    subject = "customer-cached"
+
+    db_session.add(CustomerRiskProfile(
+        customer_id=quote_router.customer_id_from_subject(subject),
+        profile_version=3,
+        effective_at=datetime.datetime.now(datetime.timezone.utc),
+        common_risk_attributes=VALID_PROFILE,
+        line_risk_attributes={"health": {"smoker": False, "height_cm": 170, "weight_kg": 65}},
+        last_event_id="profile-event-1",
+        updated_at=datetime.datetime.now(datetime.timezone.utc),
+    ))
+    db_session.commit()
+
+    captured = {}
+    mock_result = _mock_quote_result()
+
+    def fake_quote(db, product_id, profile):
+        captured["profile"] = profile
+        return mock_result
+
+    with patch("app.pricing_engine.engine.quote", side_effect=fake_quote):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/pricing/quote",
+                json={"product_id": "HEALTH_BASIC"},
+                headers={"X-Authenticated-User-Sub": subject},
+            )
+
+    assert resp.status_code == 200
+    assert captured["profile"]["age"] == VALID_PROFILE["age"]
+    assert captured["profile"]["line_attributes"]["smoker"] is False
+    db_row = db_session.query(Quote).first()
+    assert db_row.profile["profile_version"] == 3

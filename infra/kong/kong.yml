@@ -36,6 +36,8 @@ plugins:
         - X-Authenticated-User-Roles
         - X-Authenticated-User-Issuer
         - X-Authenticated-Client-Id
+        - X-Authenticated-User-Email
+        - X-Authenticated-User-Name-B64
       exposed_headers:
         - X-Correlation-Id
       credentials: true
@@ -112,6 +114,8 @@ services:
                   - X-Authenticated-User-Roles
                   - X-Authenticated-User-Issuer
                   - X-Authenticated-Client-Id
+                  - X-Authenticated-User-Email
+                  - X-Authenticated-User-Name-B64
           - name: post-function
             config:
               access:
@@ -125,6 +129,8 @@ services:
                     local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
                     local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
                     local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local email = claims_json:match('"email"%s*:%s*"([^"]*)"') or claims_json:match('"preferred_username"%s*:%s*"([^"]*)"') or ""
+                    local name = claims_json:match('"name"%s*:%s*"([^"]*)"') or ""
                     local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
                     local roles = {}
                     for role in roles_block:gmatch('"([^"]+)"') do
@@ -134,6 +140,10 @@ services:
                     kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
                     kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
                     kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                    kong.service.request.set_header("X-Authenticated-User-Email", email)
+                    -- Display name may contain UTF-8 (e.g. Vietnamese diacritics); HTTP headers
+                    -- are Latin-1, so raw bytes get mangled downstream. Base64 the name instead.
+                    kong.service.request.set_header("X-Authenticated-User-Name-B64", ngx.encode_base64(name))
                   end
 
   - name: product-service
@@ -155,6 +165,7 @@ services:
           - /admin/products
           - /admin/loading-factors
           - /admin/rate-versions
+          - /admin/pricing-reference
         strip_path: false
         preserve_host: false
 
@@ -173,6 +184,8 @@ services:
                   - X-Authenticated-User-Roles
                   - X-Authenticated-User-Issuer
                   - X-Authenticated-Client-Id
+                  - X-Authenticated-User-Email
+                  - X-Authenticated-User-Name-B64
           - name: post-function
             config:
               access:
@@ -186,6 +199,8 @@ services:
                     local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
                     local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
                     local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local email = claims_json:match('"email"%s*:%s*"([^"]*)"') or claims_json:match('"preferred_username"%s*:%s*"([^"]*)"') or ""
+                    local name = claims_json:match('"name"%s*:%s*"([^"]*)"') or ""
                     local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
                     local roles = {}
                     for role in roles_block:gmatch('"([^"]+)"') do
@@ -195,6 +210,10 @@ services:
                     kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
                     kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
                     kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                    kong.service.request.set_header("X-Authenticated-User-Email", email)
+                    -- Display name may contain UTF-8 (e.g. Vietnamese diacritics); HTTP headers
+                    -- are Latin-1, so raw bytes get mangled downstream. Base64 the name instead.
+                    kong.service.request.set_header("X-Authenticated-User-Name-B64", ngx.encode_base64(name))
                   end
 
   - name: order-service
@@ -231,6 +250,8 @@ services:
                   - X-Authenticated-User-Roles
                   - X-Authenticated-User-Issuer
                   - X-Authenticated-Client-Id
+                  - X-Authenticated-User-Email
+                  - X-Authenticated-User-Name-B64
           - name: post-function
             config:
               access:
@@ -244,6 +265,8 @@ services:
                     local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
                     local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
                     local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local email = claims_json:match('"email"%s*:%s*"([^"]*)"') or claims_json:match('"preferred_username"%s*:%s*"([^"]*)"') or ""
+                    local name = claims_json:match('"name"%s*:%s*"([^"]*)"') or ""
                     local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
                     local roles = {}
                     for role in roles_block:gmatch('"([^"]+)"') do
@@ -253,6 +276,10 @@ services:
                     kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
                     kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
                     kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                    kong.service.request.set_header("X-Authenticated-User-Email", email)
+                    -- Display name may contain UTF-8 (e.g. Vietnamese diacritics); HTTP headers
+                    -- are Latin-1, so raw bytes get mangled downstream. Base64 the name instead.
+                    kong.service.request.set_header("X-Authenticated-User-Name-B64", ngx.encode_base64(name))
                   end
 
   - name: claims-service
@@ -286,6 +313,8 @@ services:
                   - X-Authenticated-User-Roles
                   - X-Authenticated-User-Issuer
                   - X-Authenticated-Client-Id
+                  - X-Authenticated-User-Email
+                  - X-Authenticated-User-Name-B64
           - name: post-function
             config:
               access:
@@ -299,6 +328,8 @@ services:
                     local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
                     local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
                     local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local email = claims_json:match('"email"%s*:%s*"([^"]*)"') or claims_json:match('"preferred_username"%s*:%s*"([^"]*)"') or ""
+                    local name = claims_json:match('"name"%s*:%s*"([^"]*)"') or ""
                     local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
                     local roles = {}
                     for role in roles_block:gmatch('"([^"]+)"') do
@@ -308,6 +339,10 @@ services:
                     kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
                     kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
                     kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                    kong.service.request.set_header("X-Authenticated-User-Email", email)
+                    -- Display name may contain UTF-8 (e.g. Vietnamese diacritics); HTTP headers
+                    -- are Latin-1, so raw bytes get mangled downstream. Base64 the name instead.
+                    kong.service.request.set_header("X-Authenticated-User-Name-B64", ngx.encode_base64(name))
                   end
 
   - name: billing-service
@@ -348,6 +383,8 @@ services:
                   - X-Authenticated-User-Roles
                   - X-Authenticated-User-Issuer
                   - X-Authenticated-Client-Id
+                  - X-Authenticated-User-Email
+                  - X-Authenticated-User-Name-B64
           - name: post-function
             config:
               access:
@@ -361,6 +398,8 @@ services:
                     local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
                     local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
                     local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local email = claims_json:match('"email"%s*:%s*"([^"]*)"') or claims_json:match('"preferred_username"%s*:%s*"([^"]*)"') or ""
+                    local name = claims_json:match('"name"%s*:%s*"([^"]*)"') or ""
                     local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
                     local roles = {}
                     for role in roles_block:gmatch('"([^"]+)"') do
@@ -370,6 +409,10 @@ services:
                     kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
                     kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
                     kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                    kong.service.request.set_header("X-Authenticated-User-Email", email)
+                    -- Display name may contain UTF-8 (e.g. Vietnamese diacritics); HTTP headers
+                    -- are Latin-1, so raw bytes get mangled downstream. Base64 the name instead.
+                    kong.service.request.set_header("X-Authenticated-User-Name-B64", ngx.encode_base64(name))
                   end
 
   - name: notification-service
@@ -402,6 +445,8 @@ services:
                   - X-Authenticated-User-Roles
                   - X-Authenticated-User-Issuer
                   - X-Authenticated-Client-Id
+                  - X-Authenticated-User-Email
+                  - X-Authenticated-User-Name-B64
           - name: post-function
             config:
               access:
@@ -415,6 +460,8 @@ services:
                     local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
                     local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
                     local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local email = claims_json:match('"email"%s*:%s*"([^"]*)"') or claims_json:match('"preferred_username"%s*:%s*"([^"]*)"') or ""
+                    local name = claims_json:match('"name"%s*:%s*"([^"]*)"') or ""
                     local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
                     local roles = {}
                     for role in roles_block:gmatch('"([^"]+)"') do
@@ -424,6 +471,10 @@ services:
                     kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
                     kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
                     kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                    kong.service.request.set_header("X-Authenticated-User-Email", email)
+                    -- Display name may contain UTF-8 (e.g. Vietnamese diacritics); HTTP headers
+                    -- are Latin-1, so raw bytes get mangled downstream. Base64 the name instead.
+                    kong.service.request.set_header("X-Authenticated-User-Name-B64", ngx.encode_base64(name))
                   end
 
   - name: pricing-service
@@ -458,6 +509,8 @@ services:
                   - X-Authenticated-User-Roles
                   - X-Authenticated-User-Issuer
                   - X-Authenticated-Client-Id
+                  - X-Authenticated-User-Email
+                  - X-Authenticated-User-Name-B64
           - name: post-function
             config:
               access:
@@ -471,6 +524,8 @@ services:
                     local sub = claims_json:match('"sub"%s*:%s*"([^"]*)"') or ""
                     local issuer = claims_json:match('"iss"%s*:%s*"([^"]*)"') or ""
                     local client_id = claims_json:match('"azp"%s*:%s*"([^"]*)"') or claims_json:match('"client_id"%s*:%s*"([^"]*)"') or ""
+                    local email = claims_json:match('"email"%s*:%s*"([^"]*)"') or claims_json:match('"preferred_username"%s*:%s*"([^"]*)"') or ""
+                    local name = claims_json:match('"name"%s*:%s*"([^"]*)"') or ""
                     local roles_block = claims_json:match('"realm_access"%s*:%s*{%s*"roles"%s*:%s*%[(.-)%]') or ""
                     local roles = {}
                     for role in roles_block:gmatch('"([^"]+)"') do
@@ -480,6 +535,10 @@ services:
                     kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
                     kong.service.request.set_header("X-Authenticated-User-Issuer", issuer)
                     kong.service.request.set_header("X-Authenticated-Client-Id", client_id)
+                    kong.service.request.set_header("X-Authenticated-User-Email", email)
+                    -- Display name may contain UTF-8 (e.g. Vietnamese diacritics); HTTP headers
+                    -- are Latin-1, so raw bytes get mangled downstream. Base64 the name instead.
+                    kong.service.request.set_header("X-Authenticated-User-Name-B64", ngx.encode_base64(name))
                   end
 
 upstreams:
@@ -693,3 +752,4 @@ upstreams:
     targets:
       - target: pricing-service-1:8000
         weight: 100
+

@@ -1,6 +1,6 @@
 package dpp.notification.config;
 
-import dpp.common.security.KeycloakRoleConverter;
+import dpp.common.security.GatewaySecurity;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -22,7 +22,7 @@ public class SecurityConfig {
                 .requestMatchers("/notifications/**").hasRole("Customer")
                 .anyRequest().authenticated()
         );
-        http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(KeycloakRoleConverter.create())));
+        GatewaySecurity.configure(http);
         return http.build();
     }
 }

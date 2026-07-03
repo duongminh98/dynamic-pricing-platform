@@ -1,6 +1,6 @@
 package dpp.claims.config;
 
-import dpp.common.security.KeycloakRoleConverter;
+import dpp.common.security.GatewaySecurity;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -20,7 +20,7 @@ public class SecurityConfig {
         http.csrf(AbstractHttpConfigurer::disable);
         http.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         http.authorizeHttpRequests(a -> a.requestMatchers("/actuator/health", "/actuator/prometheus", "/swagger-ui/**", "/v3/api-docs/**").permitAll().anyRequest().authenticated());
-        http.oauth2ResourceServer(o -> o.jwt(j -> j.jwtAuthenticationConverter(KeycloakRoleConverter.create())));
+        GatewaySecurity.configure(http);
         return http.build();
     }
 }

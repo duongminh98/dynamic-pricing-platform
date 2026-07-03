@@ -1,6 +1,6 @@
 package dpp.customer.config;
 
-import dpp.common.security.KeycloakRoleConverter;
+import dpp.common.security.GatewaySecurity;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -23,12 +23,13 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                 .requestMatchers("/internal/**").permitAll()
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
-                .requestMatchers("/customers/register", "/customers/login").permitAll()
                 .requestMatchers("/customers/me", "/customers/me/**").hasAnyRole("Customer", "Administrator")
                 .requestMatchers("/admin/**").hasRole("Administrator")
                 .anyRequest().authenticated()
         );
-        http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(KeycloakRoleConverter.create())));
+        GatewaySecurity.configure(http);
         return http.build();
     }
 }
+
+
