@@ -26,6 +26,7 @@ scripts/
 # Documentation / spec markdown ??? kept out of version control by request
 *.md
 !README.md
+!GCP_DEPLOYMENT.md
 !.gitkeep
 
 # Python / venv
@@ -94,3 +95,11 @@ logs/
 # Local test payloads
 test_register.json
 *.local.json
+
+# Live e2e scratch captures (request bodies, outputs, captured ids)
+live_*.out
+live_*.json
+live_*.txt
+
+# Claude workflow handoff artifacts
+.claude-workflows/

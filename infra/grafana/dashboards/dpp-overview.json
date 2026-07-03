@@ -20,7 +20,7 @@
       "id": 1,
       "title": "Target health",
       "type": "stat",
-      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
       "targets": [
         {"refId": "A", "expr": "up", "legendFormat": "{{job}} {{instance}}"}
@@ -40,7 +40,7 @@
       "id": 2,
       "title": "Java services throughput",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
       "targets": [
         {"refId": "A", "expr": "sum(rate(http_server_requests_seconds_count[5m])) by (application)", "legendFormat": "{{application}}"}
@@ -52,7 +52,7 @@
       "id": 3,
       "title": "Pricing service throughput",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
       "targets": [
         {"refId": "A", "expr": "sum(rate(dpp_request_total[5m])) by (endpoint)", "legendFormat": "{{endpoint}}"}
@@ -64,7 +64,7 @@
       "id": 4,
       "title": "Java services p95 latency",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
         {"refId": "A", "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, application))", "legendFormat": "{{application}}"}
@@ -76,7 +76,7 @@
       "id": 5,
       "title": "Pricing service p95 latency",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
         {"refId": "A", "expr": "histogram_quantile(0.95, sum(rate(dpp_request_duration_seconds_bucket[5m])) by (le, endpoint))", "legendFormat": "{{endpoint}}"}
@@ -88,7 +88,7 @@
       "id": 6,
       "title": "Java services 5xx rate",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
       "targets": [
         {"refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) by (application)", "legendFormat": "{{application}}"}
@@ -100,7 +100,7 @@
       "id": 7,
       "title": "Pricing service 5xx rate",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
       "targets": [
         {"refId": "A", "expr": "sum(rate(dpp_request_total{status_code=~\"5..\"}[5m])) by (endpoint)", "legendFormat": "{{endpoint}}"}

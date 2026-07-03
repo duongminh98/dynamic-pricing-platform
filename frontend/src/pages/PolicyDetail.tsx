@@ -174,8 +174,8 @@ export default function PolicyDetail() {
                   <span className="kv-k mono" style={{ fontSize: '0.8rem' }}>{r.refund_id.slice(0, 8)} · {vndLabel(r.amount_vnd)}</span>
                   <span className="kv-v"><StatusPill status={r.status} /></span>
                   </div>
-                  {r.payment_reference && <div className="kv"><span className="kv-k">MÃ£ giao dá»‹ch</span><span className="kv-v mono">{r.payment_reference}</span></div>}
-                  {r.completed_at && <div className="kv"><span className="kv-k">HoÃ n táº¥t lÃºc</span><span className="kv-v">{dateTime(r.completed_at)}</span></div>}
+                  {r.payment_reference && <div className="kv"><span className="kv-k">Mã giao dịch</span><span className="kv-v mono">{r.payment_reference}</span></div>}
+                  {r.completed_at && <div className="kv"><span className="kv-k">Hoàn tất lúc</span><span className="kv-v">{dateTime(r.completed_at)}</span></div>}
                 </div>
               ))}
             </div>

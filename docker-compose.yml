@@ -194,7 +194,7 @@ services:
       KC_METRICS_ENABLED: "true"
     ports:
       - "${KEYCLOAK_PORT:-8080}:8080"
-      - "${KEYCLOAK_HEALTH_PORT:-9000}:9000"
+      - "${KEYCLOAK_HEALTH_PORT:-9002}:9000"
     volumes:
       - keycloak_data:/opt/keycloak/data
       - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
