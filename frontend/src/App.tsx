@@ -1,8 +1,10 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+﻿import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import Shell from './components/Shell';
 
 import Login from './pages/Login';
+import AuthCallback from './pages/AuthCallback';
+import AuthRedirect from './pages/AuthRedirect';
 import Register from './pages/Register';
 import Products from './pages/Products';
 import ProductDetail from './pages/ProductDetail';
@@ -29,14 +31,18 @@ import AdminModels from './pages/admin/AdminModels';
 
 function CustomerRoute({ title, children }: { title: string; children: JSX.Element }) {
   const { isLoggedIn, isAdmin } = useAuth();
-  if (!isLoggedIn) return <Navigate to="/login" replace />;
+  const loc = useLocation();
+  const returnTo = loc.pathname + loc.search;
+  if (!isLoggedIn) return <AuthRedirect returnTo={returnTo} />;
   if (isAdmin) return <Navigate to="/admin" replace />;
   return <Shell title={title}>{children}</Shell>;
 }
 
 function AdminRoute({ title, children }: { title: string; children: JSX.Element }) {
   const { isLoggedIn, isAdmin } = useAuth();
-  if (!isLoggedIn) return <Navigate to="/login" replace />;
+  const loc = useLocation();
+  const returnTo = loc.pathname + loc.search;
+  if (!isLoggedIn) return <AuthRedirect returnTo={returnTo} />;
   if (!isAdmin) return <Navigate to="/products" replace />;
   return <Shell title={title}>{children}</Shell>;
 }
@@ -50,7 +56,8 @@ export default function App() {
       <Route path="/" element={<Navigate to={homeRedirect} replace />} />
 
       {/* public auth */}
-      <Route path="/login" element={isLoggedIn ? <Navigate to={homeRedirect} replace /> : <Login />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/register" element={isLoggedIn ? <Navigate to={homeRedirect} replace /> : <Register />} />
       {/* VNPAY redirects here in the browser — public, display only */}
       <Route path="/payment-result" element={<PaymentResult />} />
@@ -83,3 +90,8 @@ export default function App() {
     </Routes>
   );
 }
+
+
+
+
+

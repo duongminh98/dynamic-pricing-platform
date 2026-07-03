@@ -1,8 +1,10 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
-import { setToken, clearToken, getToken, getStoredRoles, setStoredRoles } from '../api/client';
+﻿import { createContext, useContext, useState, ReactNode } from 'react';
+import { setToken, setIdToken, clearToken, getToken, getIdToken, getStoredRoles, setStoredRoles } from '../api/client';
+import { clearPendingLoginRequest, clearLoginReturnTo, keycloakLogoutUrl, setLoggingOut } from './oidc';
 
 interface LoginResult {
   access_token: string;
+  id_token?: string;
   roles: string[];
 }
 
@@ -11,7 +13,7 @@ interface AuthCtx {
   isAdmin: boolean;
   isCustomer: boolean;
   roles: string[];
-  login: (r: LoginResult) => void;
+  login: (r: LoginResult) => string[];
   logout: () => void;
 }
 const Ctx = createContext<AuthCtx>(null!);
@@ -30,21 +32,53 @@ function rolesFromToken(token: string | null): string[] {
   }
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [roles, setRoles] = useState<string[]>(getStoredRoles());
-  const [isLoggedIn, setLoggedIn] = useState(!!getToken());
+function isTokenUsable(token: string | null): boolean {
+  if (!token) return false;
+  try {
+    const payload = token.split('.')[1];
+    const json = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    if (!json.exp) return false;
+    return json.exp * 1000 > Date.now() + 30_000;
+  } catch {
+    return false;
+  }
+}
 
-  const login = (r: LoginResult) => {
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const forceLoggedOut = new URLSearchParams(location.search).has('logged_out');
+  if (forceLoggedOut) {
+    clearPendingLoginRequest();
+    clearLoginReturnTo();
+    clearToken();
+  }
+  const initialToken = forceLoggedOut ? null : getToken();
+  const initialLoggedIn = isTokenUsable(initialToken);
+  if (!initialLoggedIn && initialToken) clearToken();
+  const [roles, setRoles] = useState<string[]>(initialLoggedIn ? getStoredRoles() : []);
+  const [isLoggedIn, setLoggedIn] = useState(initialLoggedIn);
+
+  const login = (r: LoginResult): string[] => {
     setToken(r.access_token);
+    setIdToken(r.id_token ?? null);
     const resolved = r.roles && r.roles.length ? r.roles : rolesFromToken(r.access_token);
     setStoredRoles(resolved);
     setRoles(resolved);
     setLoggedIn(true);
+    return resolved;
   };
   const logout = () => {
+    const idToken = getIdToken();
+    // Navigate straight to Keycloak logout. We deliberately do NOT flip React state
+    // first: setLoggedIn(false) would synchronously re-render the current protected
+    // route into <AuthRedirect>, whose effect fires its own location.replace() to the
+    // Keycloak *login* endpoint — racing (and overriding) this logout redirect, which
+    // is exactly why "logout" left the user on the same tab. The page is leaving, so
+    // there is nothing to update in state anyway.
+    setLoggingOut();
+    clearPendingLoginRequest();
+    clearLoginReturnTo();
     clearToken();
-    setRoles([]);
-    setLoggedIn(false);
+    location.replace(keycloakLogoutUrl(idToken));
   };
 
   return (
@@ -66,3 +100,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   return useContext(Ctx);
 }
+
+
+
+
+
+
