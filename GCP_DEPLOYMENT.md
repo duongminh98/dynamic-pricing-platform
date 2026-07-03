@@ -139,7 +139,7 @@ queues** (most with a matching dead-letter queue), declared in
 | Service | Mechanism | # | Consumes (examples) | Builds / does |
 | --- | --- | --- | --- | --- |
 | notification | `@RabbitListener` | 22 | customer / policy / claim / endorsement / order / refund / invoice events | email projection + outbound notifications |
-| billing | `@RabbitListener` | 7 | `OrderApproved`, `EndorsementPendingPayment`, `PolicyRenewed`, `EndorsementCreditIssued`, `PolicyCancelled`, `EndorsementInvoiceVoidRequested` | invoices, credit application, voids, refunds |
+| billing | `@RabbitListener` | 7 | `OrderApproved`, `EndorsementApplied`, `EndorsementPendingPayment`, `PolicyRenewed`, `EndorsementCreditIssued`, `PolicyCancelled`, `EndorsementInvoiceVoidRequested` | invoices, credit application, voids, refunds |
 | order | `@RabbitListener` | 4 | `QuoteCreated`, `RepriceCompleted`, `InvoiceCreated`, `InvoicePaid` | `quote_snapshot`, policy/endorsement state transitions |
 | claims | `@RabbitListener` | 4 | `claims.policy.{issued,renewed,cancelled}`, `claims.endorsement.applied` | policy + exposure-segment projections |
 | pricing | `pika` daemons | 2 (5 queues) | `ClaimSettled`, `CustomerProfileUpdated`, policy events, product/rate events, `RepriceRequested` | calibration + serving read-models; emits `RepriceCompleted` |
@@ -216,8 +216,9 @@ and it reshapes the hosting decision (background workers are now platform-wide �
 **Residual code (not runtime paths):** `order-service` still ships two legacy
 client classes — `PricingClient` is now a **no-op compatibility shim** (asserted
 by `OrderClientCoverageTest`), and `BillingClient` is **wired but never invoked**
-at runtime (grep confirms no `billingClient.*(...)` call site). No service makes
-runtime inter-service sync calls; `/internal/**` endpoints are retained only for
+at runtime (no `billingClient` call site remains, though `BillingClient` still
+holds real `/internal/invoices` RestTemplate code). No service makes runtime
+inter-service sync calls; `/internal/**` endpoints are retained only for
 admin / backfill / migration tooling and must stay network-restricted
 ([§6.6](#66-internal-lockdown)).
 
@@ -1391,7 +1392,7 @@ sequenceDiagram
 | `OBJECT_STORAGE_PROVIDER` | pricing + jobs | `gcs` |
 | `OBJECT_STORAGE_{MODEL,REPORT,DATASET}_BUCKET` | pricing + jobs | `dpp-pricing-{models,reports,datasets}-prod` |
 | `MODEL_ARTIFACT_CACHE_DIR` | pricing | `/tmp/model-cache` |
-| `PRICING_BASE_URL`, `BILLING_BASE_URL` / `dpp.billing.base-url` | order | **Deprecated** — order no longer calls pricing/billing at runtime (async migration, [§2.7](#27-async-migration-sync-http-removed-important)); removable once the legacy `PricingClient`/`BillingClient` shims are deleted |
+| `PRICING_BASE_URL`, `BILLING_BASE_URL` / `dpp.billing.base-url` | order | **Deprecated** — order no longer calls pricing/billing at runtime (async migration, [§2.7](#27-async-migration-sync-http-removed-important)); removable once the legacy `PricingClient`/`BillingClient` client classes are deleted |
 | `VNP_TMN_CODE`, `VNP_HASH_SECRET`, `VNP_*_URL` | billing | Secret Manager + public return/IPN URLs |
 | `MAIL_HOST/PORT/USERNAME/PASSWORD` | notification | real SMTP relay (secrets) |
 | `VITE_API_BASE` | frontend (build-time) | `https://<api-domain>` |
