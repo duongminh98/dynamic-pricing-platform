@@ -33,6 +33,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write   # required for Workload Identity Federation (keyless GCP auth)
 
 concurrency:
   group: offline-model-lifecycle
@@ -44,14 +45,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      PRICING_DB_HOST: ${{ secrets.PRICING_DB_HOST }}
-      PRICING_DB_PORT: ${{ secrets.PRICING_DB_PORT }}
-      PRICING_DB_NAME: ${{ secrets.PRICING_DB_NAME }}
-      POSTGRES_USER: ${{ secrets.PRICING_DB_USER }}
+      GCP_PROJECT_ID: dpp-staging-260703
+      GKE_CLUSTER: dpp
+      GKE_REGION: asia-southeast1
+      NAMESPACE: dpp
+      PRICING_DB_HOST: 127.0.0.1
+      PRICING_DB_PORT: "5432"
+      PRICING_DB_NAME: pricing_db
+      POSTGRES_USER: platform_user
       POSTGRES_PASSWORD: ${{ secrets.PRICING_DB_PASSWORD }}
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set gcloud project
+        run: |
+          gcloud config set project "$GCP_PROJECT_ID"
+          gcloud config set billing/quota_project "$GCP_PROJECT_ID"
 
       - uses: actions/setup-python@v5
         with:
@@ -65,16 +83,51 @@ jobs:
         if: ${{ github.event_name == 'schedule' || inputs.dry_run == false || inputs.skip_drift_monitor == false }}
         run: |
           missing=0
-          for name in PRICING_DB_HOST PRICING_DB_PORT PRICING_DB_NAME POSTGRES_USER POSTGRES_PASSWORD; do
+          for name in POSTGRES_PASSWORD; do
             if [ -z "${!name}" ]; then
               echo "Missing required secret-backed environment variable: ${name}"
               missing=1
             fi
           done
           if [ "$missing" -ne 0 ]; then
-            echo "Configure repository secrets: PRICING_DB_HOST, PRICING_DB_PORT, PRICING_DB_NAME, PRICING_DB_USER, PRICING_DB_PASSWORD."
+            echo "Configure repository secret: PRICING_DB_PASSWORD."
             exit 1
           fi
+
+      - name: Open pricing database tunnel
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run == false || inputs.skip_drift_monitor == false }}
+        run: |
+          set -euo pipefail
+          bash deploy/kubeconfig.sh
+          export KUBECONFIG="$PWD/.deploy/kubeconfig.yaml"
+
+          kubectl --namespace "$NAMESPACE" rollout status deployment/pricing-service --timeout=180s
+          pod="$(kubectl --namespace "$NAMESPACE" get pod -l app=pricing-service -o jsonpath='{.items[0].metadata.name}')"
+          if [ -z "$pod" ]; then
+            echo "No pricing-service pod found in namespace $NAMESPACE."
+            exit 1
+          fi
+
+          kubectl --namespace "$NAMESPACE" port-forward "pod/$pod" "$PRICING_DB_PORT:5432" \
+            > /tmp/pricing-db-port-forward.log 2>&1 &
+          echo "$!" > /tmp/pricing-db-port-forward.pid
+
+          for _ in $(seq 1 30); do
+            if python -c 'import os, socket; host = os.environ.get("PRICING_DB_HOST", "127.0.0.1"); port = int(os.environ.get("PRICING_DB_PORT", "5432")); socket.create_connection((host, port), timeout=1).close()'
+            then
+              echo "Pricing database tunnel is ready on ${PRICING_DB_HOST}:${PRICING_DB_PORT}."
+              exit 0
+            fi
+
+            if ! kill -0 "$(cat /tmp/pricing-db-port-forward.pid)" 2>/dev/null; then
+              cat /tmp/pricing-db-port-forward.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          cat /tmp/pricing-db-port-forward.log
+          exit 1
 
       - name: Run drift monitor
         if: ${{ github.event_name == 'schedule' || inputs.skip_drift_monitor == false }}
