@@ -129,7 +129,7 @@ log "Workload Identity bindings (KSA -> GSA)"
 bind_wi() { # ksa gsa
   gcloud iam service-accounts add-iam-policy-binding "$2@$PROJECT_ID.iam.gserviceaccount.com" \
     --role=roles/iam.workloadIdentityUser \
-    --member="serviceAccount:$PROJECT_ID.svc.id.goog[$K8S_NAMESPACE/$1]" --project "$PROJECT_ID" >/dev/null; }
+    --member="serviceAccount:$PROJECT_ID.svc.id.goog[$NAMESPACE/$1]" --project "$PROJECT_ID" >/dev/null; }
 for s in "${SVCS[@]}"; do bind_wi "$s-sa" "svc-$s"; done
 bind_wi pricing-runtime-sa-ksa pricing-runtime-sa
 bind_wi keycloak-sa keycloak

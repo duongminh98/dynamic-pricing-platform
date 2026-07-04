@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; . deploy/config.env; set +a
-K="kubectl --namespace $K8S_NAMESPACE"
+K="kubectl --namespace $NAMESPACE"
 log() { echo -e "\n\033[1;36m== $* ==\033[0m"; }
 
 log "Fetch cluster credentials (static-token kubeconfig; avoids gke-gcloud-auth-plugin)"
