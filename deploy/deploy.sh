@@ -43,6 +43,13 @@ kubectl apply -f deploy/k8s/20-rabbitmq.yaml -f deploy/k8s/21-keycloak.yaml
 $K rollout status statefulset/rabbitmq --timeout=300s
 $K rollout status deployment/keycloak --timeout=420s
 
+# definitions.json bakes a fixed password_hash for the platform_user (a dev-only
+# value), which overrides RABBITMQ_DEFAULT_PASS. Reset it to the Secret-Manager
+# password so the services (which auth with that secret) can connect.
+log "Align RabbitMQ platform_user password with the secret"
+$K exec statefulset/rabbitmq -c rabbitmq -- \
+  rabbitmqctl change_password "$RABBITMQ_USER" "$(sm rabbitmq-password)"
+
 log "Migration gate (Alembic for pricing_db)"
 # Java services (Flyway) migrate at serving-pod startup — Flyway's table lock
 # makes concurrent starts safe, and the app process never exits so a migrate
