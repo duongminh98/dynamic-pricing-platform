@@ -165,13 +165,20 @@ MONOTONE_VEHICLE = {
 }
 
 # -- Exclusion sets ---------------------------------------------------------
-with open(METADATA_PATH) as f:
-    METADATA = json.load(f)
+# METADATA is read at import time, but the gitignored training data is absent on
+# CI (where only the pure-function helpers below are imported/tested). Degrade to
+# an empty metadata map so the module imports; the train/export functions that
+# actually dereference METADATA only run when the data is present.
+try:
+    with open(METADATA_PATH) as f:
+        METADATA = json.load(f)
+except FileNotFoundError:
+    METADATA = {}
 
 EXCLUDE_COLS = set(
-    METADATA["id_columns"]
-    + METADATA["time_columns"]
-    + METADATA["do_not_use_as_features"]
+    METADATA.get("id_columns", [])
+    + METADATA.get("time_columns", [])
+    + METADATA.get("do_not_use_as_features", [])
 )
 EXCLUDE_COLS.update([
     "earned_exposure_years",
