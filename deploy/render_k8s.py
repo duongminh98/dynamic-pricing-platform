@@ -151,6 +151,11 @@ def java_deployment(cfg: dict, svc: str, prefix: str, extra: dict) -> str:
                 ports: [{{containerPort: 8080}}]
                 env:
 {textwrap.indent(env_yaml, "                ")}
+                startupProbe:
+                  httpGet: {{path: /actuator/health, port: 8080}}
+                  initialDelaySeconds: 20
+                  periodSeconds: 10
+                  failureThreshold: 30
                 readinessProbe:
                   httpGet: {{path: /actuator/health, port: 8080}}
                   initialDelaySeconds: 30
@@ -246,6 +251,11 @@ def pricing_deployment(cfg: dict) -> str:
                 ports: [{{containerPort: 8000}}]
                 env:
 {textwrap.indent(env_yaml, "                ")}
+                startupProbe:
+                  httpGet: {{path: /health, port: 8000}}
+                  initialDelaySeconds: 20
+                  periodSeconds: 10
+                  failureThreshold: 30
                 readinessProbe:
                   httpGet: {{path: /health, port: 8000}}
                   initialDelaySeconds: 40

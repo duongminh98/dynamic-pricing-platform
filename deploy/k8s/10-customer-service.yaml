@@ -45,6 +45,11 @@ spec:
           value: "5432"
         - name: CUSTOMER_DB_NAME
           value: "customer_db"
+        startupProbe:
+          httpGet: {path: /actuator/health, port: 8080}
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          failureThreshold: 30
         readinessProbe:
           httpGet: {path: /actuator/health, port: 8080}
           initialDelaySeconds: 30
