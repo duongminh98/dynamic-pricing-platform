@@ -78,7 +78,11 @@ class TestUpsertClaimOutcome:
         mock_quote.customer_id = "customer-from-quote"
         mock_quote.line = "health"
         mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.side_effect = [None, mock_quote]
+        # .first() call order: (1) existing ClaimOutcome -> None,
+        # (2) Quote lookup to backfill customer/line -> mock_quote,
+        # (3) CustomerRiskProfile inside rebuild_quote_ready_profile -> None
+        # (no materialized profile, so rebuild returns early).
+        mock_db.query.return_value.filter.return_value.first.side_effect = [None, mock_quote, None]
         mock_session_local = MagicMock(return_value=mock_db)
 
         payload = {

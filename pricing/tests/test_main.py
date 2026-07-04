@@ -10,7 +10,11 @@ from app.main import app
 
 
 @pytest.mark.asyncio
-async def test_app_has_routes():
+async def test_app_has_routes(monkeypatch):
+    # Without model artifacts, loader.load_artifacts() hard-fails; stub it so the
+    # quote route resolves to a handled error status rather than crashing ASGI.
+    # This test only asserts the route is registered (not 404/405).
+    monkeypatch.setattr("app.pricing_engine.loader.load_artifacts", lambda: None)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Health route registered

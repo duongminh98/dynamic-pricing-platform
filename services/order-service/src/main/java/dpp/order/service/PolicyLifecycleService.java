@@ -134,6 +134,9 @@ public class PolicyLifecycleService {
 
         List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
         ExposureSegment prior = segments.isEmpty() ? null : segments.get(segments.size() - 1);
+        // A6: effective date must move strictly forward past the most recent segment, otherwise
+        // segment truncation would produce overlapping/inverted exposure windows.
+        requireEffectiveAfterLatestSegment(prior, eff);
         long newCoverage = prior != null ? prior.getCoverageAmountVnd() : 0L;
         long newDeductible = prior != null ? prior.getDeductibleVnd() : 0L;
         Map<String, Object> mergedProfile = prior != null ? readRiskSnapshot(prior) : new LinkedHashMap<>();
@@ -201,6 +204,9 @@ public class PolicyLifecycleService {
         // Request asynchronous pricing; the customer can poll the endorsement until it is priced.
         List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
         ExposureSegment prior = segments.isEmpty() ? null : segments.get(segments.size() - 1);
+        // A6: effective date must move strictly forward past the most recent segment, otherwise
+        // segment truncation would produce overlapping/inverted exposure windows.
+        requireEffectiveAfterLatestSegment(prior, eff);
         long newCoverage = prior != null ? prior.getCoverageAmountVnd() : 0L;
         long newDeductible = prior != null ? prior.getDeductibleVnd() : 0L;
         Map<String, Object> mergedProfile = prior != null ? readRiskSnapshot(prior) : new LinkedHashMap<>();
@@ -835,6 +841,10 @@ public class PolicyLifecycleService {
         }
 
         // A6: Close prior segment at eff and recompute earned exposure before creating new segment.
+        // Guard against overlap/inversion: eff must fall strictly inside the prior open segment.
+        // (endorse/preview already reject this, but applyEndorsement is also reachable from the
+        // paid-endorsement and waived-endorsement paths, so re-check here as a hard invariant.)
+        requireEffectiveAfterLatestSegment(prior, eff);
         if (prior != null && prior.getSegmentEnd() != null && prior.getSegmentEnd().isAfter(eff)) {
             prior.setSegmentEnd(eff);
             long priorDays = ChronoUnit.DAYS.between(prior.getSegmentStart(), eff);
@@ -975,8 +985,23 @@ public class PolicyLifecycleService {
         return "";
     }
 
-    private OffsetDateTime resolveEffectiveDate(EndorsementRequest request, OffsetDateTime now) {
-        return request != null && request.getEffectiveDate() != null ? request.getEffectiveDate() : now;
+    /**
+     * Enforce that an endorsement effective date advances strictly past the most recent
+     * exposure segment's start. Without this, a future-dated endorsement followed by an
+     * earlier-dated one truncates the wrong segment and leaves two segments covering the
+     * same window - which makes claim coverage selection ambiguous (a claim in the overlap
+     * would resolve to the stale segment). Segments must stay contiguous and non-overlapping.
+     */
+    private void requireEffectiveAfterLatestSegment(ExposureSegment prior, OffsetDateTime eff) {
+        if (prior != null && prior.getSegmentStart() != null && !eff.isAfter(prior.getSegmentStart())) {
+            throw new ServiceException(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE,
+                    "Effective date must be after the current coverage segment start date",
+                    Map.of("segment_start", prior.getSegmentStart().toString(),
+                            "effective_date", eff.toString()));
+        }
+    }
+
+    private OffsetDateTime resolveEffectiveDate(EndorsementRequest request, OffsetDateTime now) {        return request != null && request.getEffectiveDate() != null ? request.getEffectiveDate() : now;
     }
 
     private Map<String, Object> resolveChangeSet(EndorsementRequest request) {

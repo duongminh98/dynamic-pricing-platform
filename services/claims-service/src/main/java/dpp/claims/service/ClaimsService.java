@@ -112,7 +112,11 @@ public class ClaimsService {
 
     private int findSegmentSeq(List<ClaimExposureSegmentProjection> segments, OffsetDateTime occurrence) {
         int last = segments.size() - 1;
-        for (int i = 0; i < segments.size(); i++) {
+        // Scan newest-first so that if two segments ever overlap the occurrence (e.g. a legacy
+        // out-of-order endorsement produced overlapping windows), the most recent coverage wins
+        // rather than the stale earlier segment. New endorsements are guarded upstream in
+        // order-service, but claims must resolve deterministically over whatever it is fed.
+        for (int i = last; i >= 0; i--) {
             ClaimExposureSegmentProjection seg = segments.get(i);
             OffsetDateTime start = seg.getSegmentStart();
             OffsetDateTime end = seg.getSegmentEnd();

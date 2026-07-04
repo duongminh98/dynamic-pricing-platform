@@ -1,4 +1,4 @@
-﻿const BASE_URL = (import.meta.env.VITE_API_BASE as string) || 'http://localhost:8000';
+const BASE_URL = (import.meta.env.VITE_API_BASE as string) || 'http://localhost:8088';
 const TOKEN_KEY = 'access_token';
 const ID_TOKEN_KEY = 'id_token';
 const ROLES_KEY = 'roles';
@@ -156,6 +156,3 @@ export function qs(params: Record<string, unknown>): string {
   const s = u.toString();
   return s ? '?' + s : '';
 }
-
-
-

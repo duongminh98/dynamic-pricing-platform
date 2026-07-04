@@ -64,6 +64,8 @@ JAVA_SERVICES = {
         "VNP_HASH_SECRET": {"secret": "vnp-hash-secret"},
         "VNP_PAY_URL": {"value": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"},
         "VNP_API_URL": {"value": "https://sandbox.vnpayment.vn/merchant_webapi/api/transaction"},
+        # VNP_RETURN_URL is injected in java_deployment() where cfg is available
+        # (it depends on APP_HOST); see the billing-service special case there.
     }),
     "notification-service": ("NOTIFICATION", {
         "MAIL_HOST": {"value": "mailpit.dpp.svc.cluster.local"},
@@ -121,6 +123,11 @@ def java_deployment(cfg: dict, svc: str, prefix: str, extra: dict) -> str:
     ]
     for k, v in extra.items():
         env_lines.append((k, v))
+
+    # VNPAY redirects the browser here after payment; must be the public SPA
+    # route, not the localhost default (which shows "site not found").
+    if svc == "billing-service":
+        env_lines.append(("VNP_RETURN_URL", {"value": f"https://{cfg['APP_HOST']}/payment-result"}))
 
     env_yaml = render_env(env_lines)
     body = textwrap.dedent(f"""\
@@ -543,6 +550,71 @@ def migration_jobs(cfg: dict) -> str:
     return header("Pricing Alembic migration Job (pre-deploy gate; Java uses startup Flyway)") + body
 
 
+def seed_job(cfg: dict) -> str:
+    """Champion seed Job (post-migration, pre-serving): populate model_version +
+    champion_assignment so the admin "models" tab is not empty on a fresh env.
+
+    Mirrors the local `python offline/register_models.py` step, which is the only
+    thing that writes champion rows. Two differences from local, both handled here:
+
+      * Image: the pricing-service image does NOT bundle offline/ or the .joblib
+        artifacts, so we run the **lifecycle** image (offline/Dockerfile bakes
+        offline/ + champion_config.json; the large .joblib files are pulled from
+        GCS at run time — see below).
+      * Artifacts: local mounts reports/modeling/models via a compose volume; in
+        the cluster there is none, so `app.bootstrap_reference_data` first syncs
+        gs://<reference>/models -> /app/reports/modeling/models (the path
+        register_models.py hard-codes) before the register step runs. Both run in
+        the SAME container so the downloaded files are visible to the register step.
+
+    Idempotent: register_models uses UUID5 ids + INSERT ... ON CONFLICT DO UPDATE
+    and resets is_current before re-assigning, so re-running on every deploy is a
+    no-op when artifacts are unchanged. Cloud SQL proxy is a native sidecar so the
+    Job reaches Complete (same pattern as migrate-pricing)."""
+    limg = f"{cfg['REGION']}-docker.pkg.dev/{cfg['PROJECT_ID']}/{cfg['AR_REPO']}/lifecycle:{cfg['IMAGE_TAG']}"
+    body = _inject(textwrap.dedent(f"""\
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: seed-champions
+          namespace: dpp
+        spec:
+          backoffLimit: 2
+          template:
+            spec:
+              restartPolicy: Never
+              serviceAccountName: pricing-runtime-sa-ksa
+              initContainers:
+              __SQLPROXY__
+              containers:
+              - name: seed
+                image: {limg}
+                command: ["sh", "-c"]
+                args:
+                  - "python -m app.bootstrap_reference_data && python offline/register_models.py"
+                env:
+                - name: POSTGRES_PASSWORD
+                  valueFrom: {{secretKeyRef: {{name: dpp-secrets, key: db-password}}}}
+                - name: POSTGRES_USER
+                  value: "{cfg['DB_USER']}"
+                - name: PRICING_DB_HOST
+                  value: "127.0.0.1"
+                - name: PRICING_DB_PORT
+                  value: "5432"
+                - name: PRICING_DB_NAME
+                  value: "pricing_db"
+                - name: OBJECT_STORAGE_PROVIDER
+                  value: "gcs"
+                - name: REFERENCE_DATA_URI
+                  value: "gs://{cfg['BUCKET_REFERENCE']}"
+                - name: PRICING_REFERENCE_DIR
+                  value: "/app/data/synthetic_real_1m_history_lift_v2"
+                - name: PRICING_MODELS_DIR
+                  value: "/app/reports/modeling/models"
+        """), "__SQLPROXY__", sqlproxy_job_sidecar(cfg))
+    return header("Champion seed Job (post-migration: register_models.py against pricing_db)") + body
+
+
 def sqlproxy_job_sidecar(cfg: dict) -> str:
     """Cloud SQL proxy as a k8s **native sidecar**: an initContainer with
     restartPolicy: Always. It starts before `migrate`, stays up during it, and
@@ -786,6 +858,9 @@ def main() -> None:
 
     (OUT / "90-migrations.yaml").write_text(migration_jobs(cfg), encoding="utf-8")
     written.append("90-migrations.yaml")
+
+    (OUT / "91-seed-champions.yaml").write_text(seed_job(cfg), encoding="utf-8")
+    written.append("91-seed-champions.yaml")
 
     (OUT / "30-edge.yaml").write_text(edge_tier(cfg), encoding="utf-8")
     written.append("30-edge.yaml")

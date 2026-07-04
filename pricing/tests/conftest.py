@@ -86,6 +86,21 @@ _ARTIFACT_FREE_TESTS = frozenset({
     "test_claim_history_enrichment.py",
     "test_quote_claim_enrichment_no_artifacts.py",
     "test_product_read_model.py",
+    "test_read_model_consumer.py",
+    "test_outbox_relay.py",
+    "test_object_storage_gcs.py",
+    "test_feature_buckets.py",
+    "test_quote_ready_profile.py",
+    "test_main.py",
+    "test_quote_ownership.py",
+    "test_product_integration.py",
+    "test_customer_profile.py",
+    "test_reprice_consumer.py",
+    "test_object_storage_s3_and_lifecycle.py",
+    "test_consumer_lifecycle.py",
+    "test_feature_store.py",
+    "test_selection.py",
+    "test_reprice_consumer.py",
 })
 
 

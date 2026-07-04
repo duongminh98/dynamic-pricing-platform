@@ -59,6 +59,8 @@ spec:
           value: "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"
         - name: VNP_API_URL
           value: "https://sandbox.vnpayment.vn/merchant_webapi/api/transaction"
+        - name: VNP_RETURN_URL
+          value: "https://app.dpp-pricing.dev/payment-result"
         readinessProbe:
           httpGet: {path: /actuator/health, port: 8080}
           initialDelaySeconds: 30

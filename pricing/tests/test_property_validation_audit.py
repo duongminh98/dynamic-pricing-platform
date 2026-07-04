@@ -82,8 +82,9 @@ def test_property7_shap_structure(age, province, smoker):
         items = ex["items"]
         assert len(items) >= 3
         for it in items:
-            assert "feature" in it and "label_vi" in it
-            assert it["direction"] in ("tang", "giam")
+            assert "feature" in it and "label" in it
+            assert "label_vi" not in it
+            assert it["direction"] in ("increase", "decrease")
             assert it["magnitude"] >= 0
     else:
         # graceful degradation: quote still valid

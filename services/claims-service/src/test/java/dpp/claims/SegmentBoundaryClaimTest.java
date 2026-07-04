@@ -213,4 +213,44 @@ class SegmentBoundaryClaimTest {
         assertEquals(2, captor2.getValue().getExposureSegmentSeq(),
                 "claim on b2 must resolve to segment 2");
     }
+
+    /**
+     * Defense-in-depth: if two segments ever overlap the occurrence date (e.g. a legacy
+     * out-of-order endorsement produced overlapping windows before the order-service guard
+     * existed), the claim must resolve to the MOST RECENT segment (highest seq), not the
+     * stale earlier one. This mirrors the wrong-coverage bug where first-match-by-seq picked
+     * the pre-endorsement segment.
+     */
+    @Test
+    void claimInOverlappingWindowResolvesToLatestSegment() {
+        String subject = "customer-subject";
+        UUID customerId = UUID.nameUUIDFromBytes(subject.getBytes());
+        UUID policyId = UUID.randomUUID();
+
+        OffsetDateTime eff = OffsetDateTime.now().minusDays(100);
+        OffsetDateTime exp = OffsetDateTime.now().plusDays(265);
+        OffsetDateTime overlapStart = OffsetDateTime.now().minusDays(60);
+        OffsetDateTime occurrence = OffsetDateTime.now().minusDays(40);
+
+        dpp.claims.client.OrderClient orderClient = mock(dpp.claims.client.OrderClient.class);
+        when(orderClient.getPolicy(policyId)).thenReturn(policyMap(customerId));
+        // seg0 spans the whole term [eff, exp]; seg1 (newer) starts mid-term and also
+        // reaches exp. The window [overlapStart, exp] is covered by BOTH — the occurrence
+        // falls inside both segments.
+        when(orderClient.getExposureSegments(policyId)).thenReturn(List.of(
+                segment(0, eff, exp),
+                segment(1, overlapStart, exp)));
+
+        ClaimRepository repo = mock(ClaimRepository.class);
+        when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        ClaimsService svc = newService(repo, orderClient);
+        ClaimResponse resp = svc.fnol(subject, fnolRequest(policyId, occurrence));
+
+        assertEquals(ClaimStatus.pending, resp.getClaimStatus());
+        ArgumentCaptor<Claim> captor = ArgumentCaptor.forClass(Claim.class);
+        verify(repo, times(1)).save(captor.capture());
+        assertEquals(1, captor.getValue().getExposureSegmentSeq(),
+                "claim in an overlapping window must resolve to the LATEST segment (seq=1), not the stale seq=0");
+    }
 }

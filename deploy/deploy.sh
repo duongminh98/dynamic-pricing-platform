@@ -58,9 +58,22 @@ log "Migration gate (Alembic for pricing_db)"
 # Java services (Flyway) migrate at serving-pod startup — Flyway's table lock
 # makes concurrent starts safe, and the app process never exits so a migrate
 # Job would hang. Only pricing needs a dedicated one-shot Alembic Job.
+# Job spec is immutable and the image tag changes per deploy, so delete any
+# prior Job before re-applying (Alembic upgrade head is idempotent).
+$K delete job migrate-pricing --ignore-not-found
 kubectl apply -f deploy/k8s/90-migrations.yaml
 echo "waiting for job/migrate-pricing"
 $K wait --for=condition=complete job/migrate-pricing --timeout=300s
+
+log "Seed champions (register_models.py -> model_version + champion_assignment)"
+# Fresh env has an empty model_version table; the admin models tab reads from it.
+# Mirrors the local `register_models.py` step. Job spec is immutable and the
+# image tag changes per deploy, so delete any prior Job before re-applying.
+# Idempotent at the data layer too (UUID5 ids + INSERT ... ON CONFLICT DO UPDATE).
+$K delete job seed-champions --ignore-not-found
+kubectl apply -f deploy/k8s/91-seed-champions.yaml
+echo "waiting for job/seed-champions"
+$K wait --for=condition=complete job/seed-champions --timeout=300s
 
 log "App services"
 kubectl apply -f deploy/k8s/10-customer-service.yaml -f deploy/k8s/10-product-service.yaml \

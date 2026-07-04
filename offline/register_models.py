@@ -13,6 +13,7 @@ Requires: pricing_db (postgres-pricing) running + champion_config.json present,
 unless --sync-file-only is used.
 """
 import argparse
+import csv
 import datetime
 import hashlib
 import json
@@ -29,8 +30,41 @@ if not DATA_DIR.is_absolute():
     DATA_DIR = ROOT / DATA_DIR
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
 METADATA_PATH = DATA_DIR / "pricing_modeling_metadata.json"
+# Real holdout metrics (deviance/rmse/mae/gini) live in the notebook pipeline's
+# model_metrics.csv, NOT in champion_config.json. We read them at sync time and
+# bake them into champion_config.json so the cloud runtime (which never syncs
+# tables/) still gets real numbers via the config it downloads from GCS.
+METRICS_PATH = MODELS_DIR.parent / "tables" / "model_metrics.csv"
 
 LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
+
+
+def _model_name(algorithm: str, family: str) -> str:
+    """Map champion_config algorithm+family to the `model` column in
+    model_metrics.csv (e.g. lgb+freqsev -> FreqSev_LGBM, glm+tw -> Tweedie_GLM)."""
+    algo = "LGBM" if algorithm == "lgb" else "GLM"
+    fam = "Tweedie" if family in ("tw", "tweedie") else "FreqSev"
+    return f"{fam}_{algo}"
+
+
+def _load_metrics(line: str, algorithm: str, family: str) -> dict:
+    """Return the real pure_premium holdout metrics for the champion model, or
+    {} when the metrics CSV is absent (e.g. on cloud runtime where only data/ and
+    models/ are synced). Callers keep the config gini + 0.0 fallbacks in that case."""
+    if not METRICS_PATH.exists():
+        return {}
+    target = _model_name(algorithm, family)
+    with open(METRICS_PATH, encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            if (row["line"] == line and row["stage"] == "pure_premium"
+                    and row["model"] == target):
+                return {
+                    "gini": float(row["gini"]),
+                    "rmse": float(row["rmse"]),
+                    "mae": float(row["mae"]),
+                    "deviance": float(row["deviance"]),
+                }
+    return {}
 
 # Deterministic namespace so identical artifacts produce the same id, while
 # retrained artifacts produce a new id.
@@ -114,6 +148,16 @@ def enrich_model_version(line: str, cfg: dict, trained_at: str | None = None) ->
     cfg["artifact_files"] = [path.name for path in paths]
     cfg["dataset_version"] = dataset_version
     cfg["trained_at"] = trained_at or cfg.get("trained_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+    # Bake the real holdout metrics into the config so the cloud runtime (which
+    # only syncs the config, not model_metrics.csv) registers real numbers. When
+    # the CSV is absent, keep whatever gini the config already carries and leave
+    # rmse/mae/deviance unset (the DB INSERT falls back to 0.0).
+    metrics = _load_metrics(line, cfg.get("algorithm", "lgb"), cfg.get("family", "tw"))
+    if metrics:
+        cfg["gini"] = metrics["gini"]
+        cfg["rmse"] = metrics["rmse"]
+        cfg["mae"] = metrics["mae"]
+        cfg["deviance"] = metrics["deviance"]
     return model_version_id
 
 
@@ -162,12 +206,16 @@ def main():
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (model_version_id) DO UPDATE SET
                       gini = EXCLUDED.gini,
+                      rmse = EXCLUDED.rmse,
+                      mae = EXCLUDED.mae,
+                      deviance = EXCLUDED.deviance,
                       monotonic_applied = EXCLUDED.monotonic_applied,
                       status = EXCLUDED.status,
                       artifact_checksum = EXCLUDED.artifact_checksum
                     """,
                     (model_version_id, line, "LightGBM" if cfg["algorithm"] == "lgb" else "GLM",
-                     float(cfg["gini"]), 0.0, 0.0, 0.0,
+                     float(cfg["gini"]), float(cfg.get("rmse", 0.0)),
+                     float(cfg.get("mae", 0.0)), float(cfg.get("deviance", 0.0)),
                      datetime.datetime.now(datetime.timezone.utc),
                      cfg.get("dataset_version") or cfg.get("dataset_desc", "synthetic_real"),
                      bool(cfg["monotonic_applied"]),

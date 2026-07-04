@@ -354,5 +354,106 @@ class EndorsementHardeningTest {
         verify(outbox, times(1)).enqueue(eventCaptor.capture(), anyString());
         assertEquals("EndorsementCancelled", eventCaptor.getValue());
     }
+
+    // -- A6: Segment overlap prevention (earlier-dated endorsement after a future-dated one) --
+
+    private ExposureSegment segment(Policy policy, int seq, OffsetDateTime start, OffsetDateTime end) {
+        ExposureSegment seg = new ExposureSegment();
+        seg.setSegmentId(UUID.randomUUID());
+        seg.setPolicyId(policy.getPolicyId());
+        seg.setExposureSegmentSeq(seq);
+        seg.setSegmentStart(start);
+        seg.setSegmentEnd(end);
+        seg.setCoverageAmountVnd(100_000_000L);
+        seg.setDeductibleVnd(0L);
+        seg.setRiskSnapshot("{}");
+        return seg;
+    }
+
+    private PolicyLifecycleService serviceWithSegments(Policy policy, EndorsementRequestRepository endRepo,
+                                                       List<ExposureSegment> segments) {
+        PolicyRepository repo = mock(PolicyRepository.class);
+        when(repo.findById(policy.getPolicyId())).thenReturn(Optional.of(policy));
+        when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
+        when(segRepo.findByPolicyIdOrderByExposureSegmentSeqAsc(policy.getPolicyId()))
+                .thenReturn(segments);
+
+        PolicyDocumentRepository docRepo = mock(PolicyDocumentRepository.class);
+        when(docRepo.findByPolicyIdOrderByVersionDesc(policy.getPolicyId())).thenReturn(List.of());
+        when(docRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        PricingClient pricing = mock(PricingClient.class);
+        when(pricing.rerate(any(), anyMap())).thenReturn(Map.of("final_premium_vnd", 2_200_000L));
+
+        return new PolicyLifecycleService(repo, segRepo, docRepo, endRepo,
+                pricing, mock(BillingClient.class), mock(OutboxPublisher.class));
+    }
+
+    @Test
+    void endorseBeforeLatestSegmentStartIsRejected() {
+        Policy policy = activePolicy();
+        OffsetDateTime pEff = policy.getPolicyEffectiveDate();
+        // A future-dated endorsement already created seg1 starting at pEff+40.
+        List<ExposureSegment> segments = new ArrayList<>();
+        segments.add(segment(policy, 0, pEff, pEff.plusDays(40)));
+        segments.add(segment(policy, 1, pEff.plusDays(40), policy.getPolicyExpirationDate()));
+
+        EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
+        when(endRepo.findByPolicyIdOrderByCreatedAtDesc(policy.getPolicyId())).thenReturn(List.of());
+
+        PolicyLifecycleService s = serviceWithSegments(policy, endRepo, segments);
+
+        // A second endorsement dated BEFORE seg1's start (pEff+25) would overlap seg0.
+        EndorsementRequest req = validRequest(policy);
+        req.setEffectiveDate(pEff.plusDays(25));
+
+        ServiceException ex = assertThrows(ServiceException.class,
+                () -> s.endorse(policy.getPolicyId(), req, SUBJECT));
+        assertEquals(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE, ex.getErrorCode());
+        verify(endRepo, never()).save(any());
+    }
+
+    @Test
+    void previewBeforeLatestSegmentStartIsRejected() {
+        Policy policy = activePolicy();
+        OffsetDateTime pEff = policy.getPolicyEffectiveDate();
+        List<ExposureSegment> segments = new ArrayList<>();
+        segments.add(segment(policy, 0, pEff, pEff.plusDays(40)));
+        segments.add(segment(policy, 1, pEff.plusDays(40), policy.getPolicyExpirationDate()));
+
+        EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
+        PolicyLifecycleService s = serviceWithSegments(policy, endRepo, segments);
+
+        EndorsementRequest req = validRequest(policy);
+        req.setEffectiveDate(pEff.plusDays(25));
+
+        ServiceException ex = assertThrows(ServiceException.class,
+                () -> s.previewEndorsement(policy.getPolicyId(), req, SUBJECT));
+        assertEquals(ErrorCode.ENDORSEMENT_DATE_OUT_OF_RANGE, ex.getErrorCode());
+    }
+
+    @Test
+    void endorseAfterLatestSegmentStartIsAccepted() {
+        Policy policy = activePolicy();
+        OffsetDateTime pEff = policy.getPolicyEffectiveDate();
+        List<ExposureSegment> segments = new ArrayList<>();
+        segments.add(segment(policy, 0, pEff, pEff.plusDays(40)));
+        segments.add(segment(policy, 1, pEff.plusDays(40), policy.getPolicyExpirationDate()));
+
+        EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
+        when(endRepo.findByPolicyIdOrderByCreatedAtDesc(policy.getPolicyId())).thenReturn(List.of());
+        when(endRepo.save(any(EndorsementRequestEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PolicyLifecycleService s = serviceWithSegments(policy, endRepo, segments);
+
+        // Dated strictly after seg1's start — contiguous, no overlap.
+        EndorsementRequest req = validRequest(policy);
+        req.setEffectiveDate(pEff.plusDays(60));
+
+        EndorsementResult result = s.endorse(policy.getPolicyId(), req, SUBJECT);
+        assertEquals("PRICING_PENDING", result.getStatus());
+    }
 }
 

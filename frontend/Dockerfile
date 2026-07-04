@@ -4,7 +4,7 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci || npm install
 COPY frontend/ ./
-ARG VITE_API_BASE=http://localhost:8000
+ARG VITE_API_BASE=http://localhost:8088
 ARG VITE_KEYCLOAK_URL=http://localhost:8080
 ARG VITE_KEYCLOAK_REALM=dynamic-pricing
 ARG VITE_KEYCLOAK_CLIENT_ID=mini-app

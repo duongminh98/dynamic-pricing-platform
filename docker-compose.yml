@@ -220,7 +220,7 @@ services:
       KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
       KONG_LICENSE_DATA: ${KONG_LICENSE_DATA:-}
     ports:
-      - "${KONG_PROXY_PORT:-8000}:8000"
+      - "${KONG_PROXY_PORT:-8088}:8000"
       - "${KONG_ADMIN_PORT:-8001}:8001"
       - "${KONG_STATUS_PORT:-8100}:8100"
     volumes:
@@ -562,7 +562,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        VITE_API_BASE: http://localhost:${KONG_PROXY_PORT:-8000}
+        VITE_API_BASE: http://localhost:${KONG_PROXY_PORT:-8088}
     image: dpp/frontend:latest
     container_name: dpp-frontend
     ports:
