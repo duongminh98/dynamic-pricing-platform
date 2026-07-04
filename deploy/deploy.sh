@@ -23,7 +23,11 @@ kubectl apply -f deploy/k8s/00-namespace.yaml
 
 log "ConfigMaps from source files"
 $K create configmap kong-prod-config      --from-file=kong.yml=infra/kong/kong.prod.yml            --dry-run=client -o yaml | $K apply -f -
-$K create configmap rabbitmq-definitions  --from-file=definitions.json=infra/rabbitmq/definitions.json --dry-run=client -o yaml | $K apply -f -
+$K create configmap rabbitmq-definitions \
+  --from-file=definitions.json=infra/rabbitmq/definitions.json \
+  --from-file=rabbitmq.conf=infra/rabbitmq/rabbitmq.conf \
+  --from-file=enabled_plugins=infra/rabbitmq/enabled_plugins \
+  --dry-run=client -o yaml | $K apply -f -
 $K create configmap keycloak-realm        --from-file=realm-export.json=infra/keycloak/realm-export.json --dry-run=client -o yaml | $K apply -f -
 
 # The k8s Secret is synced from Secret Manager (provision.sh created the secrets).
@@ -39,7 +43,7 @@ $K create secret generic dpp-secrets \
   --dry-run=client -o yaml | $K apply -f -
 
 log "Infra: RabbitMQ + Keycloak"
-kubectl apply -f deploy/k8s/20-rabbitmq.yaml -f deploy/k8s/21-keycloak.yaml
+kubectl apply -f deploy/k8s/20-rabbitmq.yaml -f deploy/k8s/21-keycloak.yaml -f deploy/k8s/22-mailpit.yaml
 $K rollout status statefulset/rabbitmq --timeout=300s
 $K rollout status deployment/keycloak --timeout=420s
 
