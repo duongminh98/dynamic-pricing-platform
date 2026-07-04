@@ -221,7 +221,12 @@ def main():
                      bool(cfg["monotonic_applied"]),
                      cfg.get("family", "tw"), "CHAMPION",
                      cfg.get("dataset_version") or cfg.get("dataset_desc", "synthetic_real"),
-                     ",".join(str(path) for path in _artifact_paths(line, cfg)),
+                     # artifact_uri intentionally NULL: an absolute local path (e.g.
+                     # /app/reports/.. from the lifecycle image) is not portable to the
+                     # pricing container, which mounts artifacts at a different prefix.
+                     # NULL makes loader resolve via PRICING_MODELS_DIR per-container;
+                     # traceability is preserved by artifact_checksum + model_version_id.
+                     None,
                      cfg.get("artifact_checksum"),
                      _feature_schema_hash([METADATA_PATH]),
                      datetime.datetime.now(datetime.timezone.utc),

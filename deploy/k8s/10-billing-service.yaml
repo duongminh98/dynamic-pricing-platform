@@ -61,6 +61,11 @@ spec:
           value: "https://sandbox.vnpayment.vn/merchant_webapi/api/transaction"
         - name: VNP_RETURN_URL
           value: "https://app.dpp-pricing.dev/payment-result"
+        startupProbe:
+          httpGet: {path: /actuator/health, port: 8080}
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          failureThreshold: 30
         readinessProbe:
           httpGet: {path: /actuator/health, port: 8080}
           initialDelaySeconds: 30

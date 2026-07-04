@@ -53,6 +53,11 @@ spec:
           value: "noreply@dpp-pricing.dev"
         - name: NOTIFICATION_EMAIL_ENABLED
           value: "true"
+        startupProbe:
+          httpGet: {path: /actuator/health, port: 8080}
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          failureThreshold: 30
         readinessProbe:
           httpGet: {path: /actuator/health, port: 8080}
           initialDelaySeconds: 30
