@@ -72,6 +72,26 @@ kubectl apply -f deploy/k8s/30-edge.yaml
 $K rollout status deployment/kong --timeout=300s
 $K rollout status deployment/frontend --timeout=180s
 
-log "Done. Ingress IP (managed cert may take 10-60m to go ACTIVE):"
-$K get ingress dpp-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
-echo "Run deploy/smoke.sh once the cert is ACTIVE and DNS resolves."
+log "DNS A records (point hosts at the ingress LB IPs so the managed certs can validate)"
+# Both ingresses only get their LB IP after the edge rollout, so the records are
+# created here, not in provision.sh. Idempotent: replace the record set if it exists.
+API_IP=""; AUTH_IP=""
+for _ in $(seq 1 30); do
+  API_IP="$($K get ingress dpp-ingress      -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+  AUTH_IP="$($K get ingress dpp-auth-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+  [ -n "$API_IP" ] && [ -n "$AUTH_IP" ] && break
+  echo "waiting for ingress LB IPs..."; sleep 20
+done
+upsert_a() { # host ip
+  local host="$1" ip="$2"
+  gcloud dns record-sets create "$host." --type=A --ttl=300 --rrdatas="$ip" \
+    --zone="$DNS_ZONE" --project "$PROJECT_ID" 2>/dev/null || \
+  gcloud dns record-sets update "$host." --type=A --ttl=300 --rrdatas="$ip" \
+    --zone="$DNS_ZONE" --project "$PROJECT_ID"
+}
+upsert_a "$API_HOST"  "$API_IP"
+upsert_a "$APP_HOST"  "$API_IP"
+upsert_a "$AUTH_HOST" "$AUTH_IP"
+
+log "Done. api/app -> $API_IP, auth -> $AUTH_IP"
+echo "Managed certs take 10-60m to go ACTIVE after DNS resolves. Then run deploy/smoke.sh."

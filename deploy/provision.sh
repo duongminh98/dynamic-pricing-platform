@@ -29,6 +29,12 @@ gcloud services vpc-peerings connect --service=servicenetworking.googleapis.com 
   --ranges=dpp-psa-range --network=dpp-vpc --project "$PROJECT_ID" || true
 gcloud compute addresses create dpp-ingress-ip --global --project "$PROJECT_ID" || true
 
+log "Cloud DNS managed zone (public) for $BASE_DOMAIN"
+# The Cloud Domains registration delegates NS to this zone; deploy.sh writes the
+# A records once the ingress LBs have IPs.
+gcloud dns managed-zones create "$DNS_ZONE" --dns-name="$BASE_DOMAIN." \
+  --description="dpp public zone" --project "$PROJECT_ID" || true
+
 log "Artifact Registry"
 gcloud artifacts repositories create "$AR_REPO" --repository-format=docker \
   --location="$REGION" --project "$PROJECT_ID" || true
