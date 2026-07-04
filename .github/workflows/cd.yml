@@ -46,6 +46,17 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
+      # WIF produces an external_account credential; gcloud does NOT infer a
+      # quota/billing project from it, so client-side API calls (e.g. Cloud
+      # Build uploading source to the _cloudbuild bucket) fail with
+      # "serviceusage.services.use". Pin the quota project explicitly.
+      # PROJECT_ID comes from deploy/config.env (committed, single source).
+      - name: Set gcloud quota project
+        run: |
+          set -a; . deploy/config.env; set +a
+          gcloud config set project "$PROJECT_ID"
+          gcloud config set billing/quota_project "$PROJECT_ID"
+
       # deploy.sh + smoke.sh call `python` (bare); ubuntu runners only ship
       # `python3`. setup-python puts `python` on PATH so the scripts run as-is.
       - uses: actions/setup-python@v5
@@ -60,6 +71,8 @@ jobs:
       # pin config.env IMAGE_TAG to that SHA. Cloud Build layer-caches unchanged
       # images, so untouched services are cheap.
       - name: Build and push images
+        env:
+          GOOGLE_CLOUD_QUOTA_PROJECT: dpp-staging-260703
         run: bash deploy/build_images.sh
 
       # Render manifests at the new tag, run the pricing migration gate, roll out
