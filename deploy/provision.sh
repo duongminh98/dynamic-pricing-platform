@@ -33,6 +33,15 @@ log "Artifact Registry"
 gcloud artifacts repositories create "$AR_REPO" --repository-format=docker \
   --location="$REGION" --project "$PROJECT_ID" || true
 
+# `gcloud builds submit` runs as the default compute SA, which on a fresh
+# project lacks access to the Cloud Build source bucket + Artifact Registry.
+PROJECT_NUM="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+CB_SA="$PROJECT_NUM-compute@developer.gserviceaccount.com"
+for role in roles/storage.admin roles/artifactregistry.writer roles/logging.logWriter; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:$CB_SA" --role="$role" --condition=None >/dev/null
+done
+
 log "GCS buckets"
 for b in "$BUCKET_DATASETS" "$BUCKET_MODELS" "$BUCKET_REPORTS" "$BUCKET_REFERENCE" "$BUCKET_FRONTEND"; do
   gcloud storage buckets create "gs://$b" --location="$REGION" \
@@ -42,7 +51,7 @@ done
 log "Cloud SQL (Postgres 16, private IP)"
 if ! gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" >/dev/null 2>&1; then
   gcloud sql instances create "$SQL_INSTANCE" \
-    --database-version=POSTGRES_16 --tier=db-custom-2-7680 --region="$REGION" \
+    --database-version=POSTGRES_16 --edition=ENTERPRISE --tier=db-custom-2-7680 --region="$REGION" \
     --network="projects/$PROJECT_ID/global/networks/dpp-vpc" --no-assign-ip \
     --storage-auto-increase --backup --enable-point-in-time-recovery \
     --project "$PROJECT_ID"
