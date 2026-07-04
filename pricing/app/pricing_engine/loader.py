@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import time
 import warnings
@@ -18,8 +19,12 @@ from ..feature_store import clear_cache as clear_feature_store_cache
 from ..object_storage import materialize
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
-MODELS_DIR = ROOT / "reports" / "modeling" / "models"
-DATA_DIR = ROOT / "data" / "synthetic_real_1m_history_lift_v2"
+# Reference-data + champion-registry roots. Default to the in-repo layout the
+# compose volumes mount, but allow env overrides so a GCS FUSE mount (GKE /
+# Cloud Run 2nd-gen) or a baked-in image path can point them anywhere without a
+# code change (see GCP_DEPLOYMENT.md §6.3).
+MODELS_DIR = pathlib.Path(os.environ.get("PRICING_MODELS_DIR", str(ROOT / "reports" / "modeling" / "models")))
+DATA_DIR = pathlib.Path(os.environ.get("PRICING_REFERENCE_DIR", str(ROOT / "data" / "synthetic_real_1m_history_lift_v2")))
 METADATA_PATH = DATA_DIR / "pricing_modeling_metadata.json"
 GEO_RISK_PATH = DATA_DIR / "geo_risk.csv"
 COST_INDICES_PATH = DATA_DIR / "cost_indices.csv"

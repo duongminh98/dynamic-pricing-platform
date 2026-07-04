@@ -1,0 +1,58 @@
+# Controls what `gcloud builds submit` uploads as the build context.
+# IMPORTANT: when this file exists, gcloud does NOT consult .gitignore — so the
+# gitignored reference files the lifecycle image needs (scripts/, offline/, the
+# small data/ reference tree, champion_config.json) ARE uploaded from here, while
+# the 3.6GB of training tables + other heavy/irrelevant dirs stay excluded.
+
+# --- VCS / tooling / local scratch -----------------------------------------
+.git/
+.gradle/
+.venv/
+.idea/
+.kiro/
+.agents/
+.pytest_cache/
+.hypothesis/
+node_modules/
+frontend/dist/
+build/
+bin/
+logs/
+notebooks/
+docs-html/
+.claude/
+.claude-workflows/
+.deploy/
+**/__pycache__/
+**/*.pyc
+*.log
+live_*.txt
+live_*.out
+live_*.json
+
+# --- Secrets ----------------------------------------------------------------
+.env
+.env.*
+admin_token.txt
+*_token.txt
+cust_token.txt
+
+# --- data/: upload ONLY the small reference files the loader bakes in; the big
+#     training tables (pricing_freq_*, policy_exposure_*, policies.csv, …) come
+#     from GCS at job runtime, so exclude the ~3.6GB.
+data/*
+!data/synthetic_real_1m_history_lift_v2/
+data/synthetic_real_1m_history_lift_v2/*
+!data/synthetic_real_1m_history_lift_v2/pricing_modeling_metadata.json
+!data/synthetic_real_1m_history_lift_v2/geo_risk.csv
+!data/synthetic_real_1m_history_lift_v2/cost_indices.csv
+!data/synthetic_real_1m_history_lift_v2/products.csv
+!data/synthetic_real_1m_history_lift_v2/summary.json
+
+# --- reports/: upload ONLY champion_config.json (model artifacts come from GCS)
+reports/*
+!reports/modeling/
+reports/modeling/*
+!reports/modeling/models/
+reports/modeling/models/*
+!reports/modeling/models/champion_config.json

@@ -1,0 +1,73 @@
+name: CD
+
+# Continuous deployment to GKE staging. Runs ONLY after the CI workflow
+# succeeds on master (so broken code never deploys), or on manual dispatch.
+# Reuses the deploy/ scripts verbatim (single source of truth) — the same
+# provision.sh/build_images.sh/deploy.sh a human would run locally.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch: {}
+
+# One deploy at a time; a newer push supersedes an in-flight rollout.
+concurrency:
+  group: cd-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # required for Workload Identity Federation (keyless auth)
+
+jobs:
+  deploy:
+    # workflow_run fires on success AND failure — gate on success. Manual
+    # dispatch has no workflow_run context, so allow it through too.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run checks out the default branch by default; pin to the
+          # exact commit CI validated so the image tag == the tested SHA.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # Keyless auth to GCP via Workload Identity Federation (no SA key in repo).
+      # Set the two secrets once (see deploy/CD_SETUP.md).
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # deploy.sh + smoke.sh call `python` (bare); ubuntu runners only ship
+      # `python3`. setup-python puts `python` on PATH so the scripts run as-is.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # No gke-gcloud-auth-plugin needed: deploy/kubeconfig.sh writes a
+      # static-token kubeconfig (from `gcloud auth print-access-token`), which
+      # authenticates kubectl without the exec plugin.
+
+      # Build + push all 9 images (tag = short SHA) to Artifact Registry, then
+      # pin config.env IMAGE_TAG to that SHA. Cloud Build layer-caches unchanged
+      # images, so untouched services are cheap.
+      - name: Build and push images
+        run: bash deploy/build_images.sh
+
+      # Render manifests at the new tag, run the pricing migration gate, roll out
+      # all workloads, reconcile DNS, then leave. Idempotent.
+      - name: Deploy to GKE
+        run: bash deploy/deploy.sh
+
+      # End-to-end smoke against the live LB (JWT -> quote -> admin authz).
+      # Non-zero exit fails the workflow so a bad rollout is visible.
+      - name: Smoke test
+        run: bash deploy/smoke.sh
