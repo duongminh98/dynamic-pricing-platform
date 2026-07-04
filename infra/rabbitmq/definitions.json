@@ -4,25 +4,6 @@
       "name": "/"
     }
   ],
-  "users": [
-    {
-      "name": "platform_user",
-      "password_hash": "yIlR8oJQXhFfOnQHyYblUm5Z/IreUcRq2sG2jp357U1NVX3h",
-      "hashing_algorithm": "rabbit_password_hashing_sha256",
-      "tags": [
-        "administrator"
-      ]
-    }
-  ],
-  "permissions": [
-    {
-      "user": "platform_user",
-      "vhost": "/",
-      "configure": ".*",
-      "write": ".*",
-      "read": ".*"
-    }
-  ],
   "exchanges": [
     {
       "name": "platform.events",
