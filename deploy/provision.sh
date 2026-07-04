@@ -120,10 +120,20 @@ bind_wi pricing-runtime-sa-ksa pricing-runtime-sa
 bind_wi keycloak-sa keycloak
 
 log "Upload reference data to GCS"
-gcloud storage rsync -r data/synthetic_real_1m_history_lift_v2 \
-  "gs://$BUCKET_REFERENCE/data/synthetic_real_1m_history_lift_v2" --project "$PROJECT_ID"
+# The pricing serving loader needs ONLY the small reference files + champion
+# models — NOT the 3.6GB training tables (baking those in evicts the pod at its
+# 1Gi ephemeral limit). bootstrap_reference_data.py pulls {base}/data -> the
+# reference dir and {base}/models -> the models dir, both FLAT, so upload flat.
+DATA_DIR=data/synthetic_real_1m_history_lift_v2
+for f in pricing_modeling_metadata.json geo_risk.csv cost_indices.csv products.csv summary.json; do
+  gcloud storage cp "$DATA_DIR/$f" "gs://$BUCKET_REFERENCE/data/$f" --project "$PROJECT_ID"
+done
+# Champion registry + the joblib artifacts it references (loader falls back to
+# these when the fresh pricing_db has no champion_assignment yet).
 gcloud storage cp reports/modeling/models/champion_config.json \
-  "gs://$BUCKET_REFERENCE/reports/modeling/models/champion_config.json" --project "$PROJECT_ID"
+  "gs://$BUCKET_REFERENCE/models/champion_config.json" --project "$PROJECT_ID"
+gcloud storage rsync reports/modeling/models "gs://$BUCKET_REFERENCE/models" \
+  --project "$PROJECT_ID"
 
 log "Budget alert (\$300 credit guard)"
 BILLING="$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingAccountName)' | sed 's#billingAccounts/##')"
