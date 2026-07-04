@@ -48,6 +48,7 @@ gcloud iam service-accounts create "$DEPLOY_SA" \
 # per-service runtime SAs (Cloud Build/GKE workload identity).
 for role in \
   roles/cloudbuild.builds.editor \
+  roles/serviceusage.serviceUsageConsumer \
   roles/artifactregistry.writer \
   roles/container.developer \
   roles/secretmanager.secretAccessor \
