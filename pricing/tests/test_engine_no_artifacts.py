@@ -206,8 +206,11 @@ def test_quote_with_mocked_loader():
          patch("app.pricing_engine.engine.required_columns", return_value=["age", "coverage_amount_vnd", "deductible_vnd"]), \
          patch("app.pricing_engine.engine.build_features", return_value=mock_feature_df), \
          patch("app.pricing_engine.engine.get_product", return_value={"admin_fee_vnd": 10_000, "coverage_amount_vnd": 100_000_000, "deductible_vnd": 0}), \
-         patch("app.pricing_engine.engine.explain", return_value={"available": True, "items": []}), \
+         patch("app.pricing_engine.engine.explain", return_value={"available": True, "items": []}) as mock_explain, \
          patch("app.pricing_engine.engine.feature_set_for_audit", return_value={"age": 30}), \
+         patch("app.pricing_engine.engine.get_loading_factor", return_value=1.0), \
+         patch("app.pricing_engine.engine.get_reference_versions", return_value=(None, None)), \
+         patch("app.pricing_engine.engine.get_current_rate_version_id", return_value="rv-test"), \
          patch("app.pricing_engine.engine._quote_audit_enabled", return_value=False):
         result = engine.quote(None, "HEALTH_BASIC", _valid_profile())
 
@@ -223,6 +226,9 @@ def test_quote_with_mocked_loader():
     assert "expires_at" in result
     assert "created_at" in result
     assert "rate_version" in result
+    assert mock_explain.call_args.kwargs["component_excluded_features"] == {
+        "severity": engine.CUSTOMER_EXPLANATION_PRODUCT_FEATURES,
+    }
 
 
 def test_quote_rejects_unsupported_line():
@@ -269,8 +275,11 @@ def test_quote_freq_sev_with_mocked_loader():
          patch("app.pricing_engine.engine.required_columns", return_value=["age"]), \
          patch("app.pricing_engine.engine.build_features", return_value=mock_feature_df), \
          patch("app.pricing_engine.engine.get_product", return_value={"admin_fee_vnd": 10_000, "coverage_amount_vnd": 100_000_000, "deductible_vnd": 0}), \
-         patch("app.pricing_engine.engine.explain", return_value={"available": False, "items": []}), \
+         patch("app.pricing_engine.engine.explain", return_value={"available": False, "items": []}) as mock_explain, \
          patch("app.pricing_engine.engine.feature_set_for_audit", return_value={"age": 30}), \
+         patch("app.pricing_engine.engine.get_loading_factor", return_value=1.0), \
+         patch("app.pricing_engine.engine.get_reference_versions", return_value=(None, None)), \
+         patch("app.pricing_engine.engine.get_current_rate_version_id", return_value="rv-test"), \
          patch("app.pricing_engine.engine._quote_audit_enabled", return_value=False):
         result = engine.quote_freq_sev(None, "HEALTH_BASIC", _valid_profile())
 
@@ -278,6 +287,9 @@ def test_quote_freq_sev_with_mocked_loader():
     assert result["frequency"] == 0.1
     assert result["severity"] == 5_000_000.0
     assert result["coverage_amount_vnd"] == 100_000_000
+    assert mock_explain.call_args.kwargs["component_excluded_features"] == {
+        "severity": engine.CUSTOMER_EXPLANATION_PRODUCT_FEATURES,
+    }
     assert result["deductible_vnd"] == 0
     assert result["pure_premium_vnd"] >= 0
 

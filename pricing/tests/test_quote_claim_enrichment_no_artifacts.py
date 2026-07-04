@@ -61,6 +61,14 @@ def app(db_session, monkeypatch):
         }
 
     monkeypatch.setattr("app.pricing_engine.engine.quote", fake_quote)
+    # The router builds an audit snapshot via loader.required_columns +
+    # features.feature_set_for_audit (imported inside the handler). Without model
+    # artifacts these hit load_artifacts() and hard-fail, so stub them at source.
+    monkeypatch.setattr("app.pricing_engine.loader.required_columns", lambda line: ["age"])
+    monkeypatch.setattr(
+        "app.pricing_engine.features.feature_set_for_audit",
+        lambda line, product_id, profile, feature_names: {"age": profile.get("age")},
+    )
     return app
 
 
@@ -90,7 +98,7 @@ async def test_post_quote_enriches_and_overrides_client_claim_features(app, db_s
     assert resp.status_code == 200
     db_quote = db_session.query(Quote).filter(Quote.quote_id == "quote-enriched").first()
     assert db_quote is not None
-    assert db_quote.customer_id == "customer-1"
+    assert db_quote.customer_id == quote_router.customer_id_from_subject("customer-1")
     assert db_quote.profile["claim_count_12m_prior"] == 2
     assert db_quote.profile["claim_count_36m_prior"] == 4
     assert db_quote.profile["days_since_last_claim_prior"] == 15

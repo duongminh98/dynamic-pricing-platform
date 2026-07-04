@@ -33,6 +33,23 @@ LINE_SOFT_CAP_START_RATIO = {
     "travel": 0.40,
 }
 
+CUSTOMER_EXPLANATION_PRODUCT_FEATURES = frozenset({
+    "coverage_amount_vnd",
+    "deductible_vnd",
+    "base_premium_vnd",
+    "admin_fee_vnd",
+    "product_id",
+})
+
+SEVERITY_EXPLANATION_EXCLUDED_FEATURES_BY_LINE = {
+    "health": CUSTOMER_EXPLANATION_PRODUCT_FEATURES,
+}
+
+
+def _explanation_exclusions(line: str) -> dict[str, frozenset[str]]:
+    excluded = SEVERITY_EXPLANATION_EXCLUDED_FEATURES_BY_LINE.get(line)
+    return {"severity": excluded} if excluded else {}
+
 def _quote_audit_enabled() -> bool:
     """Read the bonus flag dynamically so tests/deployments can toggle it at runtime."""
     from .. import config
@@ -366,7 +383,10 @@ def quote(db, product_id: str, profile: dict,
     # (champion model_version), not a throwaway random UUID (R32.3).
     rate_version_id = _rate_version_for(line, selection["model_version"])
 
-    explanation = explain(selection["model"], feature_df)
+    explanation = explain(
+        selection["model"], feature_df,
+        component_excluded_features=_explanation_exclusions(line),
+    )
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
     geo_risk_version_id, cost_index_version_id = get_reference_versions()
 
@@ -442,7 +462,10 @@ def quote_freq_sev(db, product_id: str, profile: dict,
     expires_at = created_at + datetime.timedelta(days=QUOTE_VALIDITY_DAYS)
     quote_id = str(uuid.uuid4())
     rate_version_id = str(uuid.uuid4())
-    explanation = explain({"freq": freq_model, "sev": sev_model}, feature_df)
+    explanation = explain(
+        {"freq": freq_model, "sev": sev_model}, feature_df,
+        component_excluded_features=_explanation_exclusions(line),
+    )
     feature_set = feature_set_for_audit(line, product_id, profile, feature_names)
     geo_risk_version_id, cost_index_version_id = get_reference_versions()
     if db is not None and _quote_audit_enabled():

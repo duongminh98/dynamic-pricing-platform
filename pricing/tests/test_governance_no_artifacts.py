@@ -41,7 +41,9 @@ def test_promote_champion_success():
     db.query.return_value.filter.return_value.first.side_effect = [challenger, None]
     db.query.return_value.filter.return_value.update.return_value = 0
 
-    with patch("app.pricing_engine.governance.is_monotonic_exempt", return_value=False):
+    with patch("app.pricing_engine.governance.is_monotonic_exempt", return_value=False), \
+         patch("app.pricing_engine.governance.loader.validate_model_artifact"), \
+         patch("app.pricing_engine.governance.loader.refresh_artifacts"):
         result = governance.promote_champion(db, "health", "mv2")
 
     assert result["promoted"] is True
@@ -104,7 +106,9 @@ def test_promote_champion_exempt_line_allows_no_monotonic():
     db.query.return_value.filter.return_value.first.side_effect = [challenger, None]
     db.query.return_value.filter.return_value.update.return_value = 0
 
-    with patch("app.pricing_engine.governance.is_monotonic_exempt", return_value=True):
+    with patch("app.pricing_engine.governance.is_monotonic_exempt", return_value=True), \
+         patch("app.pricing_engine.governance.loader.validate_model_artifact"), \
+         patch("app.pricing_engine.governance.loader.refresh_artifacts"):
         result = governance.promote_champion(db, "travel", "mv2")
 
     assert result["promoted"] is True
@@ -126,7 +130,9 @@ def test_rollback_champion_success():
     ]
     db.query.return_value.filter.return_value.update.return_value = 0
 
-    result = governance.rollback_champion(db, "health")
+    with patch("app.pricing_engine.governance.loader.validate_model_artifact"), \
+         patch("app.pricing_engine.governance.loader.refresh_artifacts"):
+        result = governance.rollback_champion(db, "health")
 
     assert result["rolled_back"] is True
     assert result["champion"] == "mv1"

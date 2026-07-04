@@ -94,6 +94,43 @@ def test_explain_freqsev_composite_returns_frequency_and_severity_components():
     assert result["components"]["frequency"]["method"] == "freqsev_frequency_tree_shap"
     assert result["components"]["severity"]["method"] == "freqsev_severity_tree_shap"
 
+
+def test_explain_component_exclusions_hide_product_terms_from_severity():
+    class LocalFakeLGBMRegressor:
+        feature_name_ = ["coverage_amount_vnd", "product_id", "age", "bmi", "smoker"]
+
+        def predict(self, df):
+            return np.array([500_000.0])
+
+    freq_model = LocalFakeLGBMRegressor()
+    sev_model = LocalFakeLGBMRegressor()
+    feature_df = pd.DataFrame({
+        "coverage_amount_vnd": [100_000_000],
+        "product_id": ["HEALTH_BASIC"],
+        "age": [30],
+        "bmi": [22.5],
+        "smoker": [False],
+    })
+
+    mock_explainer = MagicMock()
+    mock_explainer.shap_values.return_value = np.array([[0.9, 0.8, 0.3, -0.2, 0.1]])
+
+    with patch("app.pricing_engine.explain._get_tree_explainer", return_value=mock_explainer), \
+         patch.dict(sys.modules, {"shap": sys.modules["shap"]}):
+        result = explain(
+            {"freq": freq_model, "sev": sev_model},
+            feature_df,
+            component_excluded_features={"severity": frozenset({"coverage_amount_vnd", "product_id"})},
+        )
+
+    severity_items = result["components"]["severity"]["items"]
+    severity_features = {item["feature"] for item in severity_items}
+    frequency_features = {item["feature"] for item in result["components"]["frequency"]["items"]}
+    assert "coverage_amount_vnd" not in severity_features
+    assert "product_id" not in severity_features
+    assert "coverage_amount_vnd" in frequency_features
+    assert [item["feature"] for item in severity_items[:3]] == ["age", "bmi", "smoker"]
+
 def test_extract_model_and_features_pipeline():
     model = MagicMock()
     del model.feature_name_

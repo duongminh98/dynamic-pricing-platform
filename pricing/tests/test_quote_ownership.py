@@ -50,11 +50,21 @@ def db_session():
 
 
 @pytest.fixture
-def app(db_session):
+def app(db_session, monkeypatch):
     app = FastAPI()
     setup_exception_handlers(app)
     app.dependency_overrides[get_db] = lambda: db_session
     app.include_router(quote_router.router)
+    # The POST handler resolves the line and builds an audit snapshot via
+    # get_line_for_product + loader.required_columns + feature_set_for_audit.
+    # Without model artifacts these hit load_artifacts() and hard-fail, so stub
+    # them for POST tests (GET-ownership tests don't reach this path).
+    monkeypatch.setattr(quote_router, "get_line_for_product", lambda product_id: "health")
+    monkeypatch.setattr("app.pricing_engine.loader.required_columns", lambda line: ["age"])
+    monkeypatch.setattr(
+        "app.pricing_engine.features.feature_set_for_audit",
+        lambda line, product_id, profile, feature_names: {"age": profile.get("age")},
+    )
     return app
 
 

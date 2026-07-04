@@ -7,6 +7,7 @@ import base64
 import json
 import datetime
 import uuid
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -17,6 +18,16 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, get_db, ModelVersion, ChampionAssignment, AuditTrail, ModelDriftFlag
 from app.routers import admin
 from common.errors import setup_exception_handlers
+
+
+@pytest.fixture(autouse=True)
+def _stub_artifact_side_effects():
+    """promote/rollback validate + refresh champion artifacts on success; those
+    hit the loader (disk artifacts) which are gitignored in CI. The DB-side
+    governance logic under test is independent of the artifact files."""
+    with patch("app.pricing_engine.governance.loader.validate_model_artifact"), \
+         patch("app.pricing_engine.governance.loader.refresh_artifacts"):
+        yield
 
 
 def make_token(roles):

@@ -35,7 +35,7 @@ PROFILE = {
 
 def test_inflation_indices_reach_feature_row(monkeypatch):
     """Server-side inflation indices should be copied into the model feature row."""
-    from app.pricing_engine import loader
+    from app.pricing_engine import features
     from app.pricing_engine.features import build_features
     from app.pricing_engine.loader import required_columns
 
@@ -43,8 +43,8 @@ def test_inflation_indices_reach_feature_row(monkeypatch):
     inflation_features = [name for name in feature_names if name.endswith("_inflation_index")]
     assert inflation_features, "health model should include inflation index features"
 
-    baseline_indices = copy.deepcopy(loader.cost_indices_latest)
-    assert baseline_indices, "cost indices should be loaded from cost_indices.csv"
+    baseline_indices = copy.deepcopy(features.get_cost_indices())
+    assert baseline_indices, "cost indices should be loaded from the feature store"
 
     baseline_features = build_features("health", PRODUCT, PROFILE, feature_names)
     baseline_values = baseline_features.iloc[0][inflation_features].to_dict()
@@ -54,7 +54,7 @@ def test_inflation_indices_reach_feature_row(monkeypatch):
     stressed_indices = copy.deepcopy(baseline_indices)
     for name in inflation_features:
         stressed_indices[name] = baseline_indices[name] * 1.5
-    monkeypatch.setattr(loader, "cost_indices_latest", stressed_indices)
+    monkeypatch.setattr(features, "get_cost_indices", lambda: dict(stressed_indices))
 
     stressed_features = build_features("health", PRODUCT, PROFILE, feature_names)
     for name in inflation_features:

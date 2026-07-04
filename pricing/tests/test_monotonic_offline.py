@@ -15,6 +15,7 @@ Validates: R4.7, R12.7, R29.5, R30.5 (BR-19/C-8)
 """
 from __future__ import annotations
 
+import importlib.util
 import pathlib
 
 import joblib
@@ -26,19 +27,29 @@ MODELS_DIR = ROOT / "reports" / "modeling" / "models"
 LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
 FAMILIES = ["freq", "sev", "tw"]
 
-MONOTONE_COMMON = {
-    "coverage_amount_vnd": 1,
-    "deductible_vnd": -1,
-    "claim_count_36m_prior": 1,
-}
-MONOTONE_VEHICLE = {
-    **MONOTONE_COMMON,
-    "annual_mileage_km": 1,
-}
+
+def _load_training_design():
+    """Import the authoritative monotone design from the offline trainer.
+
+    ``offline/`` is not an installed package, so load the module by file path.
+    The design map (MONOTONE_BY_LINE) and build_monotone_constraints() there are
+    the single source of truth used to fit the artifacts; the test asserts the
+    serialized artifacts match it rather than duplicating the mapping here.
+    """
+    path = ROOT / "offline" / "train_pricing_models.py"
+    spec = importlib.util.spec_from_file_location("_offline_train_pricing_models", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def _expected_for(line: str) -> dict:
-    return MONOTONE_VEHICLE if line in ("car", "motorbike") else MONOTONE_COMMON
+_DESIGN = _load_training_design()
+
+
+def _expected_for(line: str, feature_names: list[str]) -> dict:
+    """Non-zero constraints the design assigns to this artifact's features."""
+    constraints = _DESIGN.build_monotone_constraints(feature_names, line)
+    return {f: c for f, c in zip(feature_names, constraints) if c != 0}
 
 
 @pytest.mark.parametrize("line", LINES)
@@ -56,7 +67,7 @@ def test_lgb_artifact_has_monotone_constraints(line: str, family: str):
         f"feature count {len(feature_names)} (misalignment risk)"
     )
     actual = {f: c for f, c in zip(feature_names, mc) if c != 0}
-    expected = _expected_for(line)
+    expected = _expected_for(line, feature_names)
     for feat, direction in expected.items():
         assert feat in feature_names, f"{path.name}: expected feature {feat} absent"
         assert actual.get(feat) == direction, (
@@ -74,7 +85,7 @@ def test_monotone_directions_match_design(line: str):
     mc = model.get_params().get("monotone_constraints")
     feature_names = list(model.feature_name_)
     actual = {f: c for f, c in zip(feature_names, mc) if c != 0}
-    expected = _expected_for(line)
+    expected = _expected_for(line, feature_names)
     assert actual == expected, (
         f"{line}: non-zero monotone constraints {actual} != expected {expected}"
     )

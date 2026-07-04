@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ApiError } from '../../api/client';
 import { useApi, useMutation, dateTime } from '../../lib/format';
 import { LINES, LINE_LABEL, Line } from '../../lib/domain';
@@ -14,7 +15,7 @@ interface DriftMetric { value: number; threshold: number; needs_recalibration: b
 interface Drift { line: string; needs_recalibration: boolean; metrics: Record<string, DriftMetric>; }
 
 export default function AdminModels() {
-  const line: Line = 'car';
+  const [line, setLine] = useState<Line>('car');
   return (
     <div className="stack">
       <div>
@@ -22,7 +23,21 @@ export default function AdminModels() {
         <h2>Định giá & giám sát mô hình</h2>
       </div>
 
-      <ModelsPanel line={line} />
+      <div className="tabs" role="tablist">
+        {LINES.map((l) => (
+          <button
+            key={l}
+            role="tab"
+            aria-selected={l === line}
+            className={`tab${l === line ? ' active' : ''}`}
+            onClick={() => setLine(l)}
+          >
+            {LINE_LABEL[l]}
+          </button>
+        ))}
+      </div>
+
+      <ModelsPanel key={line} line={line} />
     </div>
   );
 }
@@ -75,8 +90,8 @@ function ModelsPanel({ line }: { line: Line }) {
       {data && data.length === 0 && <EmptyState title="Chưa có phiên bản mô hình cho dòng này" />}
       {data && data.length > 0 && (
         <div className="table-wrap" style={{ overflowX: 'auto' }}>
-          <table className="table" style={{ minWidth: 1280 }}>
-            <thead><tr><th>Version</th><th>Family</th><th>Status</th><th>Dataset</th><th>Gini</th><th>MAE</th><th>RMSE</th><th>Deviance</th><th>Gates</th><th>Checksum</th><th></th></tr></thead>
+          <table className="table" style={{ minWidth: 860 }}>
+            <thead><tr><th>Version</th><th>Family</th><th>Status</th><th>Dataset</th><th>Gini</th><th>Gates</th><th>Checksum</th><th></th></tr></thead>
             <tbody>
               {data.map((m) => (
                 <tr key={m.model_version_id}>
@@ -85,9 +100,6 @@ function ModelsPanel({ line }: { line: Line }) {
                   <td>{m.is_champion ? <span className="pill pill-ok">champion</span> : <span className="pill pill-muted">{m.status || 'unknown'}</span>}</td>
                   <td className="mono" style={{ fontSize: '0.72rem' }}>{m.dataset_version_id || m.dataset_desc}</td>
                   <td className="num">{m.gini?.toFixed(3)}</td>
-                  <td className="num">{m.mae}</td>
-                  <td className="num">{m.rmse}</td>
-                  <td className="num">{m.deviance}</td>
                   <td>
                     {m.monotonic_applied ? <span className="pill pill-ok">mono</span> : <span className="pill pill-muted">mono</span>}
                     {m.quality_gates?.smoothness_passed ? <span className="pill pill-ok">smooth</span> : <span className="pill pill-muted">smooth</span>}

@@ -83,7 +83,8 @@ def _extract_model_and_features(model):
     return model, list(getattr(model, "feature_names_in_", []))
 
 
-def _explain_selected_model(model, feature_df: "pd.DataFrame", method_prefix: str | None = None) -> dict:
+def _explain_selected_model(model, feature_df: "pd.DataFrame", method_prefix: str | None = None,
+                            excluded_features: set[str] | frozenset[str] | None = None) -> dict:
     """Produce an explanation for one concrete estimator."""
     try:
         est, feature_names = _extract_model_and_features(model)
@@ -134,7 +135,8 @@ def _explain_selected_model(model, feature_df: "pd.DataFrame", method_prefix: st
             arr = arr[0]
         contributions = list(zip(feature_names, arr.tolist()))
         # Sort by absolute magnitude descending; keep available features only.
-        contributions = [(n, v) for n, v in contributions if n in feature_df.columns]
+        excluded = excluded_features or frozenset()
+        contributions = [(n, v) for n, v in contributions if n in feature_df.columns and n not in excluded]
         contributions.sort(key=lambda kv: abs(kv[1]), reverse=True)
 
         items = []
@@ -158,7 +160,9 @@ def _primary_component(components: dict[str, dict]) -> dict:
             return component
     return _unavailable()
 
-def explain(model, feature_df: "pd.DataFrame") -> dict:
+def explain(model, feature_df: "pd.DataFrame", *,
+            component_excluded_features: dict[str, set[str] | frozenset[str]] | None = None,
+            excluded_features: set[str] | frozenset[str] | None = None) -> dict:
     """Produce a SHAP-based explanation; degrade gracefully on any error.
 
     Composite frequency-severity models return component explanations while
@@ -166,12 +170,22 @@ def explain(model, feature_df: "pd.DataFrame") -> dict:
     """
     if isinstance(model, dict):
         components: dict[str, dict] = {}
+        component_excluded_features = component_excluded_features or {}
         if model.get("freq") is not None:
-            components["frequency"] = _explain_selected_model(model["freq"], feature_df, "freqsev_frequency")
+            components["frequency"] = _explain_selected_model(
+                model["freq"], feature_df, "freqsev_frequency",
+                component_excluded_features.get("frequency", excluded_features),
+            )
         if model.get("sev") is not None:
-            components["severity"] = _explain_selected_model(model["sev"], feature_df, "freqsev_severity")
+            components["severity"] = _explain_selected_model(
+                model["sev"], feature_df, "freqsev_severity",
+                component_excluded_features.get("severity", excluded_features),
+            )
         if model.get("tw") is not None:
-            components["tweedie"] = _explain_selected_model(model["tw"], feature_df, "tweedie")
+            components["tweedie"] = _explain_selected_model(
+                model["tw"], feature_df, "tweedie",
+                component_excluded_features.get("tweedie", excluded_features),
+            )
         primary = _primary_component(components)
         available = any(component.get("available") for component in components.values())
         return {
@@ -182,4 +196,4 @@ def explain(model, feature_df: "pd.DataFrame") -> dict:
         }
 
     selected_model, method_prefix = _select_explanation_model(model)
-    return _explain_selected_model(selected_model, feature_df, method_prefix)
+    return _explain_selected_model(selected_model, feature_df, method_prefix, excluded_features)
