@@ -35,11 +35,19 @@ def _load_training_design():
     The design map (MONOTONE_BY_LINE) and build_monotone_constraints() there are
     the single source of truth used to fit the artifacts; the test asserts the
     serialized artifacts match it rather than duplicating the mapping here.
+
+    Returns None when the module can't import (e.g. CI has no gitignored training
+    data, which the trainer reads at import time). Callers then skip — matching
+    how the artifact-dependent assertions below skip when the .joblib files are
+    likewise absent on CI.
     """
     path = ROOT / "offline" / "train_pricing_models.py"
     spec = importlib.util.spec_from_file_location("_offline_train_pricing_models", path)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except (FileNotFoundError, KeyError):
+        return None
     return module
 
 
@@ -48,6 +56,8 @@ _DESIGN = _load_training_design()
 
 def _expected_for(line: str, feature_names: list[str]) -> dict:
     """Non-zero constraints the design assigns to this artifact's features."""
+    if _DESIGN is None:
+        pytest.skip("offline training design unavailable (no training data on CI)")
     constraints = _DESIGN.build_monotone_constraints(feature_names, line)
     return {f: c for f, c in zip(feature_names, constraints) if c != 0}
 
