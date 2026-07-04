@@ -37,6 +37,7 @@ build_one() {
     echo "  - $REPO/$img:latest"
     echo "options:"
     echo "  machineType: E2_HIGHCPU_8"
+    echo "  logging: CLOUD_LOGGING_ONLY"
   } > "$cb"
   log "Build $img ($file)"
   gcloud builds submit --config "$cb" --project "$PROJECT_ID" .
