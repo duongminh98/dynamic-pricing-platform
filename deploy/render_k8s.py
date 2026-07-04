@@ -571,7 +571,10 @@ def seed_job(cfg: dict) -> str:
     and resets is_current before re-assigning, so re-running on every deploy is a
     no-op when artifacts are unchanged. Cloud SQL proxy is a native sidecar so the
     Job reaches Complete (same pattern as migrate-pricing)."""
-    limg = f"{cfg['REGION']}-docker.pkg.dev/{cfg['PROJECT_ID']}/{cfg['AR_REPO']}/lifecycle:{cfg['IMAGE_TAG']}"
+    # lifecycle is NOT built by CD (offline/Dockerfile COPYs gitignored files that
+    # aren't on a CI checkout), so it has no per-SHA tag. Pin :latest, which is
+    # built and pushed manually — see build_images.sh.
+    limg = f"{cfg['REGION']}-docker.pkg.dev/{cfg['PROJECT_ID']}/{cfg['AR_REPO']}/lifecycle:latest"
     body = _inject(textwrap.dedent(f"""\
         apiVersion: batch/v1
         kind: Job

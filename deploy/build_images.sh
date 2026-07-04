@@ -47,7 +47,10 @@ for s in customer-service product-service order-service claims-service billing-s
   build_one "$s" services/Dockerfile "SERVICE=$s"
 done
 build_one pricing-service pricing/Dockerfile
-build_one lifecycle offline/Dockerfile
+# lifecycle is NOT built in CD: offline/Dockerfile COPYs gitignored files
+# (champion_config.json, the reference CSVs, scripts/) that aren't present on a
+# CI checkout, so the build fails. It's built manually and pushed as :latest;
+# the seed Job pins lifecycle:latest (see render_k8s.py seed_job()).
 build_one frontend frontend/Dockerfile \
   "VITE_API_BASE=https://$API_HOST" \
   "VITE_KEYCLOAK_URL=https://$AUTH_HOST" \
@@ -55,4 +58,4 @@ build_one frontend frontend/Dockerfile \
   "VITE_KEYCLOAK_CLIENT_ID=mini-app"
 
 sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$SHA/" deploy/config.env
-log "Built + pushed 9 images at tag $SHA; config.env IMAGE_TAG updated."
+log "Built + pushed 8 images at tag $SHA (lifecycle built separately); config.env IMAGE_TAG updated."
