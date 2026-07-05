@@ -58,11 +58,11 @@ spec:
         - name: MODEL_ARTIFACT_CACHE_DIR
           value: "/tmp/model-cache"
         - name: QUOTE_MAX_CONCURRENCY
-          value: "12"
+          value: "6"
         - name: PRICING_DB_POOL_SIZE
-          value: "8"
-        - name: PRICING_DB_MAX_OVERFLOW
           value: "4"
+        - name: PRICING_DB_MAX_OVERFLOW
+          value: "2"
         startupProbe:
           httpGet: {path: /health, port: 8000}
           initialDelaySeconds: 20
@@ -109,7 +109,7 @@ metadata:
 spec:
   scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: pricing-service}
   minReplicas: 3
-  maxReplicas: 6
+  maxReplicas: 10
   metrics:
   - type: Resource
     resource: {name: cpu, target: {type: Utilization, averageUtilization: 60}}
