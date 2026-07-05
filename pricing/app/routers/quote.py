@@ -2,8 +2,10 @@ import asyncio
 import hashlib
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from ..database import get_db, Quote, QuoteFeatureSnapshot, EventOutbox
+from ..config import QUOTE_MAX_CONCURRENCY
 from pydantic import BaseModel
 from common.errors import ErrorCode, ServiceException
 from common.auth import optional_subject
@@ -14,7 +16,7 @@ from ..services.customer_profile import merge_customer_risk_profile
 from ..services.quote_ready_profile import get_quote_ready_profile, rebuild_quote_ready_profile
 
 router = APIRouter(prefix="/pricing", tags=["pricing"])
-quote_semaphore = asyncio.Semaphore(100)
+quote_semaphore = asyncio.Semaphore(QUOTE_MAX_CONCURRENCY)
 
 
 def customer_id_from_subject(subject: str) -> str:
@@ -39,7 +41,7 @@ async def create_quote(request: QuoteRequest, http_request: Request, db: Session
     subject = optional_subject(http_request)
     customer_id = customer_id_from_subject(subject) if subject else "internal"
 
-    async with quote_semaphore:
+    def _do_quote():
         try:
             from ..pricing_engine.engine import quote
             line = get_line_for_product(request.product_id)
@@ -124,6 +126,9 @@ async def create_quote(request: QuoteRequest, http_request: Request, db: Session
         except Exception:
             db.rollback()
             raise
+
+    async with quote_semaphore:
+        return await run_in_threadpool(_do_quote)
 
 
 @router.get('/quote/{quote_id}')

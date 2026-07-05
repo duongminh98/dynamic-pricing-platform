@@ -86,6 +86,29 @@ class VnpayServiceExtraTest {
     }
 
     @Test
+    void createPaymentUrlRejectsPlaceholderCredentials() {
+        VnpayPaymentRepository payRepo = mock(VnpayPaymentRepository.class);
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        UUID invoiceId = UUID.randomUUID();
+        Invoice inv = new Invoice();
+        inv.setInvoiceId(invoiceId);
+        inv.setOrderId(UUID.randomUUID());
+        inv.setAmountVnd(1_000_000L);
+        inv.setStatus(InvoiceStatus.unpaid);
+        when(invRepo.findById(invoiceId)).thenReturn(Optional.of(inv));
+
+        VnpayConfig placeholderConfig = new VnpayConfig();
+        placeholderConfig.setTmnCode("SANDBOXPLACEHOLDER");
+        placeholderConfig.setHashSecret("SANDBOXHASHSECRETPLACEHOLDER");
+        VnpayService svc = new VnpayService(placeholderConfig, invRepo, payRepo, mock(BillingService.class));
+
+        ServiceException ex = assertThrows(ServiceException.class,
+                () -> svc.createPaymentUrl(invoiceId, "127.0.0.1"));
+        assertEquals(ErrorCode.SERVICE_UNAVAILABLE, ex.getErrorCode());
+        verify(payRepo, never()).save(any());
+    }
+
+    @Test
     void createPaymentUrlSucceeds() {
         VnpayPaymentRepository payRepo = mock(VnpayPaymentRepository.class);
         InvoiceRepository invRepo = mock(InvoiceRepository.class);

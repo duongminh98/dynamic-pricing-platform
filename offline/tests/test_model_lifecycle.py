@@ -9,7 +9,7 @@ import json
 import pathlib
 
 from offline.retrain_trigger import (
-    is_scheduled, count_new_claims_for_line, lines_exceeding_threshold,
+    is_scheduled, lines_exceeding_threshold,
     load_config, trigger_retrain,
 )
 from offline.drift_monitor import (
@@ -38,13 +38,6 @@ class TestRetrainTrigger:
     def test_is_scheduled_disabled(self):
         config = {"schedule_quarterly": False}
         assert is_scheduled(config) is False
-
-    def test_count_new_claims_uses_exported_frequency_rows(self, tmp_path):
-        data_dir = tmp_path / "data"
-        data_dir.mkdir()
-        (data_dir / "pricing_freq_health.csv").write_text("exposure_id,line\ne1,health\ne2,health\n", encoding="utf-8")
-
-        assert count_new_claims_for_line("health", data_dir=data_dir) == 2
 
     def test_export_metadata_contains_training_table_maps(self, tmp_path):
         metadata_path = _write_metadata(tmp_path, "dataset-1")
@@ -93,7 +86,7 @@ class TestDriftMonitor:
             "drift_threshold_prediction_psi": 0.2,
             "drift_threshold_calibration": 0.15,
         }
-        result = evaluate_line("health", config)
+        result = evaluate_line("health", config, current_quotes=[], outcomes=[])
         assert result["line"] == "health"
         assert "feature_psi" in result
         assert "prediction_psi" in result
@@ -110,5 +103,5 @@ class TestDriftMonitor:
             "drift_threshold_prediction_psi": 0.0,
             "drift_threshold_calibration": 0.0,
         }
-        result = evaluate_line("health", config)
+        result = evaluate_line("health", config, current_quotes=[], outcomes=[])
         assert isinstance(result["needs_recalibration"], bool)

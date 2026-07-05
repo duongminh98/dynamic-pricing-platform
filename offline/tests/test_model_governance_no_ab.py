@@ -1,9 +1,11 @@
 import datetime
+import hashlib
 import json
 import uuid
 from pathlib import Path
 import sys
 
+import joblib
 import pandas as pd
 import pytest
 from sqlalchemy import create_engine, text
@@ -20,6 +22,10 @@ from app.database import Base, ModelVersion, TrainingDatasetVersion
 from offline.build_training_dataset_from_pricing_db import _write_manifest, _window_from_frames
 from offline.compare_candidate_to_champion import _premium_delta
 from offline.register_candidate_model import register_candidate
+
+
+class DummyModel:
+    feature_name_ = ["a", "b"]
 
 
 def test_manifest_contains_checksums_and_rows(tmp_path: Path):
@@ -190,6 +196,35 @@ def test_register_candidate_writes_enriched_model(lifecycle_db):
         assert row.dataset_version_id == "ds-1"
         assert row.comparison_report_uri == str(comparison)
         assert row.quality_gates["comparison_passed"] is True
+    finally:
+        session.close()
+
+
+def test_register_candidate_allows_missing_validation_report(lifecycle_db):
+    _session, tmp_path = lifecycle_db
+    artifact = tmp_path / "car__lgb_tw.joblib"
+    joblib.dump(DummyModel(), artifact)
+    comparison = tmp_path / "comparison.json"
+    comparison.write_text(json.dumps({"passed": True, "candidate": {"algorithm": "lgb", "family": "tw", "metrics": {"gini": 0.8, "rmse": 1.0, "mae": 0.5, "deviance": 1.1}}}), encoding="utf-8")
+
+    result = register_candidate(
+        line="car",
+        dataset_version_id="ds-1",
+        artifact_uri=str(artifact),
+        comparison_report_uri=str(comparison),
+        monotonic_passed=True,
+        smoothness_passed=True,
+        registered_by="tester",
+    )
+
+    from offline import register_candidate_model as rcm
+    session = rcm.SessionLocal()
+    try:
+        row = session.query(ModelVersion).filter(ModelVersion.model_version_id == result["candidate_model_version"]).first()
+        assert row.validation_report_uri is None
+        assert row.quality_gates["validation_summary"]["source"] == "model_artifacts"
+        expected_hash = hashlib.sha256(json.dumps(["a", "b"], sort_keys=True).encode("utf-8")).hexdigest()
+        assert row.feature_schema_hash == expected_hash
     finally:
         session.close()
 

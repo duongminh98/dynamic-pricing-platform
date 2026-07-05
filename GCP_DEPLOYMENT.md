@@ -672,6 +672,24 @@ All Jobs use **one lifecycle image** (own Dockerfile that COPYs `offline/`,
 connect to `pricing_db` via the Cloud SQL connector, and read/write the three
 GCS buckets. Secrets (`pricing-db-url`) via `--set-secrets`.
 
+> **DEPLOYED (2026-07-05): coarse 2-job shape, not the fine-grained fan-out above.**
+> The diagram is the aspirational fine-grained target. What is actually deployed
+> (`deploy/lifecycle_deploy.sh` + `deploy/workflows/pricing-lifecycle.yaml`) is
+> the **coarse** shape §8.2 recommends "until [`--output-uri` etc.] lands":
+> ```text
+> Cloud Scheduler (0 2 * * *) ─► Cloud Workflows: pricing-lifecycle
+>        ├─► Job: pricing-drift-monitor   # offline/drift_monitor.py
+>        └─► Job: pricing-lifecycle       # offline/retrain_trigger.py
+>                                          #   → model_lifecycle_pipeline.run_pipeline():
+>                                          #     export▸train▸compare▸MONOTONIC▸SMOOTHNESS▸register
+> ```
+> Rationale: the fine-grained per-step jobs **omit the monotonic + smoothness
+> gates** that `register_candidate_model.py` *requires*, whereas
+> `retrain_trigger.py` runs the whole chain **including both gates** in one
+> process and already supports `gs://` via `LIFECYCLE_OBJECT_STORAGE_URI`. Two
+> jobs, both gates, no new Python. drift-monitor runs first inside the workflow
+> so `model_drift_flag` rows are fresh before the trigger reads them (§8.4).
+
 ### 8.2 Job → script mapping and I/O contract
 | Job | Script | Reads | Writes |
 | --- | --- | --- | --- |

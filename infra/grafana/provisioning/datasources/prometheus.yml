@@ -4,6 +4,9 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
+    # Pinned so the dpp-overview dashboard's hard-coded datasource uid resolves
+    # deterministically in both compose and GKE (panels reference this exact uid).
+    uid: PBFA97CFB590B2093
     url: http://prometheus:9090
     isDefault: true
     editable: true

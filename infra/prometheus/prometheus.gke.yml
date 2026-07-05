@@ -1,0 +1,42 @@
+# Prometheus scrape config for the GKE deployment (loaded via ConfigMap by
+# deploy/render_k8s.py). Mirrors infra/prometheus/prometheus.yml but targets
+# in-cluster DNS names instead of the docker-compose container names.
+# Prometheus runs in the `dpp` namespace, so short Service names resolve.
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  - job_name: kong
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - kong:8100
+
+  - job_name: rabbitmq
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - rabbitmq:15692
+
+  - job_name: pricing-service
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - pricing-service:8000
+
+  - job_name: java-services
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - customer-service:8080
+          - product-service:8080
+          - order-service:8080
+          - claims-service:8080
+          - billing-service:8080
+          - notification-service:8080

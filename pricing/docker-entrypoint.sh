@@ -28,5 +28,6 @@ else
   echo "RUN_MIGRATIONS=false — skipping alembic (migrations run as a separate Job)."
 fi
 
-echo "Starting uvicorn on :8000..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+WORKERS="${UVICORN_WORKERS:-4}"
+echo "Starting uvicorn on :8000 with ${WORKERS} worker(s)..."
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "${WORKERS}"

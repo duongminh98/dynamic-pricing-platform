@@ -11,18 +11,36 @@ and drift bookkeeping.
 | Script | Purpose |
 | --- | --- |
 | `build_training_dataset_from_pricing_db.py` | Export immutable pricing read-model datasets, write `manifest.json`, checksums, row counts, and optionally register `training_dataset_version`. |
-| `train_pricing_models.py` | Re-fit the champion LightGBM artifacts with `monotone_constraints`. `--cv` runs anti-leakage cross-validation only. |
+| `train_pricing_models.py` | Re-fit LightGBM artifacts with `monotone_constraints`. Use `PRICING_MODEL_OUTPUT_DIR` for candidate output so champion artifacts are not overwritten. `--cv` runs anti-leakage cross-validation only. |
 | `register_models.py` | Register the current champion `Model_Version` rows + `champion_assignment` and keep `champion_config.json` in sync. |
 | `compare_candidate_to_champion.py` | Compare a candidate artifact against the current champion on the same exported holdout dataset. |
-| `register_candidate_model.py` | Register a candidate `Model_Version` only after dataset, artifact, comparison, validation, monotonic, and smoothness gates pass. |
+| `register_candidate_model.py` | Register a candidate `Model_Version` only after dataset, artifact, comparison, monotonic, and smoothness gates pass; `validation_report_uri` is optional lineage. |
 | `model_smoothness_gate.py` | Validate health premium smoothness across deterministic BMI and age sweeps before candidate registration. |
-| `retrain_trigger.py` | Decide whether a retrain is due (schedule / data threshold) and chain train -> validate -> monotonic gate -> smoothness gate -> register **candidate**. Never promotes. |
+| `model_lifecycle_pipeline.py` | Production-like local/deploy-neutral orchestrator: export dataset -> train from export -> compare -> register **candidate** with artifact/report lineage. |
+| `retrain_trigger.py` | Decide whether a retrain is due (schedule / data threshold / drift) and invoke `model_lifecycle_pipeline.py`. Never promotes. |
 | `drift_monitor.py` | Per-line input-feature drift (PSI) + calibration drift; persists `model_drift_flag` rows. |
 
 ## No-A/B model governance lifecycle
 
 Runtime pricing remains champion-only. Candidate models are never served to
 customers, shadowed, canaried, or assigned through sticky experiments.
+
+Run the production-like local pipeline in one command:
+
+```bash
+python offline/model_lifecycle_pipeline.py \
+  --line car \
+  --database-url postgresql+psycopg2://platform_user:platform_password_dev_only@localhost:5440/pricing_db \
+  --dataset-version-id ds-2026-q3 \
+  --object-storage-uri s3://pricing-lifecycle-local
+```
+
+The command exports a fresh dataset, registers `training_dataset_version`, trains
+candidate artifacts under `data/model_lifecycle_runs/`, uploads dataset/model/report
+artifacts when `--object-storage-uri` is set, compares the candidate against the
+current champion, and registers a CANDIDATE row. It never promotes.
+
+Manual equivalent:
 
 1. Export and register a dataset version:
 
@@ -35,9 +53,11 @@ python offline/build_training_dataset_from_pricing_db.py \
   --created-by offline-operator
 ```
 
-2. Train candidate artifacts:
+2. Train candidate artifacts without overwriting champion artifacts:
 
 ```bash
+PRICING_TRAIN_DATA_DIR=data/pricing_read_model_export \
+PRICING_MODEL_OUTPUT_DIR=data/model_lifecycle_runs/ds-2026-q3/car/models \
 python offline/train_pricing_models.py --line car
 ```
 
@@ -47,22 +67,25 @@ python offline/train_pricing_models.py --line car
 python offline/compare_candidate_to_champion.py \
   --line car \
   --dataset-dir data/pricing_read_model_export \
-  --candidate-artifact-dir reports/modeling/models \
+  --candidate-artifact-dir data/model_lifecycle_runs/ds-2026-q3/car/models \
+  --candidate-family freqsev \
   --champion-model-version-id <current-champion-id> \
   --output-file reports/modeling/comparison/car_comparison.json
 ```
 
 Thresholds live in `offline/comparison_config.json`.
 
-4. Register the candidate only after gates pass:`r`n`r`nFor local production-like runs, upload artifacts/reports to MinIO (S3-compatible) and pass `s3://...` URIs into the registry scripts. Runtime pricing then loads the promoted champion artifact from object storage via the `artifact_uri` stored in `pricing_db`.
+4. Register the candidate only after gates pass. For local production-like runs,
+upload artifacts/reports to MinIO (S3-compatible) and pass `s3://...` URIs into
+the registry scripts. Runtime pricing then loads the promoted champion artifact
+from object storage via the `artifact_uri` stored in `pricing_db`.
 
 ```bash
 python offline/register_candidate_model.py \
   --line car \
   --dataset-version-id ds-2026-q3 \
-  --artifact-uri reports/modeling/models/car__lgb_tw.joblib \
+  --artifact-uri s3://pricing-lifecycle-local/ds-2026-q3/car/models/car__lgb_freq.joblib,s3://pricing-lifecycle-local/ds-2026-q3/car/models/car__lgb_sev.joblib \
   --comparison-report-uri reports/modeling/comparison/car_comparison.json \
-  --validation-report-uri reports/modeling/validation/car_validation.json \
   --registered-by offline-operator \
   --monotonic-passed \
   --smoothness-passed
@@ -111,6 +134,34 @@ while **tree / LightGBM** candidates always require `monotonic_applied = true`
 (BR-19 stays enforced for every non-exempt line). The exempt set lives in
 `pricing/app/config.py` (`MONOTONIC_EXEMPT_LINES`) and is mirrored by
 `offline/retrain_trigger.py`.
+
+## Train / holdout split — fair candidate vs champion comparison
+
+`model_lifecycle_pipeline.py` trains the candidate and then scores it against the
+current champion. To keep that comparison honest, the candidate is **never**
+scored on data it trained on:
+
+- The holdout is keyed by `customer_id`: a customer is in the holdout iff a
+  stable hash (`blake2b`, reproducible across processes) lands in the lowest
+  `PRICING_HOLDOUT_PCT` percent (default **20%**). Every row of a customer shares
+  one bucket, so no customer straddles the train/holdout boundary (no leakage).
+- `train_pricing_models.py` **excludes** the holdout rows before fitting
+  (`holdout_mask()`), so the candidate is fit on ~80% of customers.
+- `compare_candidate_to_champion.py` scores **only** the holdout rows — the exact
+  slice the trainer excluded — for **both** candidate and champion, so the Gini /
+  deviance / calibration comparison is out-of-sample and symmetric. The report
+  records `holdout_pct`, `rows_evaluated`, and `evaluation`
+  (`out_of_sample_holdout` vs `in_sample_full`).
+- **Low-data fallback:** when the read-model has fewer than
+  `PRICING_HOLDOUT_MIN_CUSTOMERS` distinct customers (default 500) the split is
+  skipped — train on everything, score in-sample, and flag `holdout_skipped:
+  true`. This avoids starving training on a freshly-provisioned DB whose
+  read-model is still nearly empty. Both scripts share `holdout_mask()`, so they
+  always agree on whether the split applies.
+
+Note: the split is derived from `customer_id` at read time, never written into
+the exported CSV (`_align_to_training_schema` would drop an extra column), so the
+two scripts recompute it independently and stay consistent.
 
 ## Retrain trigger (task 23.1, R37.2 / BR-24)
 
