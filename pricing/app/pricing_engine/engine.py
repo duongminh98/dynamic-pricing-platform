@@ -17,7 +17,7 @@ from .loader import (
     ensure_loaded, get_line_for_product, get_product, required_columns, LINES,
     get_loading_factor, get_current_rate_version_id,
 )
-from .features import build_features, feature_set_for_audit
+from .features import build_features, feature_set_for_audit, _build_feature_row, frame_from_rows
 from .selection import select_model
 from .explain import explain
 from ..feature_store import get_reference_versions
@@ -341,26 +341,6 @@ def _collect_safer_lattice(line: str, profile: dict) -> list[tuple[tuple, dict]]
     return order
 
 
-def _concat_feature_frames(frames: list):
-    """Stack single-row feature frames into one batch frame while preserving each
-    row's values. Categoricals are demoted to object before concat then re-cast,
-    so the batch frame's per-row values equal the per-row build (the pipeline
-    preprocessor transforms each row independently → identical predictions)."""
-    if len(frames) == 1:
-        return frames[0]
-    import pandas as pd
-    plain = []
-    for frame in frames:
-        demoted = frame.copy()
-        for col in demoted.select_dtypes(include=["category"]).columns:
-            demoted[col] = demoted[col].astype("object")
-        plain.append(demoted)
-    batch = pd.concat(plain, ignore_index=True)
-    for col in batch.select_dtypes(include=["object"]).columns:
-        batch[col] = batch[col].astype("category")
-    return batch
-
-
 def _predict_pure_premium_batch(selection: dict, feature_df) -> list[float]:
     """Vectorized _predict_pure_premium over an N-row frame. Mirrors the scalar
     version's per-family arithmetic (incl. the freqsev max(0, .) clamp and the
@@ -381,15 +361,15 @@ def _guarded_pure_premium(line: str, product_id: str, profile: dict,
     safer-than-baseline profile, so a riskier customer never prices below a safer
     one. Equivalent to the former downward-DAG recursion (which just propagated a
     max via memo), but enumerates the reachable lattice once and predicts the
-    whole batch in a single freq/sev pass instead of N sequential predicts."""
+    whole batch in a single freq/sev pass instead of N sequential predicts.
+
+    Each node resolves to a plain feature dict; the whole lattice is cast to
+    category ONCE (frame_from_rows) rather than per node — the per-node cast was
+    the dominant cost and _concat then discarded it anyway."""
     nodes = _collect_safer_lattice(line, profile)
-    root_key = _guard_key(line, profile)
-    frames = [
-        feature_df if key == root_key
-        else build_features(line, product_id, node_profile, feature_names)
-        for key, node_profile in nodes
-    ]
-    batch = _concat_feature_frames(frames)
+    rows = [_build_feature_row(line, product_id, node_profile, feature_names)
+            for _key, node_profile in nodes]
+    batch = frame_from_rows(rows, feature_names)
     return float(max(_predict_pure_premium_batch(selection, batch)))
 
 
