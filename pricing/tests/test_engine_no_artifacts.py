@@ -205,6 +205,7 @@ def test_quote_with_mocked_loader():
          patch("app.pricing_engine.engine.select_model", return_value=mock_selection), \
          patch("app.pricing_engine.engine.required_columns", return_value=["age", "coverage_amount_vnd", "deductible_vnd"]), \
          patch("app.pricing_engine.engine.build_features", return_value=mock_feature_df), \
+         patch("app.pricing_engine.engine._guarded_pure_premium", return_value=500_000.0), \
          patch("app.pricing_engine.engine.get_product", return_value={"admin_fee_vnd": 10_000, "coverage_amount_vnd": 100_000_000, "deductible_vnd": 0}), \
          patch("app.pricing_engine.engine.explain", return_value={"available": True, "items": []}) as mock_explain, \
          patch("app.pricing_engine.engine.feature_set_for_audit", return_value={"age": 30}), \
