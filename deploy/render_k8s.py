@@ -229,13 +229,16 @@ def pricing_deployment(cfg: dict) -> str:
         ("PRICING_MODELS_DIR", {"value": "/reports/modeling/models"}),
         ("MODEL_ARTIFACT_CACHE_DIR", {"value": "/tmp/model-cache"}),
         # Load-capacity tuning (verified against Cloud SQL max_connections=400,
-        # shared by all 7 services). Per-worker semaphore + SQLAlchemy pool; the
-        # invariant QUOTE_MAX_CONCURRENCY <= pool_size+max_overflow must hold, and
-        # maxReplicas(6) x UVICORN_WORKERS(4) x (pool+overflow=12) = 288 conns
-        # worst-case, leaving headroom under the 400 ceiling for the other services.
-        ("QUOTE_MAX_CONCURRENCY", {"value": "12"}),
-        ("PRICING_DB_POOL_SIZE", {"value": "8"}),
-        ("PRICING_DB_MAX_OVERFLOW", {"value": "4"}),
+        # shared by all 7 services; ~100 conns used by non-pricing + admin/bg).
+        # The per-pod bottleneck is CPU (4 uvicorn workers, ~1 quote/worker in
+        # flight since build_features is CPU-bound), so the fix is horizontal
+        # scale, NOT a bigger pool. Pool trimmed so the connection ceiling stops
+        # gating replica count: invariant QUOTE_MAX_CONCURRENCY <= pool+overflow
+        # holds, and maxReplicas(10) x workers(4) x (pool+overflow=6) = 240 conns
+        # worst-case, leaving ~60 headroom under 400 for the other services.
+        ("QUOTE_MAX_CONCURRENCY", {"value": "6"}),
+        ("PRICING_DB_POOL_SIZE", {"value": "4"}),
+        ("PRICING_DB_MAX_OVERFLOW", {"value": "2"}),
     ]
     env_yaml = render_env(env_lines)
     body = textwrap.dedent(f"""\
@@ -295,7 +298,7 @@ def pricing_deployment(cfg: dict) -> str:
         spec:
           scaleTargetRef: {{apiVersion: apps/v1, kind: Deployment, name: pricing-service}}
           minReplicas: 3
-          maxReplicas: 6
+          maxReplicas: 10
           metrics:
           - type: Resource
             resource: {{name: cpu, target: {{type: Utilization, averageUtilization: 60}}}}

@@ -137,17 +137,12 @@ def _cast_value(name: str, value):
 PRODUCT_AUTHORITATIVE = {"coverage_amount_vnd", "deductible_vnd", "base_premium_vnd", "admin_fee_vnd"}
 
 
-def build_features(line: str, product_id: str, profile: dict,
-                   feature_names: list[str]) -> "pd.DataFrame":
-    """Build a single-row DataFrame aligned to feature_names.
+def _build_feature_row(line: str, product_id: str, profile: dict,
+                       feature_names: list[str]) -> dict:
+    """Resolve one profile to a plain feature dict (no DataFrame, no dtype cast).
 
-    The profile may supply base fields and a line_attributes dict. Missing
-    features are filled with safe defaults; geo/cost features are derived
-    server-side. Leakage columns are never copied from the profile.
-
-    coverage_amount_vnd, deductible_vnd, base_premium_vnd, admin_fee_vnd are
-    always taken from the product catalog (server-authoritative) and cannot
-    be overridden by client input.
+    This is the pure value-resolution half of build_features; the category cast
+    is deferred to frame_from_rows so a batch of rows casts once, not per row.
     """
     loader.ensure_loaded()
     line_attrs = profile.get("line_attributes", {}) or {}
@@ -195,14 +190,34 @@ def build_features(line: str, product_id: str, profile: dict,
     # product_id always reflects the requested product
     if "product_id" in feature_names:
         row["product_id"] = product_id
+    return row
 
-    df = pd.DataFrame([row], columns=feature_names)
 
-    # LightGBM categorical metadata must match training. The training pipeline
-    # converts object columns only; boolean flags remain boolean/numeric.
+def frame_from_rows(rows: list[dict], feature_names: list[str]) -> "pd.DataFrame":
+    """Stack feature dicts into a model-ready frame, casting object columns to
+    category ONCE for the whole batch. LightGBM categorical metadata must match
+    training (object columns become category; boolean flags stay numeric). A
+    single-row slice equals the per-row build because the cast is per-column."""
+    df = pd.DataFrame(rows, columns=feature_names)
     for c in df.select_dtypes(include=["object"]).columns:
         df[c] = df[c].astype("category")
     return df
+
+
+def build_features(line: str, product_id: str, profile: dict,
+                   feature_names: list[str]) -> "pd.DataFrame":
+    """Build a single-row DataFrame aligned to feature_names.
+
+    The profile may supply base fields and a line_attributes dict. Missing
+    features are filled with safe defaults; geo/cost features are derived
+    server-side. Leakage columns are never copied from the profile.
+
+    coverage_amount_vnd, deductible_vnd, base_premium_vnd, admin_fee_vnd are
+    always taken from the product catalog (server-authoritative) and cannot
+    be overridden by client input.
+    """
+    row = _build_feature_row(line, product_id, profile, feature_names)
+    return frame_from_rows([row], feature_names)
 
 
 def feature_set_for_audit(line: str, product_id: str, profile: dict,
