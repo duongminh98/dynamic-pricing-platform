@@ -166,6 +166,8 @@ const FEATURE: Record<string, string> = {
   monthly_income_vnd: 'Thu nhập / tháng', marital_status: 'Tình trạng hôn nhân',
   // monetary fields surfaced in the certificate `change` block
   coverage_amount_vnd: 'Số tiền bảo hiểm', deductible_vnd: 'Mức miễn thường', premium: 'Phí bảo hiểm',
+  // aggregate SHAP rows (backend folds prior-claim + geo/cost features into these)
+  claims_history: 'Tiền sử bồi thường', regional_risk: 'Rủi ro khu vực',
 };
 // fold in every per-line attribute label (key -> Vietnamese label)
 for (const fields of Object.values(LINE_FIELDS)) {
