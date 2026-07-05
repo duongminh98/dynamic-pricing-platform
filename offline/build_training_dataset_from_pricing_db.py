@@ -52,25 +52,46 @@ def _load_table(engine, table_name: str) -> pd.DataFrame:
         return pd.read_sql(text(f"SELECT * FROM {table_name}"), conn)
 
 
+DEFAULT_LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
+
+
+def _reference_data_dir() -> Path:
+    return Path("data") / "synthetic_real_1m_history_lift_v2"
+
+
+def _reference_metadata() -> dict[str, Any]:
+    path = _reference_data_dir() / "pricing_modeling_metadata.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
 def _schema_columns(kind: str, line: str) -> list[str] | None:
-    path = Path("data") / "synthetic_real_1m_history_lift_v2" / f"pricing_{kind}_{line}.csv"
+    path = _reference_data_dir() / f"pricing_{kind}_{line}.csv"
     if not path.exists():
         return None
     return list(pd.read_csv(path, nrows=0).columns)
 
 
 def _known_lines() -> list[str]:
-    base_dir = Path("data") / "synthetic_real_1m_history_lift_v2"
-    lines = sorted(
+    # The lifecycle image bakes only the small reference files, NOT the big
+    # pricing_freq_*.csv training tables, so the glob is empty there. Fall back to
+    # the baked metadata's lines list, then to DEFAULT_LINES as a last resort.
+    base_dir = _reference_data_dir()
+    discovered = sorted(
         path.name.replace("pricing_freq_", "").replace(".csv", "")
         for path in base_dir.glob("pricing_freq_*.csv")
     )
-    if lines:
+    if discovered:
+        return discovered
+    metadata = _reference_metadata()
+    lines = metadata.get("lines")
+    if isinstance(lines, list) and all(isinstance(line, str) for line in lines):
         return lines
-    # The lifecycle image bakes only the small reference files, NOT the big
-    # pricing_freq_*.csv training tables, so the glob above is empty there.
-    # Fall back to the baked metadata's freq_tables, which lists every line.
-    return sorted(_source_metadata().get("freq_tables", {}).keys())
+    return DEFAULT_LINES
 
 
 def _date_str(value: Any) -> str | None:
@@ -149,24 +170,24 @@ def _align_to_training_schema(df: pd.DataFrame, kind: str, line: str) -> pd.Data
     return aligned[columns]
 
 
-def _source_metadata() -> dict[str, Any]:
-    metadata_path = ROOT / "data" / "synthetic_real_1m_history_lift_v2" / "pricing_modeling_metadata.json"
-    if not metadata_path.exists():
-        return {}
-    with open(metadata_path, encoding="utf-8") as handle:
-        return json.load(handle)
-
-
 def _write_metadata(output_dir: Path, dataset_version_id: str | None = None) -> Path:
+    source_metadata = _reference_metadata()
     lines = _known_lines()
-    source = _source_metadata()
     metadata = {
-        **{key: value for key, value in source.items() if key not in {"dataset_version", "freq_tables", "sev_tables", "source"}},
+        **source_metadata,
         "source": "pricing_db_read_models",
         "dataset_version": dataset_version_id,
         "lines": lines,
         "freq_tables": {line: f"pricing_freq_{line}.csv" for line in lines},
         "sev_tables": {line: f"pricing_sev_{line}.csv" for line in lines},
+        "grain_freq": "exposure_record",
+        "grain_sev": "claim",
+        "exposure_col": "earned_exposure_years",
+        "frequency_target": "claim_count",
+        "frequency_aux_target": "claim_flag",
+        "severity_target": "incurred_amount",
+        "offset": "offset_log_exposure = log(earned_exposure_years)",
+        "benchmark": "final_premium_vnd",
         "grain": {
             "frequency": "one row per policy exposure segment",
             "severity": "one row per settled claim",

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime
 import pathlib
+import sys
 
 import pytest
 
@@ -268,6 +269,25 @@ class TestDriftDrivenRetrain:
         result = rt.lines_with_drift(config)
         assert result == []
 
+    def test_main_returns_failure_when_any_triggered_line_fails(self, monkeypatch):
+        """A failed line must make the CI process fail."""
+        monkeypatch.setattr(sys, "argv", ["retrain_trigger.py", "--line", "health"])
+        monkeypatch.setattr(rt, "load_config", lambda: {})
+        monkeypatch.setattr(
+            rt,
+            "trigger_retrain",
+            lambda line, dry_run=False: {
+                "line": line,
+                "status": "failed",
+                "error": "train failed",
+                "steps": ["train"],
+                "candidate_model_version": None,
+                "promoted": False,
+            },
+        )
+
+        assert rt.main() == 1
+
 
 # Quarterly-schedule period dedup (fix #1)
 class TestScheduledPeriodDedup:
@@ -277,14 +297,16 @@ class TestScheduledPeriodDedup:
 
     def test_all_lines_due_when_none_retrained_this_period(self, monkeypatch):
         monkeypatch.setattr(rt, "lines_retrained_since", lambda _start: set())
-        july = datetime.datetime(2026, 7, 5, tzinfo=datetime.timezone.utc)
+        # day 1 so the merged is_scheduled (now requires now.day == quarterly_day,
+        # default 1) fires; this test exercises the dedup filter, not the day gate.
+        july = datetime.datetime(2026, 7, 1, tzinfo=datetime.timezone.utc)
         due = rt.scheduled_lines_needing_retrain(self._CONFIG, now=july)
         assert due == rt.LINES
 
     def test_already_retrained_lines_are_skipped(self, monkeypatch):
         monkeypatch.setattr(rt, "lines_retrained_since",
                             lambda _start: {"health", "car"})
-        july = datetime.datetime(2026, 7, 20, tzinfo=datetime.timezone.utc)
+        july = datetime.datetime(2026, 7, 1, tzinfo=datetime.timezone.utc)
         due = rt.scheduled_lines_needing_retrain(self._CONFIG, now=july)
         assert "health" not in due and "car" not in due
         assert "motorbike" in due

@@ -84,11 +84,14 @@ def load_config() -> dict:
 
 # Trigger-condition detection
 def is_scheduled(config: dict, now: datetime.datetime | None = None) -> bool:
-    """Check if the current month matches a quarterly schedule month."""
+    """Check whether today is the configured quarterly retrain day."""
     if not config.get("schedule_quarterly", False):
         return False
     now = now or datetime.datetime.now()
-    return now.month in config.get("quarterly_months", [1, 4, 7, 10])
+    return (
+        now.month in config.get("quarterly_months", [1, 4, 7, 10])
+        and now.day == int(config.get("quarterly_day", 1))
+    )
 
 
 def _quarter_period_start(config: dict, now: datetime.datetime) -> datetime.datetime:
@@ -429,7 +432,7 @@ def main():
 
     if not lines_to_check:
         print("No trigger conditions met. Nothing to retrain.")
-        return
+        return 0
 
     for line in lines_to_check:
         print(f"Triggering retrain for line: {line}")
@@ -441,7 +444,12 @@ def main():
 
     print(f"\nTriggered {len(triggered)} line(s). "
           f"Candidate Model_Version(s) created (NOT promoted; promotion is governed by BR-23).")
+    failed = [r for r in triggered if r["status"] not in ("candidate_registered", "dry_run")]
+    if failed:
+        print(f"Retrain failed for {len(failed)} line(s): {[r['line'] for r in failed]}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
