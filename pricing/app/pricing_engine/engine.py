@@ -319,23 +319,78 @@ def _guard_key(line: str, profile: dict) -> tuple:
     return tuple((field, repr(_attr_value(profile, field))) for field in sorted(fields))
 
 
+def _collect_safer_lattice(line: str, profile: dict) -> list[tuple[tuple, dict]]:
+    """Enumerate every unique profile reachable via the safer-profile guard walk,
+    including the root, keyed by _guard_key. Pure graph traversal — no features,
+    no predict. The walk only ever mutates guard fields, so _guard_key uniquely
+    identifies a node (non-guard fields are constant across the whole lattice),
+    matching the memo semantics of the former recursion exactly."""
+    seen: dict[tuple, dict] = {}
+    order: list[tuple[tuple, dict]] = []
+    stack = [profile]
+    while stack:
+        current = stack.pop()
+        key = _guard_key(line, current)
+        if key in seen:
+            continue
+        seen[key] = current
+        order.append((key, current))
+        for safer_profile in _safer_profiles_for_guard(line, current):
+            if _guard_key(line, safer_profile) not in seen:
+                stack.append(safer_profile)
+    return order
+
+
+def _concat_feature_frames(frames: list):
+    """Stack single-row feature frames into one batch frame while preserving each
+    row's values. Categoricals are demoted to object before concat then re-cast,
+    so the batch frame's per-row values equal the per-row build (the pipeline
+    preprocessor transforms each row independently → identical predictions)."""
+    if len(frames) == 1:
+        return frames[0]
+    import pandas as pd
+    plain = []
+    for frame in frames:
+        demoted = frame.copy()
+        for col in demoted.select_dtypes(include=["category"]).columns:
+            demoted[col] = demoted[col].astype("object")
+        plain.append(demoted)
+    batch = pd.concat(plain, ignore_index=True)
+    for col in batch.select_dtypes(include=["object"]).columns:
+        batch[col] = batch[col].astype("category")
+    return batch
+
+
+def _predict_pure_premium_batch(selection: dict, feature_df) -> list[float]:
+    """Vectorized _predict_pure_premium over an N-row frame. Mirrors the scalar
+    version's per-family arithmetic (incl. the freqsev max(0, .) clamp and the
+    tweedie/generic no-clamp) so a per-row slice yields the identical value."""
+    family = selection["family"]
+    model = selection["model"]
+    if family in ("freqsev", "freq_sev"):
+        freq = model["freq"].predict(feature_df)
+        sev = model["sev"].predict(feature_df)
+        return [max(0.0, float(f) * float(s)) for f, s in zip(freq, sev)]
+    # tweedie + generic fallback: direct prediction, no clamp (matches scalar path)
+    return [float(v) for v in model.predict(feature_df)]
+
+
 def _guarded_pure_premium(line: str, product_id: str, profile: dict,
                           selection: dict, feature_names: list[str], feature_df) -> float:
-    memo: dict[tuple, float] = {}
-
-    def guarded(current_profile: dict, current_df) -> float:
-        key = _guard_key(line, current_profile)
-        if key in memo:
-            return memo[key]
-        guarded_premium = _predict_pure_premium(selection, current_df)
-        memo[key] = guarded_premium
-        for safer_profile in _safer_profiles_for_guard(line, current_profile):
-            safer_df = build_features(line, product_id, safer_profile, feature_names)
-            guarded_premium = max(guarded_premium, guarded(safer_profile, safer_df))
-        memo[key] = guarded_premium
-        return guarded_premium
-
-    return guarded(profile, feature_df)
+    """Monotonicity guard: the served pure premium is the max over every
+    safer-than-baseline profile, so a riskier customer never prices below a safer
+    one. Equivalent to the former downward-DAG recursion (which just propagated a
+    max via memo), but enumerates the reachable lattice once and predicts the
+    whole batch in a single freq/sev pass instead of N sequential predicts."""
+    nodes = _collect_safer_lattice(line, profile)
+    root_key = _guard_key(line, profile)
+    frames = [
+        feature_df if key == root_key
+        else build_features(line, product_id, node_profile, feature_names)
+        for key, node_profile in nodes
+    ]
+    batch = _concat_feature_frames(frames)
+    return float(max(_predict_pure_premium_batch(selection, batch)))
 
 
 def quote(db, product_id: str, profile: dict,
