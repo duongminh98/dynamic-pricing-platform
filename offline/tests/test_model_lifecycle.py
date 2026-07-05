@@ -5,6 +5,7 @@ database or running the full training pipeline.
 """
 import pytest
 import datetime
+import json
 import pathlib
 
 from offline.retrain_trigger import (
@@ -14,14 +15,20 @@ from offline.retrain_trigger import (
 from offline.drift_monitor import (
     population_stability_index, compute_feature_drift, evaluate_line,
 )
+from offline.build_training_dataset_from_pricing_db import _write_metadata
 
 
 class TestRetrainTrigger:
 
-    def test_is_scheduled_quarterly_january(self):
+    def test_is_scheduled_quarterly_january_first_day(self):
+        config = {"schedule_quarterly": True, "quarterly_months": [1, 4, 7, 10]}
+        jan = datetime.datetime(2026, 1, 1)
+        assert is_scheduled(config, now=jan) is True
+
+    def test_is_not_scheduled_later_in_quarterly_month(self):
         config = {"schedule_quarterly": True, "quarterly_months": [1, 4, 7, 10]}
         jan = datetime.datetime(2026, 1, 15)
-        assert is_scheduled(config, now=jan) is True
+        assert is_scheduled(config, now=jan) is False
 
     def test_is_scheduled_quarterly_february(self):
         config = {"schedule_quarterly": True, "quarterly_months": [1, 4, 7, 10]}
@@ -31,6 +38,21 @@ class TestRetrainTrigger:
     def test_is_scheduled_disabled(self):
         config = {"schedule_quarterly": False}
         assert is_scheduled(config) is False
+
+    def test_count_new_claims_uses_exported_frequency_rows(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "pricing_freq_health.csv").write_text("exposure_id,line\ne1,health\ne2,health\n", encoding="utf-8")
+
+        assert count_new_claims_for_line("health", data_dir=data_dir) == 2
+
+    def test_export_metadata_contains_training_table_maps(self, tmp_path):
+        metadata_path = _write_metadata(tmp_path, "dataset-1")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+        assert metadata["freq_tables"]["health"] == "pricing_freq_health.csv"
+        assert metadata["sev_tables"]["health"] == "pricing_sev_health.csv"
+        assert metadata["frequency_target"] == "claim_count"
 
     def test_load_config_has_thresholds(self):
         config = load_config()

@@ -15,6 +15,7 @@ recalibration flag is raised.
 from __future__ import annotations
 
 import pathlib
+import sys
 
 import pytest
 
@@ -315,3 +316,22 @@ class TestDriftDrivenRetrain:
         monkeypatch.setattr(rt, "_get_db_connection", _should_not_be_called)
         result = rt.lines_with_drift(config)
         assert result == []
+
+    def test_main_returns_failure_when_any_triggered_line_fails(self, monkeypatch):
+        """A failed line must make the CI process fail."""
+        monkeypatch.setattr(sys, "argv", ["retrain_trigger.py", "--line", "health"])
+        monkeypatch.setattr(rt, "load_config", lambda: {})
+        monkeypatch.setattr(
+            rt,
+            "trigger_retrain",
+            lambda line, dry_run=False: {
+                "line": line,
+                "status": "failed",
+                "error": "train failed",
+                "steps": ["train"],
+                "candidate_model_version": None,
+                "promoted": False,
+            },
+        )
+
+        assert rt.main() == 1

@@ -49,11 +49,17 @@ jobs:
       GKE_CLUSTER: dpp
       GKE_REGION: asia-southeast1
       NAMESPACE: dpp
+      OBJECT_STORAGE_PROVIDER: gcs
+      REFERENCE_DATA_URI: gs://dpp-pricing-reference-staging
+      PRICING_REFERENCE_DIR: ${{ github.workspace }}/data/synthetic_real_1m_history_lift_v2
+      PRICING_TRAIN_DATA_DIR: ${{ github.workspace }}/data/synthetic_real_1m_history_lift_v2
+      PRICING_MODELS_DIR: ${{ github.workspace }}/reports/modeling/models
       PRICING_DB_HOST: 127.0.0.1
       PRICING_DB_PORT: "5432"
       PRICING_DB_NAME: pricing_db
       POSTGRES_USER: platform_user
       POSTGRES_PASSWORD: ${{ secrets.PRICING_DB_PASSWORD }}
+      PYTHONPATH: ${{ github.workspace }}/pricing:${{ github.workspace }}
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
@@ -137,6 +143,16 @@ jobs:
           else
             python offline/drift_monitor.py
           fi
+
+      - name: Prepare retrain data and artifacts
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -euo pipefail
+          python -m app.bootstrap_reference_data
+          python offline/build_training_dataset_from_pricing_db.py \
+            --database-url "postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PRICING_DB_HOST}:${PRICING_DB_PORT}/${PRICING_DB_NAME}" \
+            --output-dir "$PRICING_TRAIN_DATA_DIR" \
+            --created-by "github-actions-offline-lifecycle"
 
       - name: Run retrain trigger
         run: |
