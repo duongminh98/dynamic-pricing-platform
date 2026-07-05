@@ -61,10 +61,16 @@ def _schema_columns(kind: str, line: str) -> list[str] | None:
 
 def _known_lines() -> list[str]:
     base_dir = Path("data") / "synthetic_real_1m_history_lift_v2"
-    return sorted(
+    lines = sorted(
         path.name.replace("pricing_freq_", "").replace(".csv", "")
         for path in base_dir.glob("pricing_freq_*.csv")
     )
+    if lines:
+        return lines
+    # The lifecycle image bakes only the small reference files, NOT the big
+    # pricing_freq_*.csv training tables, so the glob above is empty there.
+    # Fall back to the baked metadata's freq_tables, which lists every line.
+    return sorted(_source_metadata().get("freq_tables", {}).keys())
 
 
 def _date_str(value: Any) -> str | None:
@@ -110,17 +116,19 @@ def _is_present(value: Any) -> bool:
     except (TypeError, ValueError):
         return True
 
-def _exposure_feature_row(exposure: pd.Series) -> dict[str, Any]:
+def _exposure_feature_row(exposure) -> dict[str, Any]:
     """Return one exposure row with quote-time features as authoritative input.
 
+    Accepts a pandas Series or a plain mapping (``to_dict("records")`` output),
+    so callers can iterate with records instead of the much slower ``iterrows``.
     Policy events carry a risk snapshot, but retraining must reproduce exactly
     what the pricing model saw at quote time whenever a quote feature snapshot is
     available. Pandas merge suffixes colliding quote features with ``_quote``;
     those values intentionally override policy/exposure values.
     """
-    row = exposure.to_dict()
-    row.update(_flatten("", exposure.get("risk_snapshot")))
-    for key, value in exposure.items():
+    row = dict(exposure)
+    row.update(_flatten("", row.get("risk_snapshot")))
+    for key, value in dict(exposure).items():
         if key.startswith("quote_feature__") and _is_present(value):
             row[key.removeprefix("quote_feature__")] = value
         if key.endswith("_quote") and _is_present(value):
@@ -141,10 +149,24 @@ def _align_to_training_schema(df: pd.DataFrame, kind: str, line: str) -> pd.Data
     return aligned[columns]
 
 
+def _source_metadata() -> dict[str, Any]:
+    metadata_path = ROOT / "data" / "synthetic_real_1m_history_lift_v2" / "pricing_modeling_metadata.json"
+    if not metadata_path.exists():
+        return {}
+    with open(metadata_path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def _write_metadata(output_dir: Path, dataset_version_id: str | None = None) -> Path:
+    lines = _known_lines()
+    source = _source_metadata()
     metadata = {
+        **{key: value for key, value in source.items() if key not in {"dataset_version", "freq_tables", "sev_tables", "source"}},
         "source": "pricing_db_read_models",
         "dataset_version": dataset_version_id,
+        "lines": lines,
+        "freq_tables": {line: f"pricing_freq_{line}.csv" for line in lines},
+        "sev_tables": {line: f"pricing_sev_{line}.csv" for line in lines},
         "grain": {
             "frequency": "one row per policy exposure segment",
             "severity": "one row per settled claim",
@@ -339,26 +361,55 @@ def build_datasets(database_url: str, output_dir: Path, dataset_version_id: str 
         settled_claims = claims[claims["settled_at"].notna()].copy() if not claims.empty else claims
         for line, line_exposures in exposures.groupby("line"):
             line_claims = settled_claims[settled_claims["line"] == line].copy() if not settled_claims.empty else pd.DataFrame()
+
+            # Iterate exposures as records (far cheaper than iterrows). First
+            # occurrence per (policy_id, seq) wins, matching the old
+            # matching_exposure.iloc[0] used to build severity rows.
+            exposure_records = line_exposures.to_dict("records")
+            expo_by_key: dict[tuple, dict[str, Any]] = {}
+            for exposure in exposure_records:
+                key = (exposure.get("policy_id"), exposure.get("exposure_segment_seq"))
+                expo_by_key.setdefault(key, exposure)
+
+            # Aggregate claims -> exposure ONCE via a keyed join + window filter,
+            # instead of re-scanning all claims for every exposure (was O(n*m)).
+            claim_count_by_expo: dict[Any, int] = {}
+            total_loss_by_expo: dict[Any, int] = {}
+            if not line_claims.empty:
+                lc = line_claims
+                loss = lc["incurred_amount_vnd"].fillna(lc.get("actual_loss_vnd", 0)) \
+                    if "incurred_amount_vnd" in lc.columns else lc.get("actual_loss_vnd", pd.Series(0, index=lc.index))
+                keyed = pd.DataFrame({
+                    "policy_id": lc["policy_id"],
+                    "exposure_segment_seq": lc["exposure_segment_seq"],
+                    "_occ": pd.to_datetime(lc["occurrence_date"], utc=True, errors="coerce"),
+                    "_loss": pd.to_numeric(loss, errors="coerce").fillna(0.0),
+                })
+                windows = pd.DataFrame({
+                    "exposure_id": line_exposures["exposure_id"],
+                    "policy_id": line_exposures["policy_id"],
+                    "exposure_segment_seq": line_exposures["exposure_segment_seq"],
+                    "_start": pd.to_datetime(line_exposures["segment_start"], utc=True, errors="coerce"),
+                    "_end": pd.to_datetime(line_exposures["segment_end"], utc=True, errors="coerce"),
+                })
+                merged = keyed.merge(windows, on=["policy_id", "exposure_segment_seq"], how="inner")
+                merged = merged[(merged["_occ"] >= merged["_start"]) & (merged["_occ"] < merged["_end"])]
+                if not merged.empty:
+                    grouped = merged.groupby("exposure_id")["_loss"].agg(["size", "sum"])
+                    claim_count_by_expo = grouped["size"].astype(int).to_dict()
+                    total_loss_by_expo = grouped["sum"].astype("int64").to_dict()
+
             rows = []
-            for _, exposure in line_exposures.iterrows():
-                exposure_claims = pd.DataFrame()
-                if not line_claims.empty:
-                    occurrence = pd.to_datetime(line_claims["occurrence_date"], utc=True, errors="coerce")
-                    start = pd.to_datetime(exposure["segment_start"], utc=True)
-                    end = pd.to_datetime(exposure["segment_end"], utc=True)
-                    exposure_claims = line_claims[
-                        (line_claims["policy_id"] == exposure["policy_id"])
-                        & (line_claims["exposure_segment_seq"] == exposure["exposure_segment_seq"])
-                        & (occurrence >= start)
-                        & (occurrence < end)
-                    ]
+            feature_row_by_key: dict[tuple, dict[str, Any]] = {}
+            for exposure in exposure_records:
                 row = _exposure_feature_row(exposure)
                 row = _add_line_feature_engineering(row, line)
                 row["policy_effective_date"] = _date_str(exposure.get("segment_start"))
                 row["policy_expiration_date"] = _date_str(exposure.get("segment_end"))
                 row["policy_year"] = _year(exposure.get("segment_start"))
-                claim_count = int(len(exposure_claims))
-                total_loss = int(exposure_claims["incurred_amount_vnd"].fillna(exposure_claims.get("actual_loss_vnd", 0)).sum()) if claim_count else 0
+                eid = exposure.get("exposure_id")
+                claim_count = int(claim_count_by_expo.get(eid, 0))
+                total_loss = int(total_loss_by_expo.get(eid, 0))
                 earned = float(exposure.get("earned_exposure_years") or 0.0)
                 row["claim_count"] = claim_count
                 row["claim_flag"] = 1 if claim_count > 0 else 0
@@ -374,14 +425,14 @@ def build_datasets(database_url: str, output_dir: Path, dataset_version_id: str 
             written.append(freq_path)
 
             sev_rows = []
-            for _, claim in line_claims.iterrows():
-                matching_exposure = line_exposures[
-                    (line_exposures["policy_id"] == claim["policy_id"])
-                    & (line_exposures["exposure_segment_seq"] == claim["exposure_segment_seq"])
-                ]
-                base = _exposure_feature_row(matching_exposure.iloc[0]) if not matching_exposure.empty else {}
-                base["policy_year"] = _year(base.get("segment_start"))
-                row = {**base, **claim.to_dict()}
+            for claim in (line_claims.to_dict("records") if not line_claims.empty else []):
+                key = (claim.get("policy_id"), claim.get("exposure_segment_seq"))
+                if key not in feature_row_by_key:
+                    match = expo_by_key.get(key)
+                    base = _exposure_feature_row(match) if match is not None else {}
+                    base["policy_year"] = _year(base.get("segment_start"))
+                    feature_row_by_key[key] = base
+                row = {**feature_row_by_key[key], **claim}
                 row = _add_line_feature_engineering(row, line)
                 row["report_date"] = _date_str(claim.get("reported_at") or claim.get("report_date"))
                 row["occurrence_date"] = _date_str(claim.get("occurrence_date"))

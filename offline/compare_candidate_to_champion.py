@@ -27,7 +27,14 @@ if str(PRICING_DIR) not in sys.path:
     sys.path.insert(0, str(PRICING_DIR))
 
 from offline.object_storage import materialize
-from offline.train_pricing_models import MIN_EXPOSURE, prepare_features, normalized_gini
+from offline.train_pricing_models import (
+    MIN_EXPOSURE,
+    HOLDOUT_PCT,
+    HOLDOUT_COL,
+    prepare_features,
+    normalized_gini,
+    holdout_mask,
+)
 from app.database import SessionLocal, ModelVersion
 
 
@@ -40,15 +47,32 @@ def _artifact_path(base_dir: pathlib.Path, line: str, algorithm: str, family: st
     return base_dir / f"{line}__{algorithm}_{family}.joblib"
 
 
-def _infer_candidate_family(base_dir: pathlib.Path, line: str) -> tuple[str, str]:
-    if _artifact_path(base_dir, line, "lgb", "tw").exists():
-        return "lgb", "tw"
+def _artifact_exists(base_dir: pathlib.Path, line: str, algorithm: str, family: str) -> bool:
+    if family in ("freqsev", "freq_sev"):
+        return _artifact_path(base_dir, line, algorithm, "freq").exists() and _artifact_path(base_dir, line, algorithm, "sev").exists()
+    return _artifact_path(base_dir, line, algorithm, family).exists()
+
+
+def _infer_candidate_family(base_dir: pathlib.Path, line: str, preferred_family: str | None = None, preferred_algorithm: str | None = None) -> tuple[str, str]:
+    if preferred_family:
+        algorithms = [preferred_algorithm] if preferred_algorithm else ["lgb", "glm"]
+        for algorithm in algorithms:
+            if algorithm and _artifact_exists(base_dir, line, algorithm, preferred_family):
+                return algorithm, preferred_family
+        raise FileNotFoundError(f"No candidate artifacts found for {line} family={preferred_family} in {base_dir}")
+    if preferred_algorithm:
+        for family in ("freqsev", "tw"):
+            if _artifact_exists(base_dir, line, preferred_algorithm, family):
+                return preferred_algorithm, family
+        raise FileNotFoundError(f"No candidate artifacts found for {line} algorithm={preferred_algorithm} in {base_dir}")
     if _artifact_path(base_dir, line, "lgb", "freq").exists() and _artifact_path(base_dir, line, "lgb", "sev").exists():
         return "lgb", "freqsev"
-    if _artifact_path(base_dir, line, "glm", "tw").exists():
-        return "glm", "tw"
+    if _artifact_path(base_dir, line, "lgb", "tw").exists():
+        return "lgb", "tw"
     if _artifact_path(base_dir, line, "glm", "freq").exists() and _artifact_path(base_dir, line, "glm", "sev").exists():
         return "glm", "freqsev"
+    if _artifact_path(base_dir, line, "glm", "tw").exists():
+        return "glm", "tw"
     raise FileNotFoundError(f"No candidate artifacts found for {line} in {base_dir}")
 
 
@@ -59,7 +83,7 @@ def _load_model(path_or_uri: pathlib.Path | str):
     return joblib.load(path)
 
 
-def _load_dataset(dataset_dir: pathlib.Path, line: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _load_dataset(dataset_dir: pathlib.Path, line: str) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
     freq_path = dataset_dir / f"pricing_freq_{line}.csv"
     sev_path = dataset_dir / f"pricing_sev_{line}.csv"
     if not freq_path.exists():
@@ -69,7 +93,15 @@ def _load_dataset(dataset_dir: pathlib.Path, line: str) -> tuple[pd.DataFrame, p
     if not sev_df.empty and {"exposure_id", "incurred_amount"}.issubset(sev_df.columns) and "exposure_id" in freq_df.columns:
         loss_by_expo = sev_df.groupby("exposure_id")["incurred_amount"].sum()
         freq_df["_loss_per_exposure"] = freq_df["exposure_id"].map(loss_by_expo).fillna(0.0)
-    return freq_df, sev_df
+    # Score ONLY the held-out customers — the exact slice the trainer excluded —
+    # so candidate and champion are both judged out-of-sample on the same rows.
+    # All-False mask (missing customer_id / low-data regime) keeps every row and
+    # falls back to an in-sample comparison, flagged as holdout_skipped downstream.
+    mask = holdout_mask(freq_df)
+    holdout_applied = bool(mask.any())
+    if holdout_applied:
+        freq_df = freq_df[mask].reset_index(drop=True)
+    return freq_df, sev_df, holdout_applied
 
 
 def _predict_family(model, df: pd.DataFrame) -> np.ndarray:
@@ -186,11 +218,11 @@ def _champion_metadata(model_version_id: str) -> tuple[str, str, dict[str, Any],
         session.close()
 
 
-def compare(line: str, dataset_dir: pathlib.Path, candidate_artifact_dir: pathlib.Path, champion_model_version_id: str, output_file: pathlib.Path) -> dict[str, Any]:
+def compare(line: str, dataset_dir: pathlib.Path, candidate_artifact_dir: pathlib.Path, champion_model_version_id: str, output_file: pathlib.Path, candidate_algorithm: str | None = None, candidate_family: str | None = None) -> dict[str, Any]:
     config = load_config()
-    freq_df, _sev_df = _load_dataset(dataset_dir, line)
+    freq_df, _sev_df, holdout_applied = _load_dataset(dataset_dir, line)
     actual, exposure = _targets(freq_df)
-    candidate_algorithm, candidate_family = _infer_candidate_family(candidate_artifact_dir, line)
+    candidate_algorithm, candidate_family = _infer_candidate_family(candidate_artifact_dir, line, candidate_family, candidate_algorithm)
     candidate_pred = _predict_pure_premium(candidate_artifact_dir, line, candidate_algorithm, candidate_family, freq_df)
     champion_algorithm, champion_family, champion_quality, champion_artifact_uri = _champion_metadata(champion_model_version_id)
     if champion_artifact_uri:
@@ -231,6 +263,10 @@ def compare(line: str, dataset_dir: pathlib.Path, candidate_artifact_dir: pathli
         "thresholds": config,
         "passed": bool(passed),
         "rows_evaluated": int(len(freq_df)),
+        "holdout_pct": HOLDOUT_PCT,
+        "holdout_applied": holdout_applied,
+        "holdout_skipped": not holdout_applied,
+        "evaluation": "out_of_sample_holdout" if holdout_applied else "in_sample_full",
     }
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -244,6 +280,8 @@ def main() -> None:
     parser.add_argument("--candidate-artifact-dir", required=True)
     parser.add_argument("--champion-model-version-id", required=True)
     parser.add_argument("--output-file", required=True)
+    parser.add_argument("--candidate-algorithm", choices=["lgb", "glm"])
+    parser.add_argument("--candidate-family", choices=["freqsev", "freq_sev", "tw"])
     args = parser.parse_args()
     report = compare(
         line=args.line,
@@ -251,6 +289,8 @@ def main() -> None:
         candidate_artifact_dir=pathlib.Path(args.candidate_artifact_dir),
         champion_model_version_id=args.champion_model_version_id,
         output_file=pathlib.Path(args.output_file),
+        candidate_algorithm=args.candidate_algorithm,
+        candidate_family=args.candidate_family,
     )
     print(json.dumps({"passed": report["passed"], "output_file": args.output_file}, indent=2))
 

@@ -71,7 +71,7 @@ class TestDriftMonitor:
             "drift_threshold_prediction_psi": 0.2,
             "drift_threshold_calibration": 0.15,
         }
-        result = evaluate_line("health", config)
+        result = evaluate_line("health", config, current_quotes=[], outcomes=[])
         assert result["line"] == "health"
         assert "feature_psi" in result
         assert "prediction_psi" in result
@@ -88,5 +88,5 @@ class TestDriftMonitor:
             "drift_threshold_prediction_psi": 0.0,
             "drift_threshold_calibration": 0.0,
         }
-        result = evaluate_line("health", config)
+        result = evaluate_line("health", config, current_quotes=[], outcomes=[])
         assert isinstance(result["needs_recalibration"], bool)

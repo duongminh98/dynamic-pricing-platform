@@ -1,9 +1,25 @@
-# Cloud Workflows: offline pricing model lifecycle (export ▸ train ▸ validate ▸
-# compare ▸ register ▸ drift). Replaces the GitHub Actions cron. Each step runs
-# the `lifecycle` image as a Cloud Run Job; artifacts hand off via GCS, metadata
-# to pricing_db. Deploy: gcloud workflows deploy pricing-lifecycle --source=this
+# Cloud Workflows: offline pricing model lifecycle (COARSE 2-job shape).
 #
-# Args (optional): {"line": "car", "dry_run": false}
+# Chains two Cloud Run Jobs, drift-first (so model_drift_flag rows are fresh
+# before the retrain trigger reads them — matches offline/README.md ordering):
+#
+#   drift-monitor  ─►  pricing-lifecycle (offline/retrain_trigger.py)
+#
+# pricing-lifecycle runs retrain_trigger.py, which decides whether a retrain is
+# due (schedule / data-threshold / drift) and, per line, runs the in-process
+# model_lifecycle_pipeline: export ▸ train ▸ compare ▸ monotonic gate ▸
+# smoothness gate ▸ register CANDIDATE (never promotes). One process, both gates
+# run — unlike a fine-grained per-step fan-out which would skip the two gates
+# that register_candidate_model.py requires. See GCP_DEPLOYMENT.md §8.
+#
+# Both Jobs use the single `lifecycle` image and run as pricing-lifecycle-sa.
+# Created by deploy/lifecycle_deploy.sh. Deploy this file with:
+#   gcloud workflows deploy pricing-lifecycle \
+#     --source=deploy/workflows/pricing-lifecycle.yaml --location=<region> \
+#     --service-account=pricing-lifecycle-sa@<project>.iam.gserviceaccount.com
+#
+# Args (optional): {"line": "car"}  — forces a single line (used for smoke runs).
+#   Omit to let retrain_trigger.py evaluate all lines against its trigger config.
 main:
   params: [args]
   steps:
@@ -11,61 +27,33 @@ main:
         assign:
           - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
           - region: "asia-southeast1"
-          - line: ${default(map.get(args, "line"), "all")}
-          - run_id: ${text.replace_all(time.format(sys.now()), ":", "-")}
-          - models_uri: ${"gs://dpp-pricing-models-staging/" + line + "/" + run_id}
-    - export_dataset:
-        call: runJob
-        args:
-          project: ${project}
-          region: ${region}
-          job: export-pricing-dataset
-    - train_model:
-        call: runJob
-        args:
-          project: ${project}
-          region: ${region}
-          job: train-pricing-model
-          overrides:
-            containerOverrides:
-              - args: ["offline/train_pricing_models.py", "--line", "${line}", "--output-uri", "${models_uri}"]
-    - validate_model:
-        call: runJob
-        args:
-          project: ${project}
-          region: ${region}
-          job: validate-pricing-model
-    - compare_candidate:
-        call: runJob
-        args:
-          project: ${project}
-          region: ${region}
-          job: compare-candidate
-    - register_candidate:
-        call: runJob
-        args:
-          project: ${project}
-          region: ${region}
-          job: register-candidate
+          - line: ${map.get(args, "line")}
     - drift_monitor:
-        call: runJob
+        call: googleapis.run.v2.projects.locations.jobs.run
         args:
-          project: ${project}
-          region: ${region}
-          job: drift-monitor
-    - done:
-        return: ${"lifecycle complete for line=" + line + " run=" + run_id}
-
-# Reusable subworkflow: execute a Cloud Run Job and wait for completion.
-runJob:
-  params: [project, region, job, overrides: {}]
-  steps:
-    - execute:
-        call: googleapis.run.v1.namespaces.jobs.run
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/pricing-drift-monitor"}
+        result: drift_execution
+    # If a line was supplied, override the container args so retrain_trigger runs
+    # just that line; otherwise run the Job with its baked default args (all lines).
+    - decide_lifecycle_args:
+        switch:
+          - condition: ${line != null}
+            steps:
+              - run_lifecycle_one_line:
+                  call: googleapis.run.v2.projects.locations.jobs.run
+                  args:
+                    name: ${"projects/" + project + "/locations/" + region + "/jobs/pricing-lifecycle"}
+                    body:
+                      overrides:
+                        containerOverrides:
+                          - args: ["offline/retrain_trigger.py", "--line", "${line}"]
+                  result: lifecycle_execution
+              - done_one:
+                  return: ${"lifecycle complete for line=" + line}
+    - run_lifecycle_all_lines:
+        call: googleapis.run.v2.projects.locations.jobs.run
         args:
-          name: ${"namespaces/" + project + "/jobs/" + job}
-          location: ${region}
-          body: ${overrides}
-        result: execution
-    - report:
-        return: ${execution}
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/pricing-lifecycle"}
+        result: lifecycle_execution
+    - done_all:
+        return: "lifecycle complete for all triggered lines"

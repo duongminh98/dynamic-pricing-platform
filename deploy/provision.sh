@@ -23,6 +23,7 @@ gcloud services enable \
   secretmanager.googleapis.com artifactregistry.googleapis.com \
   servicenetworking.googleapis.com cloudbuild.googleapis.com \
   storage.googleapis.com iam.googleapis.com dns.googleapis.com \
+  run.googleapis.com workflows.googleapis.com cloudscheduler.googleapis.com \
   --project "$PROJECT_ID"
 
 log "VPC + subnet + private service access"
@@ -86,6 +87,15 @@ put_secret() { # name value
   printf '%s' "$2" | gcloud secrets versions add "$1" --data-file=- --project "$PROJECT_ID"; }
 put_secret db-password "$DB_PASS"
 put_secret rabbitmq-password "$RABBIT_PASS"
+# Full SQLAlchemy URL for the offline lifecycle Cloud Run Jobs. They reach Cloud
+# SQL through the connector's unix socket (--set-cloudsql-instances mounts it at
+# /cloudsql/<inst>), so the URL has an empty host + ?host=/cloudsql/<inst>.
+# build_training_dataset_from_pricing_db.py + app.database read DATABASE_URL;
+# retrain_trigger/drift_monitor read PRICING_DB_HOST/POSTGRES_PASSWORD (set from
+# db-password) — both paths are wired in deploy/lifecycle_deploy.sh.
+SQL_INST_CONN="$PROJECT_ID:$REGION:$SQL_INSTANCE"
+put_secret pricing-db-url \
+  "postgresql+psycopg2://$DB_USER:$DB_PASS@/pricing_db?host=/cloudsql/$SQL_INST_CONN"
 put_secret keycloak-admin admin
 put_secret keycloak-admin-password "$KC_ADMIN_PASS"
 require_non_placeholder VNP_TMN_CODE "${VNP_TMN_CODE:-}"
@@ -125,6 +135,21 @@ for b in "$BUCKET_DATASETS" "$BUCKET_MODELS" "$BUCKET_REPORTS"; do
   gcloud storage buckets add-iam-policy-binding "gs://$b" \
     --member="serviceAccount:pricing-lifecycle-sa@$PROJECT_ID.iam.gserviceaccount.com" \
     --role=roles/storage.objectAdmin >/dev/null
+done
+# lifecycle-sa reads reference data + the champion fallback registry from the
+# reference bucket (REFERENCE_DATA_URI) but never writes it -> viewer only.
+gcloud storage buckets add-iam-policy-binding "gs://$BUCKET_REFERENCE" \
+  --member="serviceAccount:pricing-lifecycle-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role=roles/storage.objectViewer >/dev/null
+# Offline lifecycle Cloud Run Jobs (deploy/lifecycle_deploy.sh) connect to Cloud
+# SQL + read the pricing-db-url/db-password secrets; the Workflow that chains
+# them and the Scheduler that triggers the Workflow both run AS this SA, so it
+# also needs run.invoker (execute Jobs) + workflows.invoker (execute Workflow).
+for role in roles/cloudsql.client roles/secretmanager.secretAccessor \
+            roles/run.invoker roles/workflows.invoker; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:pricing-lifecycle-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="$role" --condition=None >/dev/null
 done
 
 log "GKE Autopilot cluster"

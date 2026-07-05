@@ -9,7 +9,14 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://platform_user:platform_password_dev_only@localhost:5440/pricing_db",
 )
-engine = create_engine(DATABASE_URL)
+from .config import DB_POOL_SIZE, DB_MAX_OVERFLOW
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():

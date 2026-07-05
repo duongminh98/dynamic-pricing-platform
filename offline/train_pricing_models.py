@@ -46,6 +46,7 @@ artifacts (artifact outputs are produced by the default ``main()`` path).
 Requirements: R12.7, R4.7, R29.5, R30.5, R31.3, R31.4 (design section 6.3, BR-19/C-8)
 """
 
+import hashlib
 import json
 import os
 import pathlib
@@ -68,14 +69,57 @@ warnings.filterwarnings("ignore")
 # (matches scripts/train_pricing_models.py: earned_exposure_years.clip(lower=1e-6)).
 MIN_EXPOSURE = 1e-6
 
+# -- Train/holdout split ----------------------------------------------------
+# A customer_id is assigned to the holdout iff a stable hash of it lands in the
+# lowest HOLDOUT_PCT percent. Both the trainer (excludes holdout before fit) and
+# the comparator (scores ONLY the holdout) recompute this from customer_id, so
+# they always agree on the split without passing any state through the CSV
+# (which _align_to_training_schema would drop anyway). blake2b is used instead
+# of the builtin hash(), which is salted per-process and not reproducible.
+HOLDOUT_COL = "customer_id"
+HOLDOUT_PCT = int(os.environ.get("PRICING_HOLDOUT_PCT", "20"))
+# Below this many distinct customers the holdout is skipped (train on all, score
+# in-sample) so a nearly-empty read-model does not starve training.
+HOLDOUT_MIN_CUSTOMERS = int(os.environ.get("PRICING_HOLDOUT_MIN_CUSTOMERS", "500"))
+
+
+def _holdout_bucket(customer_id: object) -> int:
+    digest = hashlib.blake2b(str(customer_id).encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % 100
+
+
+def holdout_mask(df: pd.DataFrame, holdout_pct: int = HOLDOUT_PCT,
+                 min_customers: int = HOLDOUT_MIN_CUSTOMERS) -> np.ndarray:
+    """Boolean mask (True = holdout row) keyed by ``customer_id``.
+
+    Returns all-False (no holdout) when the group column is absent or there are
+    fewer than ``min_customers`` distinct customers, so callers train/score on
+    everything in the low-data regime. Every row of a given customer shares one
+    bucket, so no customer straddles the train/holdout boundary.
+    """
+    n = len(df)
+    if HOLDOUT_COL not in df.columns or holdout_pct <= 0:
+        return np.zeros(n, dtype=bool)
+    customers = df[HOLDOUT_COL]
+    if customers.nunique(dropna=True) < min_customers:
+        return np.zeros(n, dtype=bool)
+    buckets = customers.map(_holdout_bucket).to_numpy()
+    return buckets < holdout_pct
+
 # -- Paths ------------------------------------------------------------------
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA_DIR = pathlib.Path(os.environ.get("PRICING_TRAIN_DATA_DIR", ROOT / "data" / "synthetic_real_1m_history_lift_v2"))
-if not DATA_DIR.is_absolute():
-    DATA_DIR = ROOT / DATA_DIR
-MODELS_DIR = ROOT / "reports" / "modeling" / "models"
+
+
+def _repo_path(value: str | pathlib.Path) -> pathlib.Path:
+    path = pathlib.Path(value)
+    return path if path.is_absolute() else ROOT / path
+
+
+DATA_DIR = _repo_path(os.environ.get("PRICING_TRAIN_DATA_DIR", ROOT / "data" / "synthetic_real_1m_history_lift_v2"))
+BASE_MODELS_DIR = _repo_path(os.environ.get("PRICING_BASE_MODELS_DIR", ROOT / "reports" / "modeling" / "models"))
+MODELS_DIR = _repo_path(os.environ.get("PRICING_MODEL_OUTPUT_DIR", str(BASE_MODELS_DIR)))
 METADATA_PATH = DATA_DIR / "pricing_modeling_metadata.json"
-BASELINES_DIR = ROOT / "reports" / "modeling" / "baselines"
+BASELINES_DIR = _repo_path(os.environ.get("PRICING_BASELINE_OUTPUT_DIR", ROOT / "reports" / "modeling" / "baselines"))
 
 LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
 
@@ -278,7 +322,7 @@ def retrain_model(line: str, family: str, df: pd.DataFrame) -> lgb.LGBMRegressor
                (the caller must have populated "_loss_per_exposure" from the severity table).
     final_premium_vnd is NEVER used as a target (it is a benchmark only).
     """
-    existing_path = MODELS_DIR / f"{line}__lgb_{family}.joblib"
+    existing_path = BASE_MODELS_DIR / f"{line}__lgb_{family}.joblib"
     if not existing_path.exists():
         print(f"    SKIP {line}__lgb_{family}: no existing artifact to base on")
         return None
@@ -297,6 +341,18 @@ def retrain_model(line: str, family: str, df: pd.DataFrame) -> lgb.LGBMRegressor
             return None
     else:
         df_work = df
+
+    # Exclude the holdout customers so compare_candidate_to_champion.py can score
+    # this candidate out-of-sample on exactly that held-out slice. All-False mask
+    # (missing customer_id or low-data regime) trains on everything, as before.
+    mask = holdout_mask(df_work)
+    if mask.any():
+        kept = int((~mask).sum())
+        print(f"    Holdout: training {line}__lgb_{family} on {kept}/{len(df_work)} rows "
+              f"({HOLDOUT_PCT}% held out by {HOLDOUT_COL})")
+        df_work = df_work[~mask]
+    else:
+        print(f"    Holdout: skipped for {line}__lgb_{family} (training on all {len(df_work)} rows)")
 
     feat_df = prepare_features(df_work, existing_features)
 
@@ -432,7 +488,7 @@ def groupkfold_cv(line: str, family: str, df: pd.DataFrame,
             f"'{group_col}' (required for anti-leakage CV)"
         )
 
-    existing_path = MODELS_DIR / f"{line}__lgb_{family}.joblib"
+    existing_path = BASE_MODELS_DIR / f"{line}__lgb_{family}.joblib"
     if not existing_path.exists():
         return {"line": line, "family": family, "k": k, "fold_gini": [],
                 "mean_gini": None, "n_groups": 0, "n_rows": 0,

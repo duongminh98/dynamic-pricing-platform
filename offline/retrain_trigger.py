@@ -8,13 +8,15 @@ Supports two mechanisms (independently configurable via retrain_config.json):
 
 What the trigger does (and does NOT do)
 ---------------------------------------
-For each triggered line it CHAINS, in order:
+For each triggered line it runs the governed lifecycle pipeline
+(offline/model_lifecycle_pipeline.py) in-process:
 
-    train  ->  validate  ->  monotonic gate  ->  register CANDIDATE
+    export dataset -> train -> compare vs champion -> monotonic gate ->
+    smoothness gate -> register CANDIDATE
 
-and stops as soon as a step fails. The monotonic gate MUST pass before the
-candidate is registered. The trigger ONLY registers a *candidate* Model_Version
-row -- it NEVER touches champion_assignment and therefore NEVER auto-promotes.
+Every gate MUST pass before the candidate is registered; the pipeline aborts on
+the first failure. The trigger ONLY registers a *candidate* Model_Version row --
+it NEVER touches champion_assignment and therefore NEVER auto-promotes.
 Promotion stays governed by BR-23 via the existing governance promote endpoint
 (pricing_engine/governance.py), driven by an Administrator. This separation is
 the core safety property of R37.2 / BR-24.
@@ -43,10 +45,8 @@ import os
 import pathlib
 import subprocess
 import sys
-import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data" / "synthetic_real_1m_history_lift_v2"
 MODELS_DIR = ROOT / "reports" / "modeling" / "models"
 CONFIG_PATH = ROOT / "offline" / "retrain_config.json"
 
@@ -91,19 +91,84 @@ def is_scheduled(config: dict, now: datetime.datetime | None = None) -> bool:
     return now.month in config.get("quarterly_months", [1, 4, 7, 10])
 
 
-def count_new_claims_for_line(line: str, data_dir: pathlib.Path = DATA_DIR) -> int:
-    """Count new claims/exposure records for a line from the dataset."""
-    csv_path = data_dir / "policies.csv"
-    if not csv_path.exists():
+def _quarter_period_start(config: dict, now: datetime.datetime) -> datetime.datetime:
+    """First day of the current quarterly period.
+
+    The external scheduler runs this script DAILY, but the quarterly schedule is
+    meant to fire ONCE per quarter. This returns the start of the most recent
+    quarterly month <= now.month so the caller can skip lines already retrained
+    within the window (see scheduled_lines_needing_retrain). Without this guard a
+    daily cron would retrain every line every day for the whole quarter month.
+    """
+    months = sorted(config.get("quarterly_months", [1, 4, 7, 10]))
+    start_month = next((m for m in reversed(months) if m <= now.month), months[0])
+    return datetime.datetime(now.year, start_month, 1, tzinfo=datetime.timezone.utc)
+
+
+def lines_retrained_since(period_start: datetime.datetime) -> set[str]:
+    """Lines with a candidate model_version registered on/after period_start.
+
+    Reads the same model_version rows the lifecycle pipeline writes. On any DB
+    error returns an empty set (fail-open: the scheduled retrain still runs).
+    """
+    try:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT line FROM model_version
+                    WHERE COALESCE(registered_at, trained_at) >= %s
+                    """,
+                    (period_start,),
+                )
+                return {row[0] for row in cur.fetchall()}
+        finally:
+            conn.close()
+    except Exception:
+        return set()
+
+
+def scheduled_lines_needing_retrain(config: dict, now: datetime.datetime | None = None) -> list[str]:
+    """Lines due for the quarterly refresh that have NOT been retrained this period.
+
+    Empty when the schedule does not fire today. Otherwise LINES minus any line
+    that already got a candidate registered since the current quarter started, so
+    a daily cron triggers each line at most once per quarter.
+    """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    if not is_scheduled(config, now):
+        return []
+    already = lines_retrained_since(_quarter_period_start(config, now))
+    return [line for line in LINES if line not in already]
+
+
+def count_new_claims_for_line(line: str, window_days: int = 90) -> int:
+    """Count settled claim outcomes for a line within the recent window.
+
+    Reads the ``claim_outcome`` read-model (the same source drift_monitor uses),
+    NOT a local CSV: the lifecycle image bakes only small reference files, so the
+    old ``data/.../policies.csv`` path is absent in deploy jobs and always
+    returned 0. On any DB error returns 0 (fail-safe: no spurious retrain).
+    """
+    try:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM claim_outcome
+                    WHERE line = %s
+                      AND recorded_at >= NOW() - INTERVAL '%s days'
+                    """,
+                    (line, window_days),
+                )
+                row = cur.fetchone()
+                return int(row[0]) if row else 0
+        finally:
+            conn.close()
+    except Exception:
         return 0
-    import csv
-    count = 0
-    with open(csv_path, encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row.get("line") == line:
-                count += 1
-    return count
 
 
 def lines_exceeding_threshold(config: dict) -> list[str]:
@@ -111,12 +176,13 @@ def lines_exceeding_threshold(config: dict) -> list[str]:
     if not config.get("data_threshold_enabled", False):
         return []
     thresholds = config.get("line_thresholds", {})
+    window_days = config.get("data_threshold_window_days", 90)
     result = []
     for line in LINES:
         threshold = thresholds.get(line, 0)
         if threshold <= 0:
             continue
-        count = count_new_claims_for_line(line)
+        count = count_new_claims_for_line(line, window_days)
         if count >= threshold:
             result.append(line)
     return result
@@ -171,16 +237,6 @@ def _run_script(script_rel: str, *args: str) -> tuple[bool, str]:
         return False, f"{script_rel}: {e}"
 
 
-def run_training(line: str) -> tuple[bool, str]:
-    """Step 1: re-fit champion artifacts (offline/train_pricing_models.py)."""
-    return _run_script("offline/train_pricing_models.py", "--line", line)
-
-
-def run_validation(line: str) -> tuple[bool, str]:
-    """Step 2: produce validation/comparison metrics (scripts/validate_pricing_models.py)."""
-    return _run_script("scripts/validate_pricing_models.py")
-
-
 def run_smoothness_gate(line: str) -> tuple[bool, str]:
     """Step 4: validate local premium smoothness before candidate registration."""
     if line != "health":
@@ -194,33 +250,62 @@ def _expected_monotone(line: str) -> dict:
     return MONOTONE_VEHICLE if line in ("car", "motorbike") else MONOTONE_COMMON
 
 
-def run_monotonic_gate(line: str, models_dir: pathlib.Path = MODELS_DIR) -> tuple[bool, str]:
+def _gate_artifact_paths(models_dir: pathlib.Path, line: str) -> list[pathlib.Path]:
+    """Artifacts the gate must validate: the ones actually registered/served.
+
+    The lifecycle pipeline registers the ``freqsev`` family (freq + sev) by
+    default, so the gate must check THOSE artifacts, not a ``tw`` model that the
+    pipeline never serves. Prefer the freq+sev pair; fall back to a lone tw
+    artifact for lines/runs trained in the Tweedie family.
+    """
+    freq = models_dir / f"{line}__lgb_freq.joblib"
+    sev = models_dir / f"{line}__lgb_sev.joblib"
+    if freq.exists() and sev.exists():
+        return [freq, sev]
+    tw = models_dir / f"{line}__lgb_tw.joblib"
+    if tw.exists():
+        return [tw]
+    return []
+
+
+def run_monotonic_gate(line: str, models_dir: pathlib.Path = MODELS_DIR,
+                       algorithm: str = "lgb") -> tuple[bool, str]:
     """Step 3: BR-19 monotonic gate. MUST pass before a candidate is registered.
 
-    For monotonic-exempt GLM lines (e.g. travel) the gate passes by construction.
-    For all other lines the LightGBM Tweedie artifact must carry monotone_constraints
-    matching the design directions.
+    Exemption mirrors pricing/app/config.is_monotonic_exempt: it applies ONLY to
+    a GLM candidate on an exempt line. A tree/LightGBM candidate is NEVER exempt,
+    even on an exempt line, because its monotone directions are enforced via
+    monotone_constraints rather than at fit time. travel's champion is now lgb
+    freqsev (not a GLM), so a bare `line in MONOTONIC_EXEMPT_LINES` check would
+    wrongly skip the gate for a LightGBM travel candidate.
+
+    For every non-exempt line each LightGBM artifact that will be served (the
+    freq+sev pair, or a tw model) must carry monotone_constraints matching the
+    design directions.
     """
-    if line in MONOTONIC_EXEMPT_LINES:
+    algo = (algorithm or "").strip().lower()
+    is_glm = algo in ("glm", "tweedieregressor", "tweedie", "poissonregressor", "gamma")
+    if line in MONOTONIC_EXEMPT_LINES and is_glm:
         return True, "monotonic-exempt (GLM line)"
 
     import joblib
 
-    path = models_dir / f"{line}__lgb_tw.joblib"
-    if not path.exists():
-        return False, f"missing artifact {path.name}"
-    model = joblib.load(path)
-    mc = model.get_params().get("monotone_constraints")
-    if mc is None:
-        return False, f"{path.name} missing monotone_constraints"
-    feature_names = list(model.feature_name_)
-    if len(mc) != len(feature_names):
-        return False, f"{path.name} constraint/feature length mismatch"
-    actual = {f: c for f, c in zip(feature_names, mc) if c != 0}
+    paths = _gate_artifact_paths(models_dir, line)
+    if not paths:
+        return False, f"missing artifact {line}__lgb_freq/sev (or tw)"
     expected = _expected_monotone(line)
-    for feat, direction in expected.items():
-        if actual.get(feat) != direction:
-            return False, f"{path.name}: {feat} expected {direction}, got {actual.get(feat)}"
+    for path in paths:
+        model = joblib.load(path)
+        mc = model.get_params().get("monotone_constraints")
+        if mc is None:
+            return False, f"{path.name} missing monotone_constraints"
+        feature_names = list(model.feature_name_)
+        if len(mc) != len(feature_names):
+            return False, f"{path.name} constraint/feature length mismatch"
+        actual = {f: c for f, c in zip(feature_names, mc) if c != 0}
+        for feat, direction in expected.items():
+            if actual.get(feat) != direction:
+                return False, f"{path.name}: {feat} expected {direction}, got {actual.get(feat)}"
     return True, "ok"
 
 
@@ -234,60 +319,47 @@ def _get_db_connection():
     return psycopg2.connect(host=host, port=port, user=user, password=password, dbname=dbname)
 
 
-def _candidate_metadata(line: str) -> dict:
-    """Read line metadata (algorithm/gini/monotonic) from champion_config.json."""
-    cfg_path = MODELS_DIR / "champion_config.json"
-    try:
-        with open(cfg_path, encoding="utf-8") as f:
-            cfg = json.load(f)
-        return cfg.get("champion_by_line", {}).get(line, {})
-    except (OSError, json.JSONDecodeError):
-        return {}
+def _database_url_from_env() -> str:
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    host = os.environ.get("PRICING_DB_HOST", "localhost")
+    port = os.environ.get("PRICING_DB_PORT", "5440")
+    user = os.environ.get("POSTGRES_USER", "platform_user")
+    password = os.environ.get("POSTGRES_PASSWORD", "platform_password_dev_only")
+    dbname = os.environ.get("PRICING_DB_NAME", "pricing_db")
+    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
 
 
-def register_candidate(line: str) -> dict:
-    """Step 4: register a CANDIDATE Model_Version row. NEVER promotes.
+def run_lifecycle_pipeline(line: str) -> dict:
+    """Run the governed local/deploy-neutral lifecycle and register a candidate.
 
-    Inserts a new model_version row with a fresh (random) id so it does NOT
-    overwrite the deterministic champion id, and crucially does NOT insert or
-    update any champion_assignment row. Promotion remains an explicit, governed
-    Administrator action (BR-23). Returns a dict including the candidate id and
-    ``promoted=False``.
+    This replaces the legacy minimal candidate insert: the pipeline exports a
+    dataset, trains from that export, compares against the current champion, and
+    calls register_candidate_model.py semantics with full artifact/report lineage.
     """
-    meta = _candidate_metadata(line)
-    candidate_id = str(uuid.uuid4())
-    algorithm = "LightGBM" if meta.get("algorithm") == "lgb" else "GLM"
-    gini = float(meta.get("gini", 0.0) or 0.0)
-    monotonic_applied = bool(meta.get("monotonic_applied", False))
-    now = datetime.datetime.now(datetime.timezone.utc)
+    from offline.model_lifecycle_pipeline import run_pipeline
 
-    conn = _get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO model_version
-                (model_version_id, line, algorithm, gini, rmse, mae, deviance,
-                 trained_at, dataset_desc, monotonic_applied)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (candidate_id, line, algorithm, gini, 0.0, 0.0, 0.0, now,
-                 meta.get("dataset_desc", "synthetic_real"), monotonic_applied),
-            )
-            # NOTE: deliberately NO champion_assignment write here (no promotion).
-        conn.commit()
-    finally:
-        conn.close()
-
-    return {"candidate_model_version": candidate_id, "line": line, "promoted": False}
+    dataset_version_id = os.environ.get("RETRAIN_DATASET_VERSION_ID") or (
+        f"retrain-{line}-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    )
+    return run_pipeline(
+        line=line,
+        database_url=_database_url_from_env(),
+        dataset_version_id=dataset_version_id,
+        work_dir=pathlib.Path(os.environ.get("LIFECYCLE_WORK_DIR", "data/model_lifecycle_runs")),
+        object_storage_uri=os.environ.get("LIFECYCLE_OBJECT_STORAGE_URI"),
+        family=os.environ.get("LIFECYCLE_CANDIDATE_FAMILY", "freqsev"),
+    )
 
 
 def trigger_retrain(line: str, dry_run: bool = False) -> dict:
-    """Run the re-train cycle for a single line.
+    """Run the re-train cycle for a single line via the governed lifecycle pipeline.
 
-    Chain: train -> validate -> monotonic gate -> smoothness gate -> register
-    CANDIDATE. Stops at the first failing step. Both gates MUST pass before the
-    candidate is registered. NEVER promotes (promotion stays governed by BR-23).
+    Delegates to run_lifecycle_pipeline, which chains export -> train -> compare
+    -> monotonic gate -> smoothness gate -> register CANDIDATE in one process and
+    aborts at the first failing step (both gates + the champion comparison MUST
+    pass before register_candidate_model writes the row). NEVER promotes
+    (promotion stays governed by BR-23).
 
     Returns a dict with line, status, steps completed, the candidate id (if any),
     and ``promoted`` (always False).
@@ -299,37 +371,15 @@ def trigger_retrain(line: str, dry_run: bool = False) -> dict:
         result["status"] = "dry_run"
         return result
 
-    ok, err = run_training(line)
-    result["steps"].append("train")
-    if not ok:
+    try:
+        candidate = run_lifecycle_pipeline(line)
+    except Exception as exc:  # noqa: BLE001 - lifecycle failures are surfaced as trigger failures
+        result["steps"].append("lifecycle_pipeline")
         result["status"] = "failed"
-        result["error"] = f"train failed: {err}"
+        result["error"] = f"lifecycle pipeline failed: {exc}"
         return result
 
-    ok, err = run_validation(line)
-    result["steps"].append("validate")
-    if not ok:
-        result["status"] = "failed"
-        result["error"] = f"validate failed: {err}"
-        return result
-
-    ok, gate_msg = run_monotonic_gate(line)
-    result["steps"].append("monotonic_gate")
-    if not ok:
-        # Gate failed -> abort BEFORE registering anything (BR-19).
-        result["status"] = "gate_failed"
-        result["error"] = f"monotonic gate failed: {gate_msg}"
-        return result
-
-    ok, gate_msg = run_smoothness_gate(line)
-    result["steps"].append("smoothness_gate")
-    if not ok:
-        result["status"] = "gate_failed"
-        result["error"] = f"smoothness gate failed: {gate_msg}"
-        return result
-
-    candidate = register_candidate(line)
-    result["steps"].append("register_candidate")
+    result["steps"].append("lifecycle_pipeline")
     result["candidate_model_version"] = candidate["candidate_model_version"]
     result["promoted"] = False
     result["status"] = "candidate_registered"
@@ -354,12 +404,14 @@ def main():
         lines_to_check = []
         seen = set()
 
-        if is_scheduled(config):
-            print("Scheduled trigger: quarterly retrain for all lines.")
-            for line in LINES:
-                if line not in seen:
-                    lines_to_check.append(line)
-                    seen.add(line)
+        # Quarterly schedule fires once per quarter even though the external
+        # cron runs daily: scheduled_lines_needing_retrain drops lines already
+        # retrained since the quarter started.
+        for line in scheduled_lines_needing_retrain(config):
+            if line not in seen:
+                print(f"Scheduled trigger: quarterly retrain for {line}")
+                lines_to_check.append(line)
+                seen.add(line)
 
         threshold_lines = lines_exceeding_threshold(config)
         for line in threshold_lines:

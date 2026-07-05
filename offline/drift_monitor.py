@@ -34,6 +34,26 @@ CONFIG_PATH = ROOT / "offline" / "retrain_config.json"
 LINES = ["health", "motorbike", "car", "home", "accident", "travel"]
 
 
+def _connect():
+    """Open a psycopg2 connection to pricing_db from the standard env vars.
+
+    Shared by the load/persist helpers. Connection failures propagate to the
+    caller — drift readers must NOT swallow them, or a broken DB reads as PSI
+    0.0 = "no drift" and masks a real outage as a clean bill of health.
+    """
+    import os
+
+    import psycopg2
+
+    return psycopg2.connect(
+        host=os.environ.get("PRICING_DB_HOST", "localhost"),
+        port=os.environ.get("PRICING_DB_PORT", "5440"),
+        user=os.environ.get("POSTGRES_USER", "platform_user"),
+        password=os.environ.get("POSTGRES_PASSWORD", "platform_password_dev_only"),
+        dbname=os.environ.get("PRICING_DB_NAME", "pricing_db"),
+    )
+
+
 def load_config() -> dict:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         return json.load(f)
@@ -277,95 +297,76 @@ def load_baseline(line: str) -> dict | None:
 def load_current_quotes(line: str, window_days: int) -> list[dict]:
     """Load recent quotes from pricing_db for a line within the window.
 
-    Returns list of dicts with feature columns + pure_premium_vnd.
+    Returns list of dicts with feature columns + pure_premium_vnd. A genuinely
+    empty read-model returns []; connection/query FAILURES propagate rather than
+    being swallowed as [], because an empty list reads downstream as PSI 0.0 =
+    "no drift" and would silently mask a broken DB as a clean bill of health.
     """
+    conn = _connect()
     try:
-        import psycopg2
-        import os
-
-        host = os.environ.get("PRICING_DB_HOST", "localhost")
-        port = os.environ.get("PRICING_DB_PORT", "5440")
-        user = os.environ.get("POSTGRES_USER", "platform_user")
-        password = os.environ.get("POSTGRES_PASSWORD", "platform_password_dev_only")
-        dbname = os.environ.get("PRICING_DB_NAME", "pricing_db")
-
-        conn = psycopg2.connect(host=host, port=port, user=user, password=password, dbname=dbname)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT quote_id, line, profile, pure_premium_vnd, created_at
-                    FROM quote
-                    WHERE line = %s
-                      AND created_at >= NOW() - INTERVAL '%s days'
-                    ORDER BY created_at DESC
-                    """,
-                    (line, window_days),
-                )
-                rows = cur.fetchall()
-                result = []
-                for row in rows:
-                    entry = {"quote_id": str(row[0]), "line": row[1], "pure_premium_vnd": row[3]}
-                    profile = row[2] if row[2] else {}
-                    if isinstance(profile, str):
-                        try:
-                            profile = json.loads(profile)
-                        except (json.JSONDecodeError, TypeError):
-                            profile = {}
-                    if isinstance(profile, dict):
-                        entry.update(profile)
-                    result.append(entry)
-                return result
-        finally:
-            conn.close()
-    except Exception:
-        return []
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT quote_id, line, profile, pure_premium_vnd, created_at
+                FROM quote
+                WHERE line = %s
+                  AND created_at >= NOW() - INTERVAL '%s days'
+                ORDER BY created_at DESC
+                """,
+                (line, window_days),
+            )
+            rows = cur.fetchall()
+            result = []
+            for row in rows:
+                entry = {"quote_id": str(row[0]), "line": row[1], "pure_premium_vnd": row[3]}
+                profile = row[2] if row[2] else {}
+                if isinstance(profile, str):
+                    try:
+                        profile = json.loads(profile)
+                    except (json.JSONDecodeError, TypeError):
+                        profile = {}
+                if isinstance(profile, dict):
+                    entry.update(profile)
+                result.append(entry)
+            return result
+    finally:
+        conn.close()
 
 
 def load_outcomes(line: str, window_days: int) -> list[dict]:
     """Load claim outcomes joined with quote predictions for calibration drift.
 
-    Returns list of dicts with quote_id, actual_loss_vnd, pure_premium_vnd.
+    Returns list of dicts with quote_id, actual_loss_vnd, pure_premium_vnd. Like
+    load_current_quotes, DB failures propagate instead of collapsing to [] so a
+    broken connection is never mistaken for "no calibration drift".
     """
+    conn = _connect()
     try:
-        import psycopg2
-        import os
-
-        host = os.environ.get("PRICING_DB_HOST", "localhost")
-        port = os.environ.get("PRICING_DB_PORT", "5440")
-        user = os.environ.get("POSTGRES_USER", "platform_user")
-        password = os.environ.get("POSTGRES_PASSWORD", "platform_password_dev_only")
-        dbname = os.environ.get("PRICING_DB_NAME", "pricing_db")
-
-        conn = psycopg2.connect(host=host, port=port, user=user, password=password, dbname=dbname)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT co.claim_id, co.quote_id, co.actual_loss_vnd,
-                           q.pure_premium_vnd, co.settled_at
-                    FROM claim_outcome co
-                    LEFT JOIN quote q ON co.quote_id = q.quote_id
-                    WHERE COALESCE(q.line, co.line) = %s
-                      AND co.settled_at >= NOW() - INTERVAL '%s days'
-                    ORDER BY co.settled_at DESC
-                    """,
-                    (line, window_days),
-                )
-                rows = cur.fetchall()
-                result = []
-                for row in rows:
-                    result.append({
-                        "claim_id": str(row[0]),
-                        "quote_id": str(row[1]) if row[1] else None,
-                        "actual_loss_vnd": row[2],
-                        "pure_premium_vnd": row[3] if row[3] else 0,
-                    })
-                return result
-        finally:
-            conn.close()
-    except Exception:
-        return []
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT co.claim_id, co.quote_id, co.actual_loss_vnd,
+                       q.pure_premium_vnd, co.settled_at
+                FROM claim_outcome co
+                LEFT JOIN quote q ON co.quote_id = q.quote_id
+                WHERE COALESCE(q.line, co.line) = %s
+                  AND co.settled_at >= NOW() - INTERVAL '%s days'
+                ORDER BY co.settled_at DESC
+                """,
+                (line, window_days),
+            )
+            rows = cur.fetchall()
+            result = []
+            for row in rows:
+                result.append({
+                    "claim_id": str(row[0]),
+                    "quote_id": str(row[1]) if row[1] else None,
+                    "actual_loss_vnd": row[2],
+                    "pure_premium_vnd": row[3] if row[3] else 0,
+                })
+            return result
+    finally:
+        conn.close()
 
 
 def evaluate_line(line: str, config: dict,
@@ -439,16 +440,7 @@ def persist_flags(results: list[dict]):
 
     Now persists 3 metrics per line: feature_psi, prediction_psi, calibration.
     """
-    import psycopg2
-    import os
-
-    host = os.environ.get("PRICING_DB_HOST", "localhost")
-    port = os.environ.get("PRICING_DB_PORT", "5440")
-    user = os.environ.get("POSTGRES_USER", "platform_user")
-    password = os.environ.get("POSTGRES_PASSWORD", "platform_password_dev_only")
-    dbname = os.environ.get("PRICING_DB_NAME", "pricing_db")
-
-    conn = psycopg2.connect(host=host, port=port, user=user, password=password, dbname=dbname)
+    conn = _connect()
     try:
         with conn.cursor() as cur:
             for r in results:

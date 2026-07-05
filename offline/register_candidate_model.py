@@ -10,6 +10,8 @@ import subprocess
 import sys
 import uuid
 
+import joblib
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PRICING_DIR = ROOT / "pricing"
 if str(ROOT) not in sys.path:
@@ -46,12 +48,25 @@ def _load_json(path: pathlib.Path) -> dict:
         return json.load(handle)
 
 
+def _feature_columns_from_artifacts(paths: list[pathlib.Path]) -> list[str]:
+    columns: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        model = joblib.load(path)
+        for column in list(getattr(model, "feature_name_", []) or []):
+            name = str(column)
+            if name not in seen:
+                seen.add(name)
+                columns.append(name)
+    return columns
+
+
 def _candidate_id(line: str, dataset_version_id: str, artifact_checksum: str, comparison_report_uri: str) -> str:
     key = f"candidate:{line}:{dataset_version_id}:{artifact_checksum}:{comparison_report_uri}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
 
 
-def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str, comparison_report_uri: str, validation_report_uri: str, fairness_report_uri: str | None, monotonic_passed: bool, smoothness_passed: bool, registered_by: str) -> dict:
+def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str, comparison_report_uri: str, monotonic_passed: bool, smoothness_passed: bool, registered_by: str, validation_report_uri: str | None = None, fairness_report_uri: str | None = None) -> dict:
     session = SessionLocal()
     try:
         dataset = session.query(TrainingDatasetVersion).filter(TrainingDatasetVersion.dataset_version_id == dataset_version_id).first()
@@ -61,11 +76,11 @@ def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str,
         artifact_uris = _artifact_uris(artifact_uri)
         artifact_paths = [materialize(uri) for uri in artifact_uris]
         comparison_path = materialize(comparison_report_uri)
-        validation_path = materialize(validation_report_uri)
+        validation_path = materialize(validation_report_uri) if validation_report_uri else None
         fairness_path = materialize(fairness_report_uri) if fairness_report_uri else None
         if not artifact_paths:
             raise FileNotFoundError("No artifact paths provided")
-        for required in [*artifact_paths, comparison_path, validation_path]:
+        for required in [*artifact_paths, comparison_path, *([validation_path] if validation_path else [])]:
             if not required.exists():
                 raise FileNotFoundError(required)
         if fairness_path and not fairness_path.exists():
@@ -75,7 +90,11 @@ def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str,
         if not comparison_report.get("passed"):
             raise ValueError("Comparison report did not pass")
 
-        validation_report = _load_json(validation_path)
+        validation_report = _load_json(validation_path) if validation_path else {
+            "source": "model_artifacts",
+        }
+        if not validation_report.get("feature_columns"):
+            validation_report["feature_columns"] = _feature_columns_from_artifacts(artifact_paths)
         quality_gates = {
             "comparison_passed": True,
             "monotonic_passed": bool(monotonic_passed),
@@ -106,7 +125,7 @@ def register_candidate(*, line: str, dataset_version_id: str, artifact_uri: str,
         model.artifact_checksum = artifact_checksum
         model.feature_schema_hash = hashlib.sha256(json.dumps(validation_report.get("feature_columns", []), sort_keys=True).encode("utf-8")).hexdigest()
         model.comparison_report_uri = comparison_report_uri
-        model.validation_report_uri = validation_report_uri
+        model.validation_report_uri = validation_report_uri if validation_report_uri else None
         model.fairness_report_uri = fairness_report_uri if fairness_report_uri else None
         model.registered_at = now
         model.registered_by = registered_by
@@ -145,7 +164,7 @@ def main() -> None:
     parser.add_argument("--dataset-version-id", required=True)
     parser.add_argument("--artifact-uri", required=True)
     parser.add_argument("--comparison-report-uri", required=True)
-    parser.add_argument("--validation-report-uri", required=True)
+    parser.add_argument("--validation-report-uri")
     parser.add_argument("--fairness-report-uri")
     parser.add_argument("--registered-by", default="offline-trigger")
     parser.add_argument("--monotonic-passed", action="store_true")
