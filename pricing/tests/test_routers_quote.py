@@ -9,6 +9,7 @@ from httpx import AsyncClient, ASGITransport
 from fastapi import FastAPI
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db, Quote, CustomerRiskProfile, QuoteReadyProfile, EventOutbox
 from app.routers import quote as quote_router
@@ -21,7 +22,15 @@ pytestmark = skip_if_no_artifacts
 
 @pytest.fixture
 def db_session():
-    engine = create_engine("sqlite:///:memory:")
+    # StaticPool + check_same_thread=False: the router runs _do_quote in a
+    # threadpool, so the worker thread must share the SAME in-memory connection
+    # the fixture seeded. A plain sqlite:///:memory: engine gives each thread its
+    # own empty DB, so the worker sees "no such table: event_outbox".
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()

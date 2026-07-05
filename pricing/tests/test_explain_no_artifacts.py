@@ -210,13 +210,13 @@ class FakeGLMEstimator:
 def test_explain_with_linear_model():
     class FakePipeline:
         named_steps = {
-            "prep": MagicMock(transformers=[("num", "passthrough", ["age", "bmi", "income"])]),
+            "prep": MagicMock(transformers=[("num", "passthrough", ["age", "bmi", "smoker"])]),
             "est": FakeGLMEstimator(),
         }
 
     mock_model = FakePipeline()
 
-    feature_df = pd.DataFrame({"age": [30], "bmi": [22.5], "income": [50]})
+    feature_df = pd.DataFrame({"age": [30], "bmi": [22.5], "smoker": [1]})
 
     mock_linear_explainer = MagicMock()
     mock_linear_explainer.shap_values.return_value = np.array([[0.1, -0.2, 0.05]])
@@ -232,7 +232,7 @@ def test_explain_with_linear_model():
 
 class FakeGenericModel:
     """Fake model with no tree/linear attributes to trigger fallback perturbation."""
-    feature_name_ = ["age", "bmi", "income"]
+    feature_name_ = ["age", "bmi", "smoker"]
 
     def predict(self, df):
         return np.array([500_000.0])
@@ -241,7 +241,7 @@ class FakeGenericModel:
 def test_explain_fallback_perturbation():
     mock_model = FakeGenericModel()
 
-    feature_df = pd.DataFrame({"age": [30], "bmi": [22.5], "income": [50]})
+    feature_df = pd.DataFrame({"age": [30], "bmi": [22.5], "smoker": [1]})
 
     fake_shap = sys.modules["shap"]
     with patch("app.pricing_engine.explain._get_tree_explainer", side_effect=Exception("no tree")), \
@@ -264,9 +264,9 @@ def test_explain_exception_returns_unavailable():
 
 def test_explain_3d_shap_values():
     mock_model = FakeLGBMRegressor()
-    mock_model.feature_name_ = ["age", "bmi", "income"]
+    mock_model.feature_name_ = ["age", "bmi", "smoker"]
 
-    feature_df = pd.DataFrame({"age": [30], "bmi": [22.5], "income": [50]})
+    feature_df = pd.DataFrame({"age": [30], "bmi": [22.5], "smoker": [1]})
 
     mock_explainer = MagicMock()
     mock_explainer.shap_values.return_value = np.array([[[0.1], [-0.2], [0.05]]])

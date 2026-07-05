@@ -85,7 +85,13 @@ def test_property7_shap_structure(age, province, smoker):
             assert "feature" in it and "label" in it
             assert "label_vi" not in it
             assert it["direction"] in ("increase", "decrease")
-            assert it["magnitude"] >= 0
+            # magnitude is now a signed premium fraction (exp(shap)-1), clamped
+            # to +/-3.0, and its sign must agree with the reported direction.
+            assert -3.0 <= it["magnitude"] <= 3.0
+            if it["direction"] == "increase":
+                assert it["magnitude"] >= 0
+            else:
+                assert it["magnitude"] <= 0
     else:
         # graceful degradation: quote still valid
         assert r["pure_premium_vnd"] >= 0

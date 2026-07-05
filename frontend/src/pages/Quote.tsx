@@ -169,6 +169,7 @@ function QuoteHero({ result, onOrder, ordering }: { result: QuoteResult; onOrder
               <span><span className="legend-dot" style={{ background: 'var(--terra)' }} />Increases premium</span>
               <span><span className="legend-dot" style={{ background: '#2FB89E' }} />Decreases premium</span>
             </div>
+            <p className="field-hint" style={{ marginTop: 8 }}>So với mức trung bình của danh mục khách hàng.</p>
           </>
         ) : fallbackExpl ? (
           <ExplanationBlock title="Quote drivers" explanation={fallbackExpl} />
@@ -199,8 +200,13 @@ function QuoteHero({ result, onOrder, ordering }: { result: QuoteResult; onOrder
 }
 
 function ExplanationBlock({ title, explanation }: { title: string; explanation: Explanation }) {
-  const items = explanation?.available ? [...(explanation.items || [])].sort((a, b) => b.magnitude - a.magnitude).slice(0, 6) : [];
-  const maxMag = items.reduce((m, it) => Math.max(m, it.magnitude), 0) || 1;
+  // magnitude is a signed fraction (0.32 == +32%, -0.18 == -18%): the feature's
+  // multiplicative effect on this component vs the portfolio average. Rank and
+  // size bars by absolute effect; the sign/direction drives colour and label.
+  const items = explanation?.available
+    ? [...(explanation.items || [])].sort((a, b) => Math.abs(b.magnitude) - Math.abs(a.magnitude)).slice(0, 6)
+    : [];
+  const maxMag = items.reduce((m, it) => Math.max(m, Math.abs(it.magnitude)), 0) || 1;
   if (!items.length) return null;
   return (
     <div className="decomp" style={{ marginTop: 18 }}>
@@ -212,10 +218,10 @@ function ExplanationBlock({ title, explanation }: { title: string; explanation: 
             <span className="decomp-mid" />
             <span
               className={'decomp-fill ' + (it.direction === 'increase' ? 'up' : 'down')}
-              style={{ width: `${Math.max(4, (it.magnitude / maxMag) * 48)}%` }}
+              style={{ width: `${Math.max(4, (Math.abs(it.magnitude) / maxMag) * 48)}%` }}
             />
           </div>
-          <span className="decomp-mag">{it.direction === 'increase' ? '+' : '-'}{it.magnitude.toFixed(2)}</span>
+          <span className="decomp-mag">{it.direction === 'increase' ? '+' : '−'}{Math.round(Math.abs(it.magnitude) * 100)}%</span>
         </div>
       ))}
     </div>

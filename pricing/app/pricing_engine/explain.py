@@ -9,10 +9,104 @@ Requirements: R5.1, R5.2, R5.4, R5.6 (design 3.3).
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 
 _EXPLAINER_CACHE: dict = {}
+
+# Cap the displayed magnitude at +/-300%. A large SHAP margin (e.g. 2.0) maps to
+# exp(2)-1 = +639%, which reads as noise to a customer; the cap is presentation
+# only and never changes the underlying prediction or ordering.
+_PCT_CAP = 3.0
+
+# Internal / engineered features never surfaced to the customer: monotonic
+# buckets that duplicate a raw field, pricing internals, height/weight (BMI is
+# shown instead), and tenure signals.
+_HIDDEN_FEATURES = frozenset({
+    "age_bucket", "bmi_bucket", "disease_risk_level",
+    "age_disease_bucket", "bmi_disease_bucket",
+    "base_premium_vnd", "admin_fee_vnd", "product_id",
+    "height_cm", "weight_kg",
+    "renewal_number", "years_since_first_policy", "is_renewal", "policy_count_prior",
+})
+
+# Two aggregate rows. Members are summed in SHAP (log-margin) space *before*
+# converting to a percentage, because exp() is non-linear and per-feature
+# percentages are not additive.
+_CLAIMS_HISTORY_KEY = "claims_history"
+_REGIONAL_RISK_KEY = "regional_risk"
+
+# Allow-list of individual features shown to the customer: base demographics,
+# the monetary product terms, and every field the customer actually entered
+# (the union of the frontend LINE_FIELDS keys across all six lines). Anything
+# not here is either folded into an aggregate row (claims history / regional
+# risk) or hidden, so a newly engineered model feature never leaks by default.
+_ALLOWED_FEATURES = frozenset({
+    # base demographics
+    "age", "gender", "province", "region", "urban_tier",
+    "occupation", "income_level", "marital_status",
+    # monetary product terms
+    "coverage_amount_vnd", "deductible_vnd",
+    # health
+    "bmi", "smoker", "chronic_disease", "diabetes", "blood_pressure_problem",
+    "major_surgeries_count", "hospitalized_last_12m", "medical_visit_count_12m",
+    # motorbike / car
+    "vehicle_brand", "vehicle_model", "vehicle_segment", "vehicle_age",
+    "vehicle_value_vnd", "engine_capacity_cc", "driving_experience_years",
+    "annual_mileage_km", "traffic_violation_count_12m", "parking_location",
+    "anti_theft_device", "primary_use", "driver_count", "garage_repair_option",
+    "loan_or_leasing_flag",
+    # home
+    "property_type", "floor_area_m2", "number_of_floors", "building_age",
+    "construction_type", "roof_type", "flood_risk_zone", "fire_protection",
+    "has_fire_alarm", "has_sprinkler", "security_system", "declared_property_value_vnd",
+    # accident
+    "occupation_class", "workplace_risk_level", "commute_mode", "commute_distance_km",
+    "sport_activity_flag", "sport_risk_level", "hazardous_activity_exclusion_flag",
+    # travel
+    "domestic_or_international", "destination_region", "destination_country",
+    "trip_duration_days", "traveler_count", "trip_cost_vnd", "travel_purpose",
+    "has_baggage_cover", "has_trip_cancellation_cover",
+})
+
+
+def _group_for(name: str) -> str | None:
+    """Return the aggregate-group key for a raw feature, or None to show it alone.
+
+    Precedence matters: prior-claim signals (``*_prior``) are claims history even
+    when their name also ends in ``_score``; everything else ending in ``_index``
+    / ``_score`` (geo risk + cost/inflation indices, derived server-side from
+    province and date) collapses into regional risk.
+    """
+    if name.endswith("_prior"):
+        return _CLAIMS_HISTORY_KEY
+    if name.endswith("_index") or name.endswith("_score") or name == "distance_to_river_km":
+        return _REGIONAL_RISK_KEY
+    return None
+
+
+# Claim-count columns that signal whether the customer has any prior claims.
+# When all are zero the "prior claims history" row only reflects the neutral
+# point-in-time defaults, so it is hidden to avoid confusing a first-time
+# customer with a "prior claims" line they never earned.
+_CLAIM_COUNT_FEATURES = (
+    "claim_count_lifetime_prior",
+    "claim_count_36m_prior",
+    "claim_count_12m_prior",
+)
+
+
+def _has_prior_claims(feature_df: "pd.DataFrame") -> bool:
+    for col in _CLAIM_COUNT_FEATURES:
+        if col in feature_df.columns:
+            try:
+                if float(feature_df.iloc[0][col]) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
 
 
 def _get_tree_explainer(est):
@@ -45,11 +139,29 @@ LABEL_EN = {
     "floor_area_m2": "Floor area",
     "occupation_class": "Occupation class",
     "sport_risk_level": "Sport risk level",
+    _CLAIMS_HISTORY_KEY: "Prior claims history",
+    _REGIONAL_RISK_KEY: "Regional risk",
 }
 
 
 def _direction(magnitude: float) -> str:
     return "increase" if magnitude >= 0 else "decrease"
+
+
+def _to_pct(signed: float, method: str, base: float | None) -> float:
+    """Convert a signed model-space contribution to a signed premium fraction.
+
+    freq/sev/tweedie all use a log link, so tree/linear SHAP live in log-margin
+    space and ``exp(shap) - 1`` is the exact multiplicative effect on that
+    component (+0.32 == +32%). The perturbation fallback already produces a
+    response-space delta, so it is normalised against the base prediction
+    instead of exponentiated. Result is clamped to +/-_PCT_CAP for display.
+    """
+    if method == "perturbation_fallback":
+        pct = signed / base if base else 0.0
+    else:
+        pct = math.exp(signed) - 1.0
+    return max(-_PCT_CAP, min(_PCT_CAP, pct))
 
 
 def _select_explanation_model(model):
@@ -133,19 +245,40 @@ def _explain_selected_model(model, feature_df: "pd.DataFrame", method_prefix: st
             arr = arr[:, :, 0]
         if arr.ndim == 2:
             arr = arr[0]
-        contributions = list(zip(feature_names, arr.tolist()))
-        # Sort by absolute magnitude descending; keep available features only.
+
+        # Keep the raw *signed* SHAP so groups can be summed in log-margin space
+        # before the percentage conversion (per-feature percentages don't add).
         excluded = excluded_features or frozenset()
-        contributions = [(n, v) for n, v in contributions if n in feature_df.columns and n not in excluded]
+        singles: list[tuple[str, float]] = []
+        group_sums: dict[str, float] = {}
+        for name, signed in zip(feature_names, arr.tolist()):
+            if name not in feature_df.columns or name in excluded or name in _HIDDEN_FEATURES:
+                continue
+            signed = float(signed)
+            group = _group_for(name)
+            if group is not None:
+                group_sums[group] = group_sums.get(group, 0.0) + signed
+            elif name in _ALLOWED_FEATURES:
+                singles.append((name, signed))
+            # Not allowed and not grouped -> hidden (never leaked to the customer).
+
+        # A customer with no prior claims only carries the neutral history
+        # defaults, so drop the aggregate row rather than show "prior claims".
+        if not _has_prior_claims(feature_df):
+            group_sums.pop(_CLAIMS_HISTORY_KEY, None)
+
+        base = float(est.predict(feature_df)[0]) if method == "perturbation_fallback" else None
+        contributions = singles + list(group_sums.items())
         contributions.sort(key=lambda kv: abs(kv[1]), reverse=True)
 
         items = []
-        for name, magnitude in contributions[:10]:
+        for name, signed in contributions[:10]:
+            pct = _to_pct(signed, method, base)
             items.append({
                 "feature": name,
                 "label": LABEL_EN.get(name, name),
-                "direction": _direction(float(magnitude)),
-                "magnitude": abs(float(magnitude)),
+                "direction": _direction(signed),
+                "magnitude": pct,
             })
         if len(items) < 3:
             return _unavailable(_method_name(method_prefix, method))
