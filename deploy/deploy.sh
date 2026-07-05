@@ -10,6 +10,15 @@ cd "$(dirname "$0")/.."
 set -a; . deploy/config.env; set +a
 K="kubectl --namespace $NAMESPACE"
 log() { echo -e "\n\033[1;36m== $* ==\033[0m"; }
+require_secret() {
+  local name="$1" value
+  value="$(sm "$name")"
+  if [[ -z "$value" || "$value" == *PLACEHOLDER* ]]; then
+    echo "Secret Manager value '$name' is missing or still a placeholder." >&2
+    exit 1
+  fi
+  printf '%s' "$value"
+}
 
 log "Fetch cluster credentials (static-token kubeconfig; avoids gke-gcloud-auth-plugin)"
 bash deploy/kubeconfig.sh
@@ -38,8 +47,8 @@ $K create secret generic dpp-secrets \
   --from-literal=rabbitmq-password="$(sm rabbitmq-password)" \
   --from-literal=keycloak-admin="$(sm keycloak-admin)" \
   --from-literal=keycloak-admin-password="$(sm keycloak-admin-password)" \
-  --from-literal=vnp-tmn-code="$(sm vnp-tmn-code 2>/dev/null || echo '')" \
-  --from-literal=vnp-hash-secret="$(sm vnp-hash-secret 2>/dev/null || echo '')" \
+  --from-literal=vnp-tmn-code="$(require_secret vnp-tmn-code)" \
+  --from-literal=vnp-hash-secret="$(require_secret vnp-hash-secret)" \
   --dry-run=client -o yaml | $K apply -f -
 
 log "Infra: RabbitMQ + Keycloak"

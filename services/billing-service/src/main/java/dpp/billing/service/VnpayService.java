@@ -58,9 +58,9 @@ public class VnpayService {
                     "Invoice is not in a payable state", Map.of("status", invoice.getStatus().name()));
         }
 
-        // Fail gracefully (503) instead of a raw 500 when the VNPAY merchant
-        // credentials are not configured (VNP_TMN_CODE / VNP_HASH_SECRET unset).
-        if (isBlank(vnpayConfig.getTmnCode()) || isBlank(vnpayConfig.getHashSecret())) {
+        // Fail gracefully (503) instead of redirecting customers to VNPAY with
+        // missing or provisioning-placeholder merchant credentials.
+        if (isInvalidCredential(vnpayConfig.getTmnCode()) || isInvalidCredential(vnpayConfig.getHashSecret())) {
             throw new ServiceException(ErrorCode.SERVICE_UNAVAILABLE,
                     "VNPAY merchant credentials are not configured", null);
         }
@@ -106,8 +106,11 @@ public class VnpayService {
         return result;
     }
 
-    private static boolean isBlank(String s) {
-        return s == null || s.isBlank();
+    private static boolean isInvalidCredential(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        return value.toUpperCase().contains("PLACEHOLDER");
     }
 
     /**

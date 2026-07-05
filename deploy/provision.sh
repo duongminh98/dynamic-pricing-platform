@@ -9,6 +9,13 @@ cd "$(dirname "$0")/.."
 set -a; . deploy/config.env; set +a
 
 log() { echo -e "\n\033[1;36m== $* ==\033[0m"; }
+require_non_placeholder() {
+  local name="$1" value="$2"
+  if [[ -z "$value" || "$value" == *PLACEHOLDER* ]]; then
+    echo "Missing required secret value: $name. Export $name before running provision.sh." >&2
+    exit 1
+  fi
+}
 
 log "APIs"
 gcloud services enable \
@@ -81,8 +88,10 @@ put_secret db-password "$DB_PASS"
 put_secret rabbitmq-password "$RABBIT_PASS"
 put_secret keycloak-admin admin
 put_secret keycloak-admin-password "$KC_ADMIN_PASS"
-put_secret vnp-tmn-code "${VNP_TMN_CODE:-SANDBOXPLACEHOLDER}"
-put_secret vnp-hash-secret "${VNP_HASH_SECRET:-SANDBOXHASHSECRETPLACEHOLDER}"
+require_non_placeholder VNP_TMN_CODE "${VNP_TMN_CODE:-}"
+require_non_placeholder VNP_HASH_SECRET "${VNP_HASH_SECRET:-}"
+put_secret vnp-tmn-code "$VNP_TMN_CODE"
+put_secret vnp-hash-secret "$VNP_HASH_SECRET"
 
 log "Service accounts + IAM (Workload Identity)"
 declare -a SVCS=(customer-service product-service order-service claims-service billing-service notification-service)
