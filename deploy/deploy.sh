@@ -38,6 +38,13 @@ $K create configmap rabbitmq-definitions \
   --from-file=enabled_plugins=infra/rabbitmq/enabled_plugins \
   --dry-run=client -o yaml | $K apply -f -
 $K create configmap keycloak-realm        --from-file=realm-export.json=infra/keycloak/realm-export.json --dry-run=client -o yaml | $K apply -f -
+# Observability: Prometheus scrape config (GKE variant, in-cluster DNS targets)
+# + Grafana provisioning (datasource + dashboard provider) + the dashboard JSON.
+# Same infra/ sources as compose, so local and GKE share one dashboard.
+$K create configmap prometheus-config          --from-file=prometheus.yml=infra/prometheus/prometheus.gke.yml                        --dry-run=client -o yaml | $K apply -f -
+$K create configmap grafana-datasources        --from-file=prometheus.yml=infra/grafana/provisioning/datasources/prometheus.yml     --dry-run=client -o yaml | $K apply -f -
+$K create configmap grafana-dashboard-provider --from-file=dashboards.yml=infra/grafana/provisioning/dashboards/dashboards.yml       --dry-run=client -o yaml | $K apply -f -
+$K create configmap grafana-dashboards         --from-file=dpp-overview.json=infra/grafana/dashboards/dpp-overview.json              --dry-run=client -o yaml | $K apply -f -
 
 # The k8s Secret is synced from Secret Manager (provision.sh created the secrets).
 log "Sync dpp-secrets from Secret Manager"
@@ -47,6 +54,7 @@ $K create secret generic dpp-secrets \
   --from-literal=rabbitmq-password="$(sm rabbitmq-password)" \
   --from-literal=keycloak-admin="$(sm keycloak-admin)" \
   --from-literal=keycloak-admin-password="$(sm keycloak-admin-password)" \
+  --from-literal=grafana-admin-password="$(sm grafana-admin-password)" \
   --from-literal=vnp-tmn-code="$(require_secret vnp-tmn-code)" \
   --from-literal=vnp-hash-secret="$(require_secret vnp-hash-secret)" \
   --dry-run=client -o yaml | $K apply -f -
@@ -98,14 +106,20 @@ kubectl apply -f deploy/k8s/30-edge.yaml
 $K rollout status deployment/kong --timeout=300s
 $K rollout status deployment/frontend --timeout=180s
 
+log "Observability: Prometheus (private) + Grafana (public via ingress)"
+kubectl apply -f deploy/k8s/40-observability.yaml
+$K rollout status deployment/prometheus --timeout=180s
+$K rollout status deployment/grafana --timeout=180s
+
 log "DNS A records (point hosts at the ingress LB IPs so the managed certs can validate)"
 # Both ingresses only get their LB IP after the edge rollout, so the records are
 # created here, not in provision.sh. Idempotent: replace the record set if it exists.
-API_IP=""; AUTH_IP=""
+API_IP=""; AUTH_IP=""; GRAFANA_IP=""
 for _ in $(seq 1 30); do
-  API_IP="$($K get ingress dpp-ingress      -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
-  AUTH_IP="$($K get ingress dpp-auth-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
-  [ -n "$API_IP" ] && [ -n "$AUTH_IP" ] && break
+  API_IP="$($K get ingress dpp-ingress         -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+  AUTH_IP="$($K get ingress dpp-auth-ingress    -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+  GRAFANA_IP="$($K get ingress dpp-grafana-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+  [ -n "$API_IP" ] && [ -n "$AUTH_IP" ] && [ -n "$GRAFANA_IP" ] && break
   echo "waiting for ingress LB IPs..."; sleep 20
 done
 upsert_a() { # host ip
@@ -115,9 +129,10 @@ upsert_a() { # host ip
   gcloud dns record-sets update "$host." --type=A --ttl=300 --rrdatas="$ip" \
     --zone="$DNS_ZONE" --project "$PROJECT_ID"
 }
-upsert_a "$API_HOST"  "$API_IP"
-upsert_a "$APP_HOST"  "$API_IP"
-upsert_a "$AUTH_HOST" "$AUTH_IP"
+upsert_a "$API_HOST"     "$API_IP"
+upsert_a "$APP_HOST"     "$API_IP"
+upsert_a "$AUTH_HOST"    "$AUTH_IP"
+upsert_a "$GRAFANA_HOST" "$GRAFANA_IP"
 
-log "Done. api/app -> $API_IP, auth -> $AUTH_IP"
+log "Done. api/app -> $API_IP, auth -> $AUTH_IP, grafana -> $GRAFANA_IP"
 echo "Managed certs take 10-60m to go ACTIVE after DNS resolves. Then run deploy/smoke.sh."

@@ -7,7 +7,7 @@ metadata:
   namespace: dpp
   labels: {app: pricing-service, tier: backend}
 spec:
-  replicas: 1
+  replicas: 3
   selector: {matchLabels: {app: pricing-service}}
   template:
     metadata:
@@ -57,6 +57,12 @@ spec:
           value: "/reports/modeling/models"
         - name: MODEL_ARTIFACT_CACHE_DIR
           value: "/tmp/model-cache"
+        - name: QUOTE_MAX_CONCURRENCY
+          value: "12"
+        - name: PRICING_DB_POOL_SIZE
+          value: "8"
+        - name: PRICING_DB_MAX_OVERFLOW
+          value: "4"
         startupProbe:
           httpGet: {path: /health, port: 8000}
           initialDelaySeconds: 20
@@ -71,7 +77,7 @@ spec:
           initialDelaySeconds: 90
           periodSeconds: 20
         resources:
-          requests: {cpu: 500m, memory: 1Gi}
+          requests: {cpu: 750m, memory: 1Gi}
           limits: {memory: 2Gi}
       - name: cloud-sql-proxy
         image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.0
@@ -94,3 +100,16 @@ spec:
   type: ClusterIP
   selector: {app: pricing-service}
   ports: [{port: 8000, targetPort: 8000}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pricing-service
+  namespace: dpp
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: pricing-service}
+  minReplicas: 3
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource: {name: cpu, target: {type: Utilization, averageUtilization: 60}}

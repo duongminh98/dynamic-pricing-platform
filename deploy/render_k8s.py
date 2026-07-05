@@ -228,6 +228,14 @@ def pricing_deployment(cfg: dict) -> str:
         ("PRICING_REFERENCE_DIR", {"value": "/data/synthetic_real_1m_history_lift_v2"}),
         ("PRICING_MODELS_DIR", {"value": "/reports/modeling/models"}),
         ("MODEL_ARTIFACT_CACHE_DIR", {"value": "/tmp/model-cache"}),
+        # Load-capacity tuning (verified against Cloud SQL max_connections=400,
+        # shared by all 7 services). Per-worker semaphore + SQLAlchemy pool; the
+        # invariant QUOTE_MAX_CONCURRENCY <= pool_size+max_overflow must hold, and
+        # maxReplicas(6) x UVICORN_WORKERS(4) x (pool+overflow=12) = 288 conns
+        # worst-case, leaving headroom under the 400 ceiling for the other services.
+        ("QUOTE_MAX_CONCURRENCY", {"value": "12"}),
+        ("PRICING_DB_POOL_SIZE", {"value": "8"}),
+        ("PRICING_DB_MAX_OVERFLOW", {"value": "4"}),
     ]
     env_yaml = render_env(env_lines)
     body = textwrap.dedent(f"""\
@@ -238,7 +246,7 @@ def pricing_deployment(cfg: dict) -> str:
           namespace: dpp
           labels: {{app: pricing-service, tier: backend}}
         spec:
-          replicas: 1
+          replicas: 3
           selector: {{matchLabels: {{app: pricing-service}}}}
           template:
             metadata:
@@ -265,7 +273,7 @@ def pricing_deployment(cfg: dict) -> str:
                   initialDelaySeconds: 90
                   periodSeconds: 20
                 resources:
-                  requests: {{cpu: 500m, memory: 1Gi}}
+                  requests: {{cpu: 750m, memory: 1Gi}}
                   limits: {{memory: 2Gi}}
               __SQLPROXY__
         ---
@@ -278,6 +286,19 @@ def pricing_deployment(cfg: dict) -> str:
           type: ClusterIP
           selector: {{app: pricing-service}}
           ports: [{{port: 8000, targetPort: 8000}}]
+        ---
+        apiVersion: autoscaling/v2
+        kind: HorizontalPodAutoscaler
+        metadata:
+          name: pricing-service
+          namespace: dpp
+        spec:
+          scaleTargetRef: {{apiVersion: apps/v1, kind: Deployment, name: pricing-service}}
+          minReplicas: 3
+          maxReplicas: 6
+          metrics:
+          - type: Resource
+            resource: {{name: cpu, target: {{type: Utilization, averageUtilization: 60}}}}
         """)
     return header("pricing-service (FastAPI, private ClusterIP + Cloud SQL proxy + GCS reference bootstrap)") + _inject(body, "__SQLPROXY__", sqlproxy_sidecar(cfg))
 
@@ -699,7 +720,9 @@ def edge_tier(cfg: dict) -> str:
         spec:
           type: NodePort
           selector: {{app: kong}}
-          ports: [{{port: 8000, targetPort: 8000}}]
+          ports:
+          - {{name: proxy, port: 8000, targetPort: 8000}}
+          - {{name: metrics, port: 8100, targetPort: 8100}}
         ---
         apiVersion: cloud.google.com/v1
         kind: BackendConfig
@@ -813,6 +836,12 @@ def edge_tier(cfg: dict) -> str:
             - ipBlock: {{cidr: 130.211.0.0/22}}
             - ipBlock: {{cidr: 35.191.0.0/16}}
         """)
+    # Grafana is also reached through the ingress LB, so its GKE health checks
+    # arrive from the same Google ranges — add it to the LB allow-list.
+    body = body.replace(
+        "values: [kong, frontend, keycloak]",
+        "values: [kong, frontend, keycloak, grafana]",
+    )
     # Keycloak is also public (SPA logs in directly at auth.dpp-pricing.dev). It
     # gets its own cert + ingress so the OIDC issuer URL resolves over HTTPS.
     body += textwrap.dedent(f"""\
@@ -843,6 +872,156 @@ def edge_tier(cfg: dict) -> str:
                 backend: {{service: {{name: keycloak, port: {{number: 8080}}}}}}
         """)
     return header("edge: Kong (public) + frontend SPA + Ingress + ManagedCertificate + NetworkPolicy") + body
+
+
+def observability_tier(cfg: dict) -> str:
+    """Prometheus (private ClusterIP; scrapes in-cluster targets) + Grafana
+    (reached through the ingress LB at GRAFANA_HOST, same pattern as Keycloak).
+
+    Prometheus config + Grafana provisioning (datasource + dashboard provider)
+    and the dashboard JSON are mounted from ConfigMaps that deploy.sh builds
+    from the infra/ source files, so local and GKE share one dashboard.
+
+    Grafana's admin password comes from dpp-secrets (grafana-admin-password),
+    NOT the compose default admin/admin — it is publicly reachable."""
+    graf = cfg["GRAFANA_HOST"]
+    body = textwrap.dedent(f"""\
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: prometheus
+          namespace: dpp
+        spec:
+          replicas: 1
+          selector: {{matchLabels: {{app: prometheus}}}}
+          template:
+            metadata:
+              labels: {{app: prometheus}}
+            spec:
+              containers:
+              - name: prometheus
+                image: prom/prometheus:v2.55.1
+                args:
+                - --config.file=/etc/prometheus/prometheus.yml
+                - --storage.tsdb.path=/prometheus
+                ports: [{{containerPort: 9090}}]
+                volumeMounts:
+                - {{name: config, mountPath: /etc/prometheus/prometheus.yml, subPath: prometheus.yml}}
+                - {{name: data, mountPath: /prometheus}}
+                readinessProbe:
+                  httpGet: {{path: /-/ready, port: 9090}}
+                  initialDelaySeconds: 15
+                  periodSeconds: 10
+                resources:
+                  requests: {{cpu: 100m, memory: 256Mi}}
+                  limits: {{memory: 1Gi}}
+              volumes:
+              - name: config
+                configMap: {{name: prometheus-config}}
+              - name: data
+                emptyDir: {{}}
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: prometheus
+          namespace: dpp
+        spec:
+          type: ClusterIP
+          selector: {{app: prometheus}}
+          ports: [{{port: 9090, targetPort: 9090}}]
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: grafana
+          namespace: dpp
+        spec:
+          replicas: 1
+          selector: {{matchLabels: {{app: grafana}}}}
+          template:
+            metadata:
+              labels: {{app: grafana}}
+            spec:
+              containers:
+              - name: grafana
+                image: grafana/grafana:11.3.0
+                env:
+                - {{name: GF_SECURITY_ADMIN_USER, value: "admin"}}
+                - name: GF_SECURITY_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {{name: dpp-secrets, key: grafana-admin-password}}
+                - {{name: GF_USERS_ALLOW_SIGN_UP, value: "false"}}
+                - {{name: GF_SERVER_ROOT_URL, value: "https://{graf}"}}
+                ports: [{{containerPort: 3000}}]
+                volumeMounts:
+                - {{name: datasources, mountPath: /etc/grafana/provisioning/datasources}}
+                - {{name: dashboard-provider, mountPath: /etc/grafana/provisioning/dashboards}}
+                - {{name: dashboards, mountPath: /var/lib/grafana/dashboards}}
+                readinessProbe:
+                  httpGet: {{path: /api/health, port: 3000}}
+                  initialDelaySeconds: 20
+                  periodSeconds: 10
+                resources:
+                  requests: {{cpu: 100m, memory: 256Mi}}
+                  limits: {{memory: 512Mi}}
+              volumes:
+              - name: datasources
+                configMap: {{name: grafana-datasources}}
+              - name: dashboard-provider
+                configMap: {{name: grafana-dashboard-provider}}
+              - name: dashboards
+                configMap: {{name: grafana-dashboards}}
+        ---
+        apiVersion: cloud.google.com/v1
+        kind: BackendConfig
+        metadata:
+          name: grafana-backendconfig
+          namespace: dpp
+        spec:
+          healthCheck:
+            type: HTTP
+            port: 3000
+            requestPath: /api/health
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: grafana
+          namespace: dpp
+          annotations:
+            cloud.google.com/backend-config: '{{"default": "grafana-backendconfig"}}'
+        spec:
+          type: NodePort
+          selector: {{app: grafana}}
+          ports: [{{port: 3000, targetPort: 3000}}]
+        ---
+        apiVersion: networking.gke.io/v1
+        kind: ManagedCertificate
+        metadata:
+          name: dpp-grafana-cert
+          namespace: dpp
+        spec:
+          domains: [{graf}]
+        ---
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: dpp-grafana-ingress
+          namespace: dpp
+          annotations:
+            kubernetes.io/ingress.class: "gce"
+            networking.gke.io/managed-certificates: "dpp-grafana-cert"
+        spec:
+          rules:
+          - host: {graf}
+            http:
+              paths:
+              - path: /
+                pathType: Prefix
+                backend: {{service: {{name: grafana, port: {{number: 3000}}}}}}
+        """)
+    return header("observability: Prometheus (private) + Grafana (public via ingress)") + body
 
 
 def main() -> None:
@@ -877,6 +1056,9 @@ def main() -> None:
 
     (OUT / "30-edge.yaml").write_text(edge_tier(cfg), encoding="utf-8")
     written.append("30-edge.yaml")
+
+    (OUT / "40-observability.yaml").write_text(observability_tier(cfg), encoding="utf-8")
+    written.append("40-observability.yaml")
 
     print(f"Wrote {len(written)} manifest(s) to {OUT}:")
     for w in written:

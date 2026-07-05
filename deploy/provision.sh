@@ -82,6 +82,7 @@ done
 log "Secret Manager"
 RABBIT_PASS="$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)"
 KC_ADMIN_PASS="$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)"
+GRAFANA_ADMIN_PASS="$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)"
 put_secret() { # name value
   printf '%s' "$2" | gcloud secrets create "$1" --data-file=- --project "$PROJECT_ID" 2>/dev/null || \
   printf '%s' "$2" | gcloud secrets versions add "$1" --data-file=- --project "$PROJECT_ID"; }
@@ -98,6 +99,7 @@ put_secret pricing-db-url \
   "postgresql+psycopg2://$DB_USER:$DB_PASS@/pricing_db?host=/cloudsql/$SQL_INST_CONN"
 put_secret keycloak-admin admin
 put_secret keycloak-admin-password "$KC_ADMIN_PASS"
+put_secret grafana-admin-password "$GRAFANA_ADMIN_PASS"
 require_non_placeholder VNP_TMN_CODE "${VNP_TMN_CODE:-}"
 require_non_placeholder VNP_HASH_SECRET "${VNP_HASH_SECRET:-}"
 put_secret vnp-tmn-code "$VNP_TMN_CODE"
