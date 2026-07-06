@@ -368,6 +368,8 @@ public class PolicyLifecycleService {
             }
         }
 
+        cancelInFlightEndorsements(policy);
+
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(cancelDate, policy.getPolicyExpirationDate());
         long refundableCreditVnd = 0L;
@@ -590,6 +592,35 @@ public class PolicyLifecycleService {
         endorsementRequestRepository.save(req);
     }
 
+    /** Called when an adjustment invoice is voided (e.g. an admin voids it directly from the
+     *  billing tab). Without this, the endorsement stays in APPROVED_PENDING_PAYMENT forever with
+     *  no payable invoice — approve/apply can never fire and it sticks in the review queue. Void
+     *  it (same terminal state the overdue job uses); the change was never applied so the policy
+     *  is untouched. Admin can revive via extendDueDate, which accepts VOID. */
+    @Transactional
+    public void voidEndorsementForVoidedInvoice(UUID endorsementRequestId, UUID voidedInvoiceId) {
+        EndorsementRequestEntity req = endorsementRequestRepository.findById(endorsementRequestId).orElse(null);
+        if (req == null || req.getStatus() != EndorsementStatus.APPROVED_PENDING_PAYMENT) {
+            return;
+        }
+        // Act ONLY when the voided invoice is the endorsement's current live invoice. extendDueDate
+        // and the cancel cascade also void the prior invoice then re-open a new one (invoiceId briefly
+        // null, then the new id); a stale InvoiceVoided for the old invoice must never void the
+        // freshly re-opened endorsement. A legitimate manual void always carries the matching id.
+        if (voidedInvoiceId == null || !voidedInvoiceId.equals(req.getInvoiceId())) {
+            return;
+        }
+        req.setStatus(EndorsementStatus.VOID);
+        endorsementRequestRepository.save(req);
+        enqueueEvent("EndorsementOverdue", req.getPolicyId(), Map.of(
+                "customer_id", req.getCustomerId().toString(),
+                "endorsement_request_id", req.getEndorsementRequestId().toString(),
+                "policy_id", req.getPolicyId().toString(),
+                "invoice_id", req.getInvoiceId() != null ? req.getInvoiceId().toString() : "",
+                "additional_charge_vnd", req.getQuotedPremiumVnd() != null ? req.getQuotedPremiumVnd() : 0,
+                "due_date", req.getDueDate() != null ? req.getDueDate().toString() : ""));
+    }
+
     /** Administrator extends the payment deadline for an APPROVED_PENDING_PAYMENT endorsement.
      *  Also revives a VOID endorsement back to APPROVED_PENDING_PAYMENT with a new invoice. */
     @Transactional
@@ -676,6 +707,8 @@ public class PolicyLifecycleService {
                 segmentRepository.save(seg);
             }
         }
+
+        cancelInFlightEndorsements(policy);
 
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(cancelDate, policy.getPolicyExpirationDate());
@@ -1215,6 +1248,8 @@ public class PolicyLifecycleService {
             }
         }
 
+        cancelInFlightEndorsements(policy);
+
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(cancelDate, policy.getPolicyExpirationDate());
 
@@ -1370,6 +1405,36 @@ public class PolicyLifecycleService {
                 "order_id", policy.getOrderId().toString(),
                 "endorsement_request_id", req.getEndorsementRequestId().toString(),
                 "invoice_id", req.getInvoiceId() != null ? req.getInvoiceId().toString() : ""));
+    }
+
+    /** When a policy is cancelled, any in-flight endorsement can never be applied to it — a coverage
+     *  change on a dead policy is meaningless. Cancel each one and void its unpaid adjustment invoice,
+     *  otherwise the endorsement sticks in PENDING_REVIEW/APPROVED_PENDING_PAYMENT and admin approve
+     *  hits the policy-active guard (POLICY_NOT_MODIFIABLE) forever. */
+    private void cancelInFlightEndorsements(Policy policy) {
+        List<EndorsementRequestEntity> existing =
+                endorsementRequestRepository.findByPolicyIdOrderByCreatedAtDesc(policy.getPolicyId());
+        OffsetDateTime cancelledAt = OffsetDateTime.now();
+        for (EndorsementRequestEntity req : existing) {
+            EndorsementStatus s = req.getStatus();
+            if (s != EndorsementStatus.PENDING_REVIEW
+                    && s != EndorsementStatus.PRICING_PENDING
+                    && s != EndorsementStatus.APPROVED_PENDING_PAYMENT) {
+                continue;
+            }
+            if (s == EndorsementStatus.APPROVED_PENDING_PAYMENT && req.getInvoiceId() != null) {
+                requestEndorsementInvoiceVoid(policy, req);
+            }
+            req.setStatus(EndorsementStatus.CANCELLED);
+            req.setReviewReason("Policy cancelled");
+            req.setReviewedAt(cancelledAt);
+            endorsementRequestRepository.save(req);
+            enqueueEvent("EndorsementCancelled", policy.getPolicyId(), Map.of(
+                    "customer_id", policy.getCustomerId().toString(),
+                    "policy_id", policy.getPolicyId().toString(),
+                    "endorsement_request_id", req.getEndorsementRequestId().toString(),
+                    "policy_changed", false));
+        }
     }
     public PolicyResponse toResponse(Policy policy) {
         PolicyResponse resp = new PolicyResponse();

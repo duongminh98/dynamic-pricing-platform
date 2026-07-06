@@ -318,6 +318,9 @@ public class BillingService {
         payload.put("invoice_id", invoice.getInvoiceId());
         payload.put("order_id", invoice.getOrderId());
         payload.put("policy_id", invoice.getPolicyId());
+        if (invoice.getEndorsementRequestId() != null) {
+            payload.put("endorsement_request_id", invoice.getEndorsementRequestId());
+        }
         if (invoice.getCustomerId() != null) {
             payload.put("customer_id", invoice.getCustomerId());
         }

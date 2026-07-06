@@ -4,6 +4,7 @@ import { useApi, useMutation, vndLabel, dateTime, dateOnly } from '../../lib/for
 import { viStatus, viFeature } from '../../lib/labels';
 import { usePaged, Pager } from '../../lib/paged';
 import { Loading, ErrorBanner, EmptyState, StatusPill, Spinner, useToast } from '../../lib/ui';
+import { TextAreaField } from '../../lib/fields';
 
 interface EndorsementReq {
   endorsement_request_id: string; policy_id: string; status: string;
@@ -20,17 +21,22 @@ interface EndorsementDetail {
   pricing_failed_reason: string | null; change: Record<string, unknown> | null;
 }
 
-const STATUSES = ['PENDING_REVIEW', 'APPROVED', 'APPLIED', 'REJECTED', 'CANCELLED'];
+const STATUSES = ['PRICING_PENDING', 'PENDING_REVIEW', 'APPROVED_PENDING_PAYMENT', 'APPLIED', 'REJECTED', 'VOID', 'CANCELLED', 'PRICING_FAILED'];
 
 export default function AdminEndorsements() {
   const toast = useToast();
   const [status, setStatus] = useState('PENDING_REVIEW');
   const [viewing, setViewing] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState<string | null>(null);
   const { run, busy } = useMutation();
   const { data, error, loading, page, setPage, reload } = usePaged<EndorsementReq>('/admin/endorsements', { status });
 
-  const act = async (id: string, action: 'approve' | 'reject', body: any = {}) => {
-    try { await run(`/admin/endorsements/${id}/${action}`, { method: 'POST', body }); toast.push(action === 'approve' ? 'Đã duyệt.' : 'Đã từ chối.'); reload(); }
+  const approve = async (id: string) => {
+    try { await run(`/admin/endorsements/${id}/approve`, { method: 'POST', body: {} }); toast.push('Đã duyệt.'); reload(); }
+    catch (e) { toast.push((e as ApiError).message, 'err'); }
+  };
+  const reject = async (id: string, reason: string) => {
+    try { await run(`/admin/endorsements/${id}/reject`, { method: 'POST', body: { reason } }); toast.push('Đã từ chối.'); setRejecting(null); reload(); }
     catch (e) { toast.push((e as ApiError).message, 'err'); }
   };
   const extend = async (id: string) => {
@@ -81,12 +87,15 @@ export default function AdminEndorsements() {
                     <td className="num">
                       {e.status === 'PENDING_REVIEW' && (
                         <div className="row" style={{ justifyContent: 'flex-end' }}>
-                          <button className="btn btn-primary btn-sm" disabled={busy} onClick={(ev) => { ev.stopPropagation(); act(e.endorsement_request_id, 'approve'); }}>Duyệt</button>
-                          <button className="btn btn-danger btn-sm" disabled={busy} onClick={(ev) => { ev.stopPropagation(); act(e.endorsement_request_id, 'reject'); }}>Từ chối</button>
+                          <button className="btn btn-primary btn-sm" disabled={busy} onClick={(ev) => { ev.stopPropagation(); approve(e.endorsement_request_id); }}>Duyệt</button>
+                          <button className="btn btn-danger btn-sm" disabled={busy} onClick={(ev) => { ev.stopPropagation(); setViewing(null); setRejecting(rejecting === e.endorsement_request_id ? null : e.endorsement_request_id); }}>Từ chối</button>
                         </div>
                       )}
-                      {e.status === 'APPROVED' && (
+                      {e.status === 'APPROVED_PENDING_PAYMENT' && (
                         <button className="btn btn-ghost btn-sm" disabled={busy} onClick={(ev) => { ev.stopPropagation(); extend(e.endorsement_request_id); }}>+7 ngày</button>
+                      )}
+                      {e.status === 'VOID' && (
+                        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={(ev) => { ev.stopPropagation(); extend(e.endorsement_request_id); }}>Gia hạn lại</button>
                       )}
                     </td>
                   </tr>
@@ -94,6 +103,13 @@ export default function AdminEndorsements() {
                     <tr key={e.endorsement_request_id + '-d'}>
                       <td colSpan={6} style={{ background: 'var(--surface-2)' }}>
                         <EndorsementDetailPanel id={e.endorsement_request_id} onClose={() => setViewing(null)} />
+                      </td>
+                    </tr>
+                  )}
+                  {rejecting === e.endorsement_request_id && (
+                    <tr key={e.endorsement_request_id + '-r'}>
+                      <td colSpan={6} style={{ background: 'var(--surface-2)' }}>
+                        <RejectForm busy={busy} onSubmit={(reason) => reject(e.endorsement_request_id, reason)} onCancel={() => setRejecting(null)} />
                       </td>
                     </tr>
                   )}
@@ -167,6 +183,19 @@ function EndorsementDetailPanel({ id, onClose }: { id: string; onClose: () => vo
           <button className="btn btn-ghost" onClick={onClose}>Đóng</button>
         </div>
       )}
+    </div>
+  );
+}
+
+function RejectForm({ busy, onSubmit, onCancel }: { busy: boolean; onSubmit: (reason: string) => void; onCancel: () => void }) {
+  const [reason, setReason] = useState('');
+  return (
+    <div className="stack" style={{ padding: 'var(--s3) 0' }}>
+      <TextAreaField label="Lý do từ chối" value={reason} onChange={setReason} placeholder="Bắt buộc" required />
+      <div className="row">
+        <button className="btn btn-danger btn-sm" disabled={busy || !reason.trim()} onClick={() => onSubmit(reason.trim())}>{busy ? <Spinner /> : 'Xác nhận từ chối'}</button>
+        <button className="btn btn-ghost btn-sm" onClick={onCancel}>Hủy</button>
+      </div>
     </div>
   );
 }

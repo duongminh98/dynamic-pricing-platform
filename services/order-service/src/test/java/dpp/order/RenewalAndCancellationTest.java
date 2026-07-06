@@ -155,6 +155,81 @@ class RenewalAndCancellationTest {
     }
 
     @Test
+    void cancellationCascadesCancelInFlightEndorsementsAndVoidsInvoice() {
+        Policy policy = activePolicy();
+        OffsetDateTime eff = policy.getPolicyEffectiveDate();
+        OffsetDateTime exp = policy.getPolicyExpirationDate();
+        OffsetDateTime cancelDate = eff.plusDays(100);
+
+        PolicyRepository repo = mock(PolicyRepository.class);
+        when(repo.findById(policy.getPolicyId())).thenReturn(Optional.of(policy));
+        when(repo.save(any(Policy.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ExposureSegment seg = new ExposureSegment();
+        seg.setSegmentId(UUID.randomUUID());
+        seg.setPolicyId(policy.getPolicyId());
+        seg.setExposureSegmentSeq(0);
+        seg.setSegmentStart(eff);
+        seg.setSegmentEnd(exp);
+        seg.setEarnedExposureYears(1.0);
+        seg.setCoverageAmountVnd(100_000_000L);
+        seg.setDeductibleVnd(0L);
+        seg.setRiskSnapshot("{}");
+        List<ExposureSegment> segs = new ArrayList<>(List.of(seg));
+
+        ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
+        when(segRepo.findByPolicyIdOrderByExposureSegmentSeqAsc(policy.getPolicyId())).thenReturn(segs);
+        when(segRepo.save(any(ExposureSegment.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // Two in-flight endorsements on this policy + one already-terminal one that must be untouched.
+        EndorsementRequestEntity pendingReview = new EndorsementRequestEntity();
+        pendingReview.setEndorsementRequestId(UUID.randomUUID());
+        pendingReview.setPolicyId(policy.getPolicyId());
+        pendingReview.setCustomerId(policy.getCustomerId());
+        pendingReview.setStatus(EndorsementStatus.PENDING_REVIEW);
+
+        EndorsementRequestEntity pendingPayment = new EndorsementRequestEntity();
+        pendingPayment.setEndorsementRequestId(UUID.randomUUID());
+        pendingPayment.setPolicyId(policy.getPolicyId());
+        pendingPayment.setCustomerId(policy.getCustomerId());
+        pendingPayment.setStatus(EndorsementStatus.APPROVED_PENDING_PAYMENT);
+        pendingPayment.setInvoiceId(UUID.randomUUID());
+
+        EndorsementRequestEntity alreadyApplied = new EndorsementRequestEntity();
+        alreadyApplied.setEndorsementRequestId(UUID.randomUUID());
+        alreadyApplied.setPolicyId(policy.getPolicyId());
+        alreadyApplied.setCustomerId(policy.getCustomerId());
+        alreadyApplied.setStatus(EndorsementStatus.APPLIED);
+
+        EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
+        when(endRepo.findByPolicyIdOrderByCreatedAtDesc(policy.getPolicyId()))
+                .thenReturn(List.of(pendingReview, pendingPayment, alreadyApplied));
+        when(endRepo.save(any(EndorsementRequestEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+        PolicyLifecycleService svc = new PolicyLifecycleService(repo, segRepo,
+                mock(PolicyDocumentRepository.class), endRepo,
+                mock(PricingClient.class), mock(BillingClient.class), outbox);
+
+        CancelRequest req = new CancelRequest();
+        req.setCancelDate(cancelDate);
+        svc.cancel(policy.getPolicyId(), req, SUBJECT);
+
+        // Both in-flight endorsements are cancelled; the APPLIED one is left alone.
+        assertEquals(EndorsementStatus.CANCELLED, pendingReview.getStatus(),
+                "PENDING_REVIEW endorsement must be cancelled with the policy");
+        assertEquals(EndorsementStatus.CANCELLED, pendingPayment.getStatus(),
+                "APPROVED_PENDING_PAYMENT endorsement must be cancelled with the policy");
+        assertEquals(EndorsementStatus.APPLIED, alreadyApplied.getStatus(),
+                "terminal endorsement must not be touched");
+
+        // The invoiced one emits a void request; PolicyCancelled is still emitted.
+        verify(outbox, times(1)).enqueue(eq("EndorsementInvoiceVoidRequested"), anyString());
+        verify(outbox, times(2)).enqueue(eq("EndorsementCancelled"), anyString());
+        verify(outbox, times(1)).enqueue(eq("PolicyCancelled"), anyString());
+    }
+
+    @Test
     void cancelDateOutsideRangeUsesCancelDateError() {
         Policy policy = activePolicy();
         PolicyRepository repo = mock(PolicyRepository.class);

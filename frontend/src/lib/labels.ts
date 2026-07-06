@@ -34,8 +34,11 @@ const STATUS: Record<string, string> = {
   exhausted: 'Đã dùng hết',
   refunded: 'Đã hoàn',
   // endorsements
-  APPROVED: 'Đã duyệt',
+  PRICING_PENDING: 'Đang định phí',
+  APPROVED_PENDING_PAYMENT: 'Chờ thanh toán',
   APPLIED: 'Đã áp dụng',
+  VOID: 'Hết hạn thanh toán',
+  PRICING_FAILED: 'Định phí thất bại',
   // review decisions
   APPROVE: 'Duyệt',
   REJECT: 'Từ chối',

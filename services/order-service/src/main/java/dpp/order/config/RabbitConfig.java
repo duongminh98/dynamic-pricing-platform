@@ -71,4 +71,19 @@ public class RabbitConfig {
     public Binding repriceCompletedBinding() {
         return BindingBuilder.bind(repriceCompletedQueue()).to(eventsExchange()).with("RepriceCompleted");
     }
+
+    @Bean
+    public Queue invoiceVoidedQueue() {
+        return QueueBuilder.durable("invoice.voided.order.queue")
+                .withArgument("x-queue-type", "quorum")
+                .withArgument("x-dead-letter-exchange", "platform.events.dlx")
+                .withArgument("x-dead-letter-routing-key", "InvoiceVoided")
+                .withArgument("x-delivery-limit", 3)
+                .build();
+    }
+
+    @Bean
+    public Binding invoiceVoidedBinding() {
+        return BindingBuilder.bind(invoiceVoidedQueue()).to(eventsExchange()).with("InvoiceVoided");
+    }
 }
