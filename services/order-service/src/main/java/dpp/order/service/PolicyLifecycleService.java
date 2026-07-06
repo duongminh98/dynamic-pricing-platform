@@ -849,7 +849,11 @@ public class PolicyLifecycleService {
             prior.setSegmentEnd(eff);
             long priorDays = ChronoUnit.DAYS.between(prior.getSegmentStart(), eff);
             prior.setEarnedExposureYears(Math.max(0, priorDays) / 365.25);
-            segmentRepository.save(prior);
+            // Flush the truncation before inserting the successor segment. Hibernate orders
+            // INSERT before UPDATE by default, so without this the new [eff, expiration) segment
+            // hits the DB while the prior still ends at expiration, tripping the
+            // exposure_segment_no_overlap exclusion constraint (23P01).
+            segmentRepository.saveAndFlush(prior);
         }
 
         ExposureSegment seg = new ExposureSegment();

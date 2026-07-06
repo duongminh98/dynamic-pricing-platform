@@ -397,10 +397,13 @@ class MaterialChangeEndorsementTest {
         verify(pricing, never()).rerate(eq("HEALTH_BASIC"), anyMap());
 
         // --- Verify: new segment has merged profile ---
-        // A6: prior segment closed (1 save) + new segment (1 save) = 2 saves.
+        // A6: prior segment closed via saveAndFlush (flushed before the INSERT to avoid
+        // a transient overlap tripping the exposure_segment_no_overlap constraint);
+        // new segment persisted via save.
+        verify(segRepo).saveAndFlush(any(ExposureSegment.class));
         ArgumentCaptor<ExposureSegment> segCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
-        verify(segRepo, times(2)).save(segCaptor.capture());
-        ExposureSegment newSeg = segCaptor.getAllValues().get(1);
+        verify(segRepo).save(segCaptor.capture());
+        ExposureSegment newSeg = segCaptor.getValue();
         assertEquals(1, newSeg.getExposureSegmentSeq(), "new segment must be seq=1");
         assertEquals(endorseDate, newSeg.getSegmentStart());
         assertEquals(exp, newSeg.getSegmentEnd());
@@ -584,8 +587,10 @@ class MaterialChangeEndorsementTest {
                 "premium must reflect locked quoted premium after apply");
 
         // Verify EndorsementApplied event emitted with correct premiums
-        // A6: prior segment closed (1 save) + new segment (1 save) = 2 saves.
-        verify(segRepo, times(2)).save(any(ExposureSegment.class));
+        // A6: prior segment closed via saveAndFlush (ordered before the INSERT to
+        // avoid the exposure_segment_no_overlap constraint) + new segment via save.
+        verify(segRepo).saveAndFlush(any(ExposureSegment.class));
+        verify(segRepo).save(any(ExposureSegment.class));
         verify(outbox).enqueue(eq("EndorsementApplied"), anyString());
     }
 

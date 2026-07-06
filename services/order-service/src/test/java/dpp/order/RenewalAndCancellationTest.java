@@ -426,10 +426,11 @@ class RenewalAndCancellationTest {
                 "premium must reflect locked quoted premium after payment triggers apply");
 
         // Capture the new segment created by endorsement
-        // A6: prior segment closed (1 save) + new segment (1 save) = 2 saves.
+        // A6: prior segment closed via saveAndFlush (ordered before the INSERT to
+        // avoid the exposure_segment_no_overlap constraint) + new segment via save.
         ArgumentCaptor<ExposureSegment> endSegCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
-        verify(segRepo, times(2)).save(endSegCaptor.capture());
-        ExposureSegment endorsedSeg = endSegCaptor.getAllValues().get(1);
+        verify(segRepo).save(endSegCaptor.capture());
+        ExposureSegment endorsedSeg = endSegCaptor.getValue();
         assertEquals(1, endorsedSeg.getExposureSegmentSeq(), "endorsement must create segment seq=1");
         String endorsedSnapshot = endorsedSeg.getRiskSnapshot();
         assertNotNull(endorsedSnapshot);
@@ -463,9 +464,11 @@ class RenewalAndCancellationTest {
 
         // Verify renewal created segment 0 for the new policy with updated profile
         ArgumentCaptor<ExposureSegment> renewSegCaptor = ArgumentCaptor.forClass(ExposureSegment.class);
-        // segRepo.save called 3 times: 2 for endorsement (A6: close prior + new) + 1 for renewal
-        verify(segRepo, times(3)).save(renewSegCaptor.capture());
-        ExposureSegment renewalSeg = renewSegCaptor.getAllValues().get(2);
+        // segRepo.save called 2 times: 1 for the endorsement's new segment + 1 for renewal.
+        // (The endorsement's prior-segment close now goes through saveAndFlush, ordered before
+        // the INSERT to avoid the exposure_segment_no_overlap constraint.)
+        verify(segRepo, times(2)).save(renewSegCaptor.capture());
+        ExposureSegment renewalSeg = renewSegCaptor.getAllValues().get(1);
         assertEquals(0, renewalSeg.getExposureSegmentSeq(), "renewed policy must have segment seq=0");
         String renewalSnapshot = renewalSeg.getRiskSnapshot();
         assertNotNull(renewalSnapshot);
