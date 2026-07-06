@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { ApiError } from '../../api/client';
-import { useMutation, vndLabel, dateTime } from '../../lib/format';
+import { useApi, useMutation, vndLabel, dateTime } from '../../lib/format';
 import { viStatus, viEnum } from '../../lib/labels';
 import { usePaged, Pager } from '../../lib/paged';
 import { Loading, ErrorBanner, EmptyState, StatusPill, Spinner, useToast } from '../../lib/ui';
@@ -12,12 +12,22 @@ interface ClaimResponse {
   incurred_amount_vnd?: number; paid_amount_vnd?: number; admin_note?: string | null;
 }
 
+interface ClaimDetailResponse {
+  claim_id: string; policy_id: string; customer_id: string; exposure_segment_seq: number;
+  loss_type: string; claim_status: string; occurrence_date: string; report_date: string;
+  estimated_cost: number; incurred_amount: number; paid_amount: number;
+  description: string | null; admin_note: string | null; payment_reference: string | null;
+  paid_at: string | null; misrepresentation_sanction: string | null; attachments: string[];
+  created_at: string;
+}
+
 const STATUSES = ['pending', 'approved', 'rejected'];
 type Action = 'approve' | 'reject' | 'sanction';
 
 export default function AdminClaims() {
   const [status, setStatus] = useState('pending');
   const [acting, setActing] = useState<{ id: string; action: Action } | null>(null);
+  const [viewing, setViewing] = useState<string | null>(null);
   const { data, error, loading, page, setPage, reload } = usePaged<ClaimResponse>('/admin/claims', { status });
 
   return (
@@ -48,7 +58,13 @@ export default function AdminClaims() {
             <tbody>
               {data.content.map((c) => (
                 <Fragment key={c.claim_id}>
-                  <tr>
+                  <tr
+                    role="button"
+                    tabIndex={0}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => { setViewing(viewing === c.claim_id ? null : c.claim_id); setActing(null); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setViewing(viewing === c.claim_id ? null : c.claim_id); setActing(null); } }}
+                  >
                     <td className="mono" style={{ fontSize: '0.78rem' }}>{c.claim_id.slice(0, 8)}</td>
                     <td>{viEnum(c.loss_type)}</td>
                     <td className="muted">{dateTime(c.occurrence_date)}</td>
@@ -57,13 +73,20 @@ export default function AdminClaims() {
                     <td className="num">
                       {c.claim_status === 'pending' && (
                         <div className="row" style={{ justifyContent: 'flex-end' }}>
-                          <button className="btn btn-primary btn-sm" onClick={() => setActing({ id: c.claim_id, action: 'approve' })}>Duyệt</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => setActing({ id: c.claim_id, action: 'reject' })}>Từ chối</button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => setActing({ id: c.claim_id, action: 'sanction' })}>Chế tài</button>
+                          <button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); setActing({ id: c.claim_id, action: 'approve' }); setViewing(null); }}>Duyệt</button>
+                          <button className="btn btn-danger btn-sm" onClick={(e) => { e.stopPropagation(); setActing({ id: c.claim_id, action: 'reject' }); setViewing(null); }}>Từ chối</button>
+                          <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setActing({ id: c.claim_id, action: 'sanction' }); setViewing(null); }}>Chế tài</button>
                         </div>
                       )}
                     </td>
                   </tr>
+                  {viewing === c.claim_id && (
+                    <tr key={c.claim_id + '-d'}>
+                      <td colSpan={6} style={{ background: 'var(--surface-2)' }}>
+                        <ClaimDetailPanel claimId={c.claim_id} onClose={() => setViewing(null)} />
+                      </td>
+                    </tr>
+                  )}
                   {acting?.id === c.claim_id && (
                     <tr key={c.claim_id + '-a'}>
                       <td colSpan={6} style={{ background: 'var(--surface-2)' }}>
@@ -149,4 +172,64 @@ function ClaimAction({ id, action, onDone, onCancel }: { id: string; action: Act
       </div>
     </div>
   );
+}
+
+function ClaimDetailPanel({ claimId, onClose }: { claimId: string; onClose: () => void }) {
+  const { data: claim, error, loading } = useApi<ClaimDetailResponse>(`/admin/claims/${claimId}`, [claimId]);
+
+  return (
+    <div className="stack" style={{ padding: 'var(--s3) 0' }}>
+      {loading && <Loading />}
+      <ErrorBanner error={error} />
+      {claim && (
+        <div className="card stack" style={{ background: 'var(--raised)' }}>
+          <div className="row-between">
+            <div>
+              <span className="mono faint" style={{ fontSize: '0.78rem' }}>{claim.claim_id}</span>
+              <h3 style={{ marginTop: 4 }}>{viEnum(claim.loss_type)}</h3>
+            </div>
+            <StatusPill status={claim.claim_status} />
+          </div>
+
+          <div className="panel">
+            <h4 style={{ marginTop: 0 }}>Thông tin bồi thường</h4>
+            <Kv label="Hợp đồng" value={claim.policy_id} first />
+            <Kv label="Khách hàng" value={claim.customer_id} />
+            <Kv label="Kỳ phơi nhiễm" value={String(claim.exposure_segment_seq)} />
+            <Kv label="Ngày xảy ra" value={dateTime(claim.occurrence_date)} />
+            <Kv label="Ngày khai báo" value={dateTime(claim.report_date)} />
+            <Kv label="Chi phí ước tính" value={vndLabel(claim.estimated_cost)} />
+            <Kv label="Mô tả" value={claim.description || '-'} />
+          </div>
+
+          <div className="panel">
+            <h4 style={{ marginTop: 0 }}>Thẩm định & chi trả</h4>
+            <Kv label="Tổn thất ghi nhận" value={vndLabel(claim.incurred_amount)} first />
+            <Kv label="Số chi trả" value={vndLabel(claim.paid_amount)} />
+            <Kv label="Mã chứng từ" value={claim.payment_reference || '-'} />
+            <Kv label="Ngày chi trả" value={claim.paid_at ? dateTime(claim.paid_at) : '-'} />
+            <Kv label="Chế tài khai báo" value={claim.misrepresentation_sanction ? viEnum(claim.misrepresentation_sanction) : '-'} />
+            <Kv label="Ghi chú thẩm định" value={claim.admin_note || '-'} />
+          </div>
+
+          <div className="panel">
+            <h4 style={{ marginTop: 0 }}>Chứng từ đính kèm</h4>
+            {claim.attachments.length === 0 && <p className="muted">Không có chứng từ.</p>}
+            {claim.attachments.map((a, idx) => (
+              <div className="kv" key={idx} style={idx === 0 ? { borderTop: 'none' } : undefined}>
+                <span className="kv-k">#{idx + 1}</span>
+                <span className="kv-v mono" style={{ fontSize: '0.78rem' }}>{a}</span>
+              </div>
+            ))}
+          </div>
+
+          <button className="btn btn-ghost" onClick={onClose}>Đóng</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Kv({ label, value, first = false }: { label: string; value: string; first?: boolean }) {
+  return <div className="kv" style={first ? { borderTop: 'none' } : undefined}><span className="kv-k">{label}</span><span className="kv-v">{value}</span></div>;
 }
