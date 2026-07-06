@@ -782,7 +782,11 @@ public class PolicyLifecycleService {
         r.setChange(readChangeSet(req));
         r.setEffectiveDate(req.getEffectiveDate());
         r.setMaterialChange(true);
+        r.setCurrentPremiumVnd(req.getCurrentPremiumVnd());
         r.setQuotedPremiumVnd(req.getQuotedPremiumVnd());
+        if (req.getCurrentPremiumVnd() != null && req.getQuotedPremiumVnd() != null) {
+            r.setDifferenceVnd(req.getQuotedPremiumVnd() - req.getCurrentPremiumVnd());
+        }
         r.setReviewReason(req.getReviewReason());
         r.setReviewedBy(req.getReviewedBy());
         r.setReviewedAt(req.getReviewedAt());
@@ -1285,6 +1289,7 @@ public class PolicyLifecycleService {
         long remainingDays = policy != null ? ChronoUnit.DAYS.between(req.getEffectiveDate(), policy.getPolicyExpirationDate()) : 0L;
         double fraction = termDays > 0 ? remainingDays / (double) termDays : 0;
         fraction = Math.max(0.0, Math.min(1.0, fraction));
+        req.setCurrentPremiumVnd(currentPremium);
         req.setQuotedPremiumVnd(finalPremiumVnd);
         req.setStatus(EndorsementStatus.PENDING_REVIEW);
         req.setPricingFailedReason(null);

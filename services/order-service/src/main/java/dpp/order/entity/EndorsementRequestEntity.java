@@ -66,6 +66,12 @@ public class EndorsementRequestEntity {
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 
+    /** Policy premium (VND) at the time this endorsement was priced. Captured then so the
+     *  displayed difference stays correct even after the endorsement is applied and the
+     *  policy's live premium changes. */
+    @Column(name = "current_premium_vnd")
+    private Long currentPremiumVnd;
+
     /** Provisional premium (VND) quoted at submission time for the customer's information; applied only on admin approval. */
     @Column(name = "quoted_premium_vnd")
     private Long quotedPremiumVnd;
