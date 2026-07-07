@@ -38,6 +38,60 @@ export default function AdminModels() {
       </div>
 
       <ModelsPanel key={line} line={line} />
+      <DriftPanel key={`drift-${line}`} line={line} />
+    </div>
+  );
+}
+
+
+/* ---------- drift (3 metrics) ---------- */
+// The drift endpoint currently returns an array of all lines (ignoring ?line=),
+// though the contract describes a single object. Normalize both shapes and pick
+// the requested line so a shape change on either side can't crash the page.
+function pickDrift(data: Drift | Drift[] | null, line: Line): Drift | null {
+  if (!data) return null;
+  if (Array.isArray(data)) return data.find((d) => d.line === line) ?? null;
+  return data;
+}
+
+const METRIC_LABEL: Record<string, string> = {
+  feature_psi: 'Feature PSI',
+  prediction_psi: 'Prediction PSI',
+  calibration: 'Calibration',
+};
+
+function DriftPanel({ line }: { line: Line }) {
+  const { data, loading } = useApi<Drift | Drift[]>(`/pricing/drift?line=${line}`, [line]);
+  const drift = pickDrift(data, line);
+  const metrics = drift?.metrics ?? {};
+  return (
+    <div className="card stack">
+      <div className="row-between">
+        <h3 style={{ fontSize: 'var(--step-1)' }}>Model Drift · {LINE_LABEL[line]}</h3>
+        {drift && (drift.needs_recalibration ? <span className="pill pill-bad">needs recalibration</span> : <span className="pill pill-ok">stable</span>)}
+      </div>
+      {loading && <Loading />}
+      {drift && Object.keys(metrics).length > 0 && (
+        <div className="cards-grid">
+          {Object.entries(metrics).map(([k, m]) => (
+            <div className="panel stack" key={k} style={{ gap: 'var(--s2)' }}>
+              <div className="row-between">
+                <span className="stat-l">{METRIC_LABEL[k] || k}</span>
+                {m.needs_recalibration ? <span className="pill pill-bad">over threshold</span> : <span className="pill pill-ok">within threshold</span>}
+              </div>
+              <div className="figure" style={{ fontSize: 'var(--step-2)' }}>{m.value?.toFixed?.(3) ?? '—'}</div>
+              <div className="faint mono" style={{ fontSize: '0.74rem' }}>
+                threshold {m.threshold}
+                {m.status && ` · ${m.status}`}
+                {m.bins_evaluated !== undefined && ` · ${m.bins_evaluated} bins`}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!loading && drift && Object.keys(metrics).length === 0 && (
+        <p className="faint">No drift metrics available for this line.</p>
+      )}
     </div>
   );
 }
@@ -89,8 +143,8 @@ function ModelsPanel({ line }: { line: Line }) {
       <ErrorBanner error={error} />
       {data && data.length === 0 && <EmptyState title="Chưa có phiên bản mô hình cho dòng này" />}
       {data && data.length > 0 && (
-        <div className="table-wrap" style={{ overflowX: 'auto' }}>
-          <table className="table" style={{ minWidth: 860 }}>
+        <div className="table-wrap">
+          <table className="table">
             <thead><tr><th>Version</th><th>Family</th><th>Status</th><th>Dataset</th><th>Gini</th><th>Gates</th><th>Checksum</th><th></th></tr></thead>
             <tbody>
               {data.map((m) => (
@@ -107,7 +161,7 @@ function ModelsPanel({ line }: { line: Line }) {
                   </td>
                   <td className="mono" style={{ fontSize: '0.72rem' }}>{m.artifact_checksum ? m.artifact_checksum.slice(0, 12) : '—'}</td>
                   <td className="num">
-                    {!m.is_champion && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => promote(m.model_version_id)}>Thăng hạng</button>}
+                    {!m.is_champion && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => promote(m.model_version_id)}>Promote</button>}
                     {!m.is_champion && m.status === 'CANDIDATE' && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => reject(m.model_version_id)}>Reject</button>}
                   </td>
                 </tr>
