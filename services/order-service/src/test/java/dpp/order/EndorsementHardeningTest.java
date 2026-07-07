@@ -6,13 +6,16 @@ import dpp.common.outbox.OutboxPublisher;
 import dpp.order.client.BillingClient;
 import dpp.order.client.PricingClient;
 import dpp.order.dto.EndorsementCancelResponse;
+import dpp.order.dto.EndorsementPreviewResponse;
 import dpp.order.dto.EndorsementRequest;
 import dpp.order.dto.EndorsementResult;
+import dpp.order.entity.EndorsementPreviewEntity;
 import dpp.order.entity.EndorsementRequestEntity;
 import dpp.order.entity.EndorsementStatus;
 import dpp.order.entity.ExposureSegment;
 import dpp.order.entity.Policy;
 import dpp.order.entity.PolicyStatus;
+import dpp.order.repository.EndorsementPreviewRepository;
 import dpp.order.repository.EndorsementRequestRepository;
 import dpp.order.repository.ExposureSegmentRepository;
 import dpp.order.repository.PolicyDocumentRepository;
@@ -93,6 +96,13 @@ class EndorsementHardeningTest {
     private PolicyLifecycleService newService(Policy policy, EndorsementRequestRepository endRepo,
                                                PricingClient pricing, BillingClient billing,
                                                OutboxPublisher outbox) {
+        return newService(policy, endRepo, mock(EndorsementPreviewRepository.class), pricing, billing, outbox);
+    }
+
+    private PolicyLifecycleService newService(Policy policy, EndorsementRequestRepository endRepo,
+                                               EndorsementPreviewRepository previewRepo,
+                                               PricingClient pricing, BillingClient billing,
+                                               OutboxPublisher outbox) {
         PolicyRepository repo = mock(PolicyRepository.class);
         when(repo.findById(policy.getPolicyId())).thenReturn(Optional.of(policy));
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -105,7 +115,92 @@ class EndorsementHardeningTest {
         when(docRepo.findByPolicyIdOrderByVersionDesc(policy.getPolicyId())).thenReturn(List.of());
         when(docRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        return new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, pricing, billing, outbox);
+        return new PolicyLifecycleService(repo, segRepo, docRepo, endRepo, previewRepo, billing, outbox);
+    }
+
+    private ExposureSegment activeSegment(Policy policy) {
+        ExposureSegment seg = new ExposureSegment();
+        seg.setSegmentId(UUID.randomUUID());
+        seg.setPolicyId(policy.getPolicyId());
+        seg.setExposureSegmentSeq(0);
+        seg.setSegmentStart(policy.getPolicyEffectiveDate());
+        seg.setSegmentEnd(policy.getPolicyExpirationDate());
+        seg.setCoverageAmountVnd(100_000_000L);
+        seg.setDeductibleVnd(1_000_000L);
+        seg.setRiskSnapshot("{\"vehicle_value_vnd\":400000000,\"vehicle_age\":2}");
+        return seg;
+    }
+
+    @Test
+    void previewEndorsementReturnsPendingAndPersistsAsyncPreview() {
+        Policy policy = activePolicy();
+        ExposureSegment base = activeSegment(policy);
+
+        PolicyRepository repo = mock(PolicyRepository.class);
+        when(repo.findById(policy.getPolicyId())).thenReturn(Optional.of(policy));
+        ExposureSegmentRepository segRepo = mock(ExposureSegmentRepository.class);
+        when(segRepo.findByPolicyIdOrderByExposureSegmentSeqAsc(policy.getPolicyId())).thenReturn(List.of(base));
+        EndorsementRequestRepository endRepo = mock(EndorsementRequestRepository.class);
+        EndorsementPreviewRepository previewRepo = mock(EndorsementPreviewRepository.class);
+        when(previewRepo.save(any(EndorsementPreviewEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        OutboxPublisher outbox = mock(OutboxPublisher.class);
+
+        PolicyLifecycleService s = new PolicyLifecycleService(repo, segRepo, mock(PolicyDocumentRepository.class),
+                endRepo, previewRepo, mock(BillingClient.class), outbox);
+
+        EndorsementPreviewResponse response = s.previewEndorsement(policy.getPolicyId(), validRequest(policy), SUBJECT);
+
+        assertEquals("PRICING_PENDING", response.getStatus());
+        assertNotNull(response.getPricingRequestId());
+        assertNull(response.getQuotedPremiumVnd());
+        assertEquals(policy.getFinalPremiumVnd(), response.getCurrentPremiumVnd());
+        verify(endRepo, never()).save(any());
+        ArgumentCaptor<EndorsementPreviewEntity> previewCaptor = ArgumentCaptor.forClass(EndorsementPreviewEntity.class);
+        verify(previewRepo).save(previewCaptor.capture());
+        EndorsementPreviewEntity saved = previewCaptor.getValue();
+        assertEquals(response.getPricingRequestId(), saved.getPricingRequestId());
+        assertEquals("PRICING_PENDING", saved.getStatus());
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(outbox).enqueue(eq("RepriceRequested"), payloadCaptor.capture());
+        assertTrue(payloadCaptor.getValue().contains("\"workflow\":\"ENDORSEMENT_PREVIEW\""));
+        assertTrue(payloadCaptor.getValue().contains(response.getPricingRequestId().toString()));
+    }
+
+    @Test
+    void previewStatusReturnsPricedResultAfterRepriceCompleted() {
+        Policy policy = activePolicy();
+        EndorsementPreviewRepository previewRepo = mock(EndorsementPreviewRepository.class);
+        EndorsementPreviewEntity preview = new EndorsementPreviewEntity();
+        UUID pricingRequestId = UUID.randomUUID();
+        preview.setPricingRequestId(pricingRequestId);
+        preview.setPolicyId(policy.getPolicyId());
+        preview.setCustomerId(policy.getCustomerId());
+        preview.setChangeSet("{\"vehicle_value_vnd\":500000000}");
+        preview.setEffectiveDate(policy.getPolicyEffectiveDate().plusDays(10));
+        preview.setCurrentPremiumVnd(policy.getFinalPremiumVnd());
+        preview.setCoverageAmountVnd(100_000_000L);
+        preview.setDeductibleVnd(1_000_000L);
+        preview.setRemainingDays(355);
+        preview.setTermDays(365);
+        preview.setStatus("PRICING_PENDING");
+        preview.setCreatedAt(OffsetDateTime.now());
+        when(previewRepo.findById(pricingRequestId)).thenReturn(Optional.of(preview));
+        when(previewRepo.save(any(EndorsementPreviewEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PolicyRepository repo = mock(PolicyRepository.class);
+        when(repo.findById(policy.getPolicyId())).thenReturn(Optional.of(policy));
+        PolicyLifecycleService s = new PolicyLifecycleService(repo, mock(ExposureSegmentRepository.class),
+                mock(PolicyDocumentRepository.class), mock(EndorsementRequestRepository.class), previewRepo,
+                mock(BillingClient.class), mock(OutboxPublisher.class));
+
+        s.handleRepriceCompleted(pricingRequestId.toString(), "ENDORSEMENT_PREVIEW", 2_200_000L, null);
+        EndorsementPreviewResponse response = s.getEndorsementPreview(policy.getPolicyId(), pricingRequestId, SUBJECT);
+
+        assertEquals("PRICED", response.getStatus());
+        assertEquals(2_200_000L, response.getQuotedPremiumVnd());
+        assertEquals(1_200_000L, response.getDifferenceVnd());
+        assertEquals(Math.round(1_200_000L * (355 / 365.0)), response.getProRatedChargeVnd());
+        verify(previewRepo, times(1)).save(preview);
     }
 
     // -- A4: Concurrent endorsement block --

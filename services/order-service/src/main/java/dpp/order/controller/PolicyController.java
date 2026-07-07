@@ -66,6 +66,12 @@ public class PolicyController {
         return lifecycleService.previewEndorsement(id, request, jwt.getSubject());
     }
 
+    @GetMapping("/{id}/endorsements/preview/{pricingRequestId}")
+    public EndorsementPreviewResponse getEndorsementPreview(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                             @PathVariable UUID pricingRequestId) {
+        return lifecycleService.getEndorsementPreview(id, pricingRequestId, jwt.getSubject());
+    }
+
     @PostMapping("/{id}/endorsements")
     public EndorsementResult endorse(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                      @Valid @RequestBody EndorsementRequest request) {

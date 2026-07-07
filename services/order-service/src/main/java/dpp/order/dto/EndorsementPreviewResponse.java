@@ -13,7 +13,7 @@ public class EndorsementPreviewResponse {
     private OffsetDateTime effectiveDate;
     private boolean materialChange;
     private long currentPremiumVnd;
-    private long quotedPremiumVnd;
+    private Long quotedPremiumVnd;
     private long differenceVnd;
     private long proRatedChargeVnd;
     private long remainingDays;
@@ -22,4 +22,5 @@ public class EndorsementPreviewResponse {
     private long deductibleVnd;
     private String status;
     private UUID pricingRequestId;
+    private String pricingFailedReason;
 }

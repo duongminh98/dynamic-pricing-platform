@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ApiError } from '../api/client';
-import { useApi, useMutation, vndLabel, dateOnly, dateTime } from '../lib/format';
+import { ApiError, apiFetch } from '../api/client';
+import { useApi, useMutation, useInterval, vndLabel, dateOnly, dateTime } from '../lib/format';
 import { viFeature, viProduct } from '../lib/labels';
 import { LINE_FIELDS, LINE_LABEL, LINE_ICON, AttrField, Line } from '../lib/domain';
 import { TextField, TextAreaField, NumberField, SelectField, Toggle } from '../lib/fields';
@@ -266,18 +266,74 @@ function EndorsePanel({ policyId, line, onDone }: { policyId: string; line: Line
   const fields = line ? LINE_FIELDS[line] : [];
   const [change, setChange] = useState<Record<string, string | number | boolean>>({});
   const [preview, setPreview] = useState<any>(null);
+  const [pollingPreviewId, setPollingPreviewId] = useState<string | null>(null);
+  const pollingPreviewIdRef = useRef<string | null>(null);
+  const [pollAttempts, setPollAttempts] = useState(0);
+  const [pollError, setPollError] = useState<ApiError | null>(null);
 
   const buildBody = () => ({
     change,
   });
   const hasChange = Object.keys(change).length > 0;
+  const previewPending = Boolean(preview && preview.status === 'PRICING_PENDING' && pollingPreviewId);
+  const previewReady = Boolean(preview && preview.status === 'PRICED');
+  const canSubmit = hasChange && !busy && previewReady;
+
+  useEffect(() => {
+    pollingPreviewIdRef.current = pollingPreviewId;
+  }, [pollingPreviewId]);
+
+  useInterval(() => {
+    if (!pollingPreviewId) return;
+    const requestId = pollingPreviewId;
+    setPollAttempts((n) => n + 1);
+    apiFetch<any>(`/policies/${policyId}/endorsements/preview/${requestId}`)
+      .then((next) => {
+        if (requestId !== pollingPreviewIdRef.current) return;
+        setPreview(next);
+        setPollError(null);
+        if (next.status === 'PRICED' || next.status === 'PRICING_FAILED') {
+          pollingPreviewIdRef.current = null;
+          setPollingPreviewId(null);
+        }
+      })
+      .catch((e) => {
+        if (requestId !== pollingPreviewIdRef.current) return;
+        const err = e instanceof ApiError ? e : new ApiError(0, 'NETWORK', String(e), null, null);
+        setPollError(err);
+        pollingPreviewIdRef.current = null;
+        setPollingPreviewId(null);
+      });
+  }, pollingPreviewId ? 1500 : null);
+
+  useEffect(() => {
+    if (!pollingPreviewId || pollAttempts < 20) return;
+    pollingPreviewIdRef.current = null;
+    setPollingPreviewId(null);
+    setPollError(new ApiError(408, 'PRICING_TIMEOUT', 'Tính phí mất nhiều thời gian hơn dự kiến. Vui lòng thử lại.', null, null));
+  }, [pollingPreviewId, pollAttempts]);
 
   const doPreview = async () => {
-    try { setPreview(await run<any>(`/policies/${policyId}/endorsements/preview`, { method: 'POST', body: buildBody() })); }
+    try {
+      setPollError(null);
+      pollingPreviewIdRef.current = null;
+      setPollingPreviewId(null);
+      setPollAttempts(0);
+      const first = await run<any>(`/policies/${policyId}/endorsements/preview`, { method: 'POST', body: buildBody() });
+      setPreview(first);
+      if (first.status === 'PRICING_PENDING' && first.pricing_request_id) {
+        pollingPreviewIdRef.current = first.pricing_request_id;
+        setPollingPreviewId(first.pricing_request_id);
+      }
+    }
     catch { /* shown */ }
   };
   const submit = async () => {
     try {
+      if (!previewReady) {
+        toast.push('Vui lòng xem trước phí và chờ hệ thống tính xong trước khi gửi.', 'warn');
+        return;
+      }
       await run(`/policies/${policyId}/endorsements`, { method: 'POST', body: buildBody() });
       toast.push('Đã gửi yêu cầu sửa đổi. Đang chờ duyệt.');
       onDone();
@@ -291,7 +347,7 @@ function EndorsePanel({ policyId, line, onDone }: { policyId: string; line: Line
   return (
     <div className="panel stack">
       <Alert kind="info">Sửa đổi thuộc tính tài sản (ví dụ giá trị xe). Không thể đổi số tiền bảo hiểm hay mức miễn thường tại đây.</Alert>
-      <ErrorBanner error={error} />
+      <ErrorBanner error={error || pollError} />
       <div className="field-hint">Sửa đổi có hiệu lực ngay khi được duyệt và hoàn tất thanh toán nếu có phí phải trả.</div>
       {fields.length === 0 ? (
         <Alert kind="warn">Không xác định được dòng sản phẩm của hợp đồng này.</Alert>
@@ -306,6 +362,10 @@ function EndorsePanel({ policyId, line, onDone }: { policyId: string; line: Line
                 return next;
               });
               setPreview(null);
+              pollingPreviewIdRef.current = null;
+              setPollingPreviewId(null);
+              setPollAttempts(0);
+              setPollError(null);
             }} />
           ))}
         </div>
@@ -314,15 +374,26 @@ function EndorsePanel({ policyId, line, onDone }: { policyId: string; line: Line
       {preview && (
         <div className="panel" style={{ background: 'var(--raised)' }}>
           <div className="kv" style={{ borderTop: 'none' }}><span className="kv-k">Phí hiện tại</span><span className="kv-v">{vndLabel(preview.current_premium_vnd)}</span></div>
-          <div className="kv"><span className="kv-k">Phí sau sửa đổi</span><span className="kv-v">{vndLabel(preview.quoted_premium_vnd)}</span></div>
-          <div className="kv"><span className="kv-k">Chênh lệch theo tỷ lệ</span><span className="kv-v">{vndLabel(preview.pro_rated_charge_vnd)}</span></div>
+          {preview.status === 'PRICING_PENDING' ? (
+            <div className="row" style={{ marginTop: 10 }}>
+              {previewPending && <Spinner />}
+              <span className="field-hint">{previewPending ? 'Đang tính phí sau sửa đổi…' : 'Chưa có kết quả phí. Bấm Xem trước phí để thử lại.'}</span>
+            </div>
+          ) : preview.status === 'PRICING_FAILED' ? (
+            <Alert kind="err">Không tính được phí preview{preview.pricing_failed_reason ? `: ${preview.pricing_failed_reason}` : '.'}</Alert>
+          ) : (
+            <>
+              <div className="kv"><span className="kv-k">Phí sau sửa đổi</span><span className="kv-v">{vndLabel(preview.quoted_premium_vnd)}</span></div>
+              <div className="kv"><span className="kv-k">Chênh lệch theo tỷ lệ</span><span className="kv-v">{vndLabel(preview.pro_rated_charge_vnd)}</span></div>
+            </>
+          )}
           <div className="field-hint">Còn {preview.remaining_days}/{preview.term_days} ngày trong kỳ.</div>
         </div>
       )}
 
       <div className="row">
-        <button className="btn btn-ghost" disabled={busy || !hasChange} onClick={doPreview}>{busy && !preview ? <Spinner /> : 'Xem trước phí'}</button>
-        <button className="btn btn-primary" disabled={busy || !hasChange} onClick={submit}>Gửi yêu cầu sửa đổi</button>
+        <button className="btn btn-ghost" disabled={busy || previewPending || !hasChange} onClick={doPreview}>{(busy && !preview) || previewPending ? <Spinner /> : 'Xem trước phí'}</button>
+        <button className="btn btn-primary" disabled={!canSubmit} onClick={submit}>Gửi yêu cầu sửa đổi</button>
       </div>
     </div>
   );

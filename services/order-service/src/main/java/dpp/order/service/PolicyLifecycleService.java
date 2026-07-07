@@ -41,6 +41,9 @@ public class PolicyLifecycleService {
 
     static final int ENDORSEMENT_PAYMENT_DUE_DAYS = 14;
     static final long MIN_SETTLE_AMOUNT = 10_000L;
+    private static final String PREVIEW_PRICING_PENDING = "PRICING_PENDING";
+    private static final String PREVIEW_PRICED = "PRICED";
+    private static final String PREVIEW_PRICING_FAILED = "PRICING_FAILED";
 
     private static final Map<String, Set<String>> ALLOWED_KEYS_BY_LINE = Map.of(
             "health", Set.of("height_cm", "weight_kg", "bmi", "smoker", "chronic_disease",
@@ -73,6 +76,7 @@ public class PolicyLifecycleService {
     private final PolicyRepository policyRepository;    private final ExposureSegmentRepository segmentRepository;
     private final PolicyDocumentRepository documentRepository;
     private final EndorsementRequestRepository endorsementRequestRepository;
+    private final EndorsementPreviewRepository endorsementPreviewRepository;
     private final BillingClient billingClient;
     private final OutboxPublisher outboxPublisher;
     private final ObjectMapper objectMapper;
@@ -81,12 +85,14 @@ public class PolicyLifecycleService {
     public PolicyLifecycleService(PolicyRepository policyRepository, ExposureSegmentRepository segmentRepository,
                                    PolicyDocumentRepository documentRepository,
                                    EndorsementRequestRepository endorsementRequestRepository,
+                                   EndorsementPreviewRepository endorsementPreviewRepository,
                                    BillingClient billingClient,
                                    OutboxPublisher outboxPublisher) {
         this.policyRepository = policyRepository;
         this.segmentRepository = segmentRepository;
         this.documentRepository = documentRepository;
         this.endorsementRequestRepository = endorsementRequestRepository;
+        this.endorsementPreviewRepository = endorsementPreviewRepository;
         this.billingClient = billingClient;
         this.outboxPublisher = outboxPublisher;
         this.objectMapper = new ObjectMapper();
@@ -95,10 +101,19 @@ public class PolicyLifecycleService {
     public PolicyLifecycleService(PolicyRepository policyRepository, ExposureSegmentRepository segmentRepository,
                                    PolicyDocumentRepository documentRepository,
                                    EndorsementRequestRepository endorsementRequestRepository,
+                                   BillingClient billingClient,
+                                   OutboxPublisher outboxPublisher) {
+        this(policyRepository, segmentRepository, documentRepository, endorsementRequestRepository,
+                (EndorsementPreviewRepository) null, billingClient, outboxPublisher);
+    }
+
+    public PolicyLifecycleService(PolicyRepository policyRepository, ExposureSegmentRepository segmentRepository,
+                                   PolicyDocumentRepository documentRepository,
+                                   EndorsementRequestRepository endorsementRequestRepository,
                                    PricingClient ignoredPricingClient, BillingClient billingClient,
                                    OutboxPublisher outboxPublisher) {
         this(policyRepository, segmentRepository, documentRepository, endorsementRequestRepository,
-                billingClient, outboxPublisher);
+                (EndorsementPreviewRepository) null, billingClient, outboxPublisher);
     }
 
     /**
@@ -109,11 +124,10 @@ public class PolicyLifecycleService {
      * approve/reject - the customer can never self-approve.
      */
     /**
-     * Preview an endorsement: re-rate without saving anything. Returns the current
-     * premium, the quoted premium for the proposed change, whether it is material,
-     * and the difference. The customer can review this before deciding to submit.
+     * Preview an endorsement: persist a short-lived async pricing preview and
+     * return a pricing_request_id that the customer UI can poll until priced.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public EndorsementPreviewResponse previewEndorsement(UUID policyId, EndorsementRequest request, String keycloakSubject) {
         Policy policy = findOwnedPolicy(policyId, keycloakSubject);
         if (policy.getStatus() != PolicyStatus.active) {
@@ -145,29 +159,32 @@ public class PolicyLifecycleService {
         mergedProfile.put("deductible_vnd", newDeductible);
 
         UUID pricingRequestId = UUID.randomUUID();
-        enqueueRepriceRequested(pricingRequestId, "ENDORSEMENT_PREVIEW", policy, mergedProfile, null);
-
         long currentPremium = policy.getFinalPremiumVnd();
-        EndorsementPreviewResponse resp = new EndorsementPreviewResponse();
-        resp.setPolicyId(policyId);
-        resp.setEffectiveDate(eff);
-        resp.setMaterialChange(true);
-        resp.setCurrentPremiumVnd(currentPremium);
-        resp.setQuotedPremiumVnd(currentPremium);
-        resp.setDifferenceVnd(0L);
-        resp.setStatus("PRICING_PENDING");
-        resp.setPricingRequestId(pricingRequestId);
         long termDays = ChronoUnit.DAYS.between(policy.getPolicyEffectiveDate(), policy.getPolicyExpirationDate());
         long remainingDays = ChronoUnit.DAYS.between(eff, policy.getPolicyExpirationDate());
-        double fraction = termDays > 0 ? remainingDays / (double) termDays : 0;
-        fraction = Math.max(0.0, Math.min(1.0, fraction));
-        long proRated = 0L;
-        resp.setProRatedChargeVnd(proRated);
-        resp.setRemainingDays(remainingDays);
-        resp.setTermDays(termDays);
-        resp.setCoverageAmountVnd(newCoverage);
-        resp.setDeductibleVnd(newDeductible);
-        return resp;
+
+        EndorsementPreviewEntity preview = new EndorsementPreviewEntity();
+        preview.setPricingRequestId(pricingRequestId);
+        preview.setPolicyId(policyId);
+        preview.setCustomerId(policy.getCustomerId());
+        try {
+            preview.setChangeSet(objectMapper.writeValueAsString(change));
+        } catch (Exception e) {
+            preview.setChangeSet("{}");
+        }
+        preview.setEffectiveDate(eff);
+        preview.setCurrentPremiumVnd(currentPremium);
+        preview.setQuotedPremiumVnd(null);
+        preview.setCoverageAmountVnd(newCoverage);
+        preview.setDeductibleVnd(newDeductible);
+        preview.setRemainingDays(remainingDays);
+        preview.setTermDays(termDays);
+        preview.setStatus(PREVIEW_PRICING_PENDING);
+        preview.setCreatedAt(now);
+        saveEndorsementPreview(preview);
+
+        enqueueRepriceRequested(pricingRequestId, "ENDORSEMENT_PREVIEW", policy, mergedProfile, null);
+        return toEndorsementPreviewResponse(preview);
     }
 
     @Transactional
@@ -426,6 +443,16 @@ public class PolicyLifecycleService {
     public List<EndorsementRequestResponse> voidedEndorsements() {
         return endorsementRequestRepository.findByStatusOrderByCreatedAtAsc(EndorsementStatus.VOID)
                 .stream().map(this::toEndorsementResponse).collect(java.util.stream.Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public EndorsementPreviewResponse getEndorsementPreview(UUID policyId, UUID pricingRequestId, String keycloakSubject) {
+        findOwnedPolicy(policyId, keycloakSubject);
+        EndorsementPreviewEntity preview = findEndorsementPreview(pricingRequestId);
+        if (preview == null || !preview.getPolicyId().equals(policyId)) {
+            throw new ServiceException(ErrorCode.RESOURCE_NOT_FOUND, "Endorsement preview not found", null);
+        }
+        return toEndorsementPreviewResponse(preview);
     }
 
     @Transactional(readOnly = true)
@@ -804,6 +831,45 @@ public class PolicyLifecycleService {
         } catch (Exception e) {
             return new LinkedHashMap<>();
         }
+    }
+
+    private EndorsementPreviewEntity findEndorsementPreview(UUID pricingRequestId) {
+        if (endorsementPreviewRepository == null) {
+            return null;
+        }
+        return endorsementPreviewRepository.findById(pricingRequestId).orElse(null);
+    }
+
+    private void saveEndorsementPreview(EndorsementPreviewEntity preview) {
+        if (endorsementPreviewRepository != null) {
+            endorsementPreviewRepository.save(preview);
+        }
+    }
+
+    private EndorsementPreviewResponse toEndorsementPreviewResponse(EndorsementPreviewEntity preview) {
+        EndorsementPreviewResponse resp = new EndorsementPreviewResponse();
+        resp.setPolicyId(preview.getPolicyId());
+        resp.setEffectiveDate(preview.getEffectiveDate());
+        resp.setMaterialChange(true);
+        resp.setCurrentPremiumVnd(preview.getCurrentPremiumVnd());
+        resp.setQuotedPremiumVnd(preview.getQuotedPremiumVnd());
+        long difference = preview.getQuotedPremiumVnd() != null
+                ? preview.getQuotedPremiumVnd() - preview.getCurrentPremiumVnd()
+                : 0L;
+        resp.setDifferenceVnd(difference);
+        double fraction = preview.getTermDays() > 0
+                ? preview.getRemainingDays() / (double) preview.getTermDays()
+                : 0.0;
+        fraction = Math.max(0.0, Math.min(1.0, fraction));
+        resp.setProRatedChargeVnd(preview.getQuotedPremiumVnd() != null ? Math.round(difference * fraction) : 0L);
+        resp.setRemainingDays(preview.getRemainingDays());
+        resp.setTermDays(preview.getTermDays());
+        resp.setCoverageAmountVnd(preview.getCoverageAmountVnd());
+        resp.setDeductibleVnd(preview.getDeductibleVnd());
+        resp.setStatus(preview.getStatus());
+        resp.setPricingRequestId(preview.getPricingRequestId());
+        resp.setPricingFailedReason(preview.getPricingFailedReason());
+        return resp;
     }
 
     private EndorsementRequestResponse toEndorsementResponse(EndorsementRequestEntity req) {
@@ -1304,6 +1370,8 @@ public class PolicyLifecycleService {
             handleEndorsementRepriced(pricingRequestId, finalPremiumVnd, failureReason);
         } else if ("RENEWAL_SUBMIT".equals(workflow)) {
             handleRenewalRepriced(pricingRequestId, finalPremiumVnd, failureReason);
+        } else if ("ENDORSEMENT_PREVIEW".equals(workflow)) {
+            handleEndorsementPreviewRepriced(pricingRequestId, finalPremiumVnd, failureReason);
         }
     }
 
@@ -1337,6 +1405,23 @@ public class PolicyLifecycleService {
                 "quoted_premium_vnd", finalPremiumVnd,
                 "difference_vnd", finalPremiumVnd - currentPremium,
                 "pro_rated_charge_vnd", Math.round((finalPremiumVnd - currentPremium) * fraction)));
+    }
+
+    private void handleEndorsementPreviewRepriced(UUID pricingRequestId, Long finalPremiumVnd, String failureReason) {
+        EndorsementPreviewEntity preview = findEndorsementPreview(pricingRequestId);
+        if (preview == null || !PREVIEW_PRICING_PENDING.equals(preview.getStatus())) {
+            return;
+        }
+        if (finalPremiumVnd == null) {
+            preview.setStatus(PREVIEW_PRICING_FAILED);
+            preview.setPricingFailedReason(failureReason);
+            saveEndorsementPreview(preview);
+            return;
+        }
+        preview.setQuotedPremiumVnd(finalPremiumVnd);
+        preview.setStatus(PREVIEW_PRICED);
+        preview.setPricingFailedReason(null);
+        saveEndorsementPreview(preview);
     }
 
     private void handleRenewalRepriced(UUID pricingRequestId, Long finalPremiumVnd, String failureReason) {
