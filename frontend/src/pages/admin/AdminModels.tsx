@@ -145,14 +145,14 @@ function ModelsPanel({ line }: { line: Line }) {
       {data && data.length > 0 && (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Version</th><th>Family</th><th>Status</th><th>Dataset</th><th>Gini</th><th>Gates</th><th>Checksum</th><th></th></tr></thead>
+            <thead><tr><th>Version</th><th>Family</th><th>Status</th><th style={{ maxWidth: 120 }}>Dataset</th><th>Gini</th><th>Gates</th><th>Checksum</th><th></th></tr></thead>
             <tbody>
               {data.map((m) => (
                 <tr key={m.model_version_id}>
                   <td className="mono" style={{ fontSize: '0.78rem' }}>{m.model_version_id}<div className="faint" style={{ fontSize: '0.7rem' }}>{dateTime(m.trained_at)}</div></td>
                   <td>{m.algorithm}<div className="faint">{m.family || 'freqsev'}</div></td>
                   <td>{m.is_champion ? <span className="pill pill-ok">champion</span> : <span className="pill pill-muted">{m.status || 'unknown'}</span>}</td>
-                  <td className="mono" style={{ fontSize: '0.72rem' }}>{m.dataset_version_id || m.dataset_desc}</td>
+                  <td className="mono" style={{ fontSize: '0.72rem', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.dataset_version_id || m.dataset_desc}>{m.dataset_version_id || m.dataset_desc}</td>
                   <td className="num">{m.gini?.toFixed(3)}</td>
                   <td>
                     {m.monotonic_applied ? <span className="pill pill-ok">mono</span> : <span className="pill pill-muted">mono</span>}
@@ -160,7 +160,7 @@ function ModelsPanel({ line }: { line: Line }) {
                     {m.quality_gates?.comparison_passed ? <span className="pill pill-ok">compare</span> : <span className="pill pill-muted">compare</span>}
                   </td>
                   <td className="mono" style={{ fontSize: '0.72rem' }}>{m.artifact_checksum ? m.artifact_checksum.slice(0, 12) : '—'}</td>
-                  <td className="num">
+                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
                     {!m.is_champion && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => promote(m.model_version_id)}>Promote</button>}
                     {!m.is_champion && m.status === 'CANDIDATE' && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => reject(m.model_version_id)}>Reject</button>}
                   </td>
