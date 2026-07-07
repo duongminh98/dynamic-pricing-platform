@@ -1,100 +1,186 @@
-﻿# Dynamic Pricing Platform
+# Dynamic Pricing Platform
 
-A microservices platform for dynamic insurance pricing featuring an AI pricing engine (Python/FastAPI with LightGBM + SHAP explainability) and six Java/Spring Boot services, orchestrated through a Kong API gateway with Keycloak JWT authentication and RabbitMQ async messaging.
+---
 
-## Architecture
+## Overview
+
+Dynamic Pricing Platform is a **microservices-based insurance platform** that delivers AI-powered dynamic pricing across six insurance lines. It covers the full customer journey: profile capture, quoting with explainable premiums, order review, payment, policy issuance, endorsements, and claims, backed by an offline model lifecycle for governed champion/challenger management.
+
+### Architecture Highlights
+
+- **Microservices Architecture** - Six Java/Spring Boot services plus one Python/FastAPI pricing engine
+- **AI-Powered Pricing** - Frequency x Severity LightGBM models with SHAP explainability and monotonic constraints
+- **Event-Driven Communication** - RabbitMQ async messaging via the transactional outbox pattern
+- **Centralized API Gateway** - Kong for routing, JWT verification, and trusted identity header injection
+- **Identity Management** - Keycloak (OAuth 2.0 / OpenID Connect) with two realm roles
+- **Governed Model Lifecycle** - Offline retrain, drift monitoring, and champion promotion outside the serving path
+- **Monitoring & Observability** - Prometheus metrics and Grafana dashboards
+- **Cloud-Native Deployment** - GKE Autopilot, Cloud SQL, and Cloud Run Jobs on Google Cloud
+
+---
+
+## Project Structure
 
 ```
-                    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                    â”‚ Keycloak â”‚ (JWT RS256, 2 roles: Customer, Administrator)
-                    â””â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”˜
-                         â”‚
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”      â”Œâ”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”      â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Client â”‚â”€â”€â”€â”€â”€â–¶â”‚  Kong Gateway  â”‚â”€â”€â”€â”€â”€â–¶â”‚  Microservices   â”‚
-â”‚ (React) â”‚      â”‚  (port 8000)   â”‚      â”‚  (6 Java + 1 Py) â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜      â””â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”˜      â””â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                         â”‚                        â”‚
-                  â”Œâ”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”          â”Œâ”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”
-                  â”‚ Prometheus  â”‚          â”‚  RabbitMQ   â”‚ (outbox pattern)
-                  â”‚   Grafana   â”‚          â”‚  exchange:  â”‚
-                  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜          â”‚platform.eventsâ”‚
-                                           â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+Dynamic Pricing Platform/
+├── services/                         # Java/Spring Boot 3.3 microservices (Java 17)
+│   ├── common/                       # Shared module (outbox, security, error handling)
+│   ├── customer-service/             # Auth events, profile management, line validation
+│   ├── product-service/              # Product catalog, admin config, rate versions
+│   ├── order-service/                # Order lifecycle, policy issuance, endorsements
+│   ├── billing-service/              # Invoice creation, VNPay payment, pro-rata adjustments
+│   ├── claims-service/               # FNOL, approve/reject, misrepresentation
+│   ├── notification-service/         # Event-driven notifications
+│   └── build.gradle                  # Gradle multi-module build config
+│
+├── pricing/                          # Python/FastAPI pricing engine
+│   ├── app/                          # Routers, pricing engine, feature store, governance
+│   ├── common/                       # Shared Python module (errors, health, metrics)
+│   └── migrations/                   # Alembic DB migrations
+│
+├── offline/                          # Offline model lifecycle (never in serving path)
+│   ├── build_training_dataset_from_pricing_db.py  # Immutable dataset export + registry
+│   ├── train_pricing_models.py       # Frequency x Severity training
+│   ├── compare_candidate_to_champion.py           # Holdout comparison gate
+│   ├── register_candidate_model.py   # Register after gates pass
+│   ├── model_lifecycle_pipeline.py   # Coarse export→train→compare→gate→register job
+│   ├── retrain_trigger.py            # Schedule / data-threshold / drift trigger
+│   └── drift_monitor.py              # Feature PSI, prediction PSI, calibration
+│
+├── frontend/                         # React 18 + Vite 5 + TypeScript mini app
+│   └── src/
+│       ├── pages/                    # Route pages (customer + admin)
+│       ├── components/               # Reusable components
+│       ├── api/                      # API client
+│       ├── auth/                     # Keycloak integration
+│       └── lib/                      # Formatting, domain, UI helpers
+│
+├── infra/                            # Infrastructure configs
+│   ├── kong/                         # Kong declarative config (routes, JWT, upstreams)
+│   ├── keycloak/                     # Realm export (roles, users, clients)
+│   ├── prometheus/                   # Prometheus scrape config
+│   ├── grafana/                      # Dashboards and provisioning
+│   └── rabbitmq/                     # Exchange/queue definitions
+│
+├── deploy/                           # GCP deployment (GKE + Cloud Run lifecycle)
+│   ├── provision.sh                  # Project, VPC, Cloud SQL, buckets, IAM
+│   ├── build_images.sh               # Cloud Build image builds
+│   ├── deploy.sh                     # Render + apply k8s manifests
+│   ├── lifecycle_deploy.sh           # Cloud Run Jobs + Workflow + Scheduler
+│   ├── smoke.sh                      # Post-deploy smoke checks
+│   └── k8s/                          # Rendered Kubernetes manifests
+│
+├── reports/modeling/models/          # 36 trained model artifacts + champion_config.json
+├── data/                             # Training datasets, geo risk, cost indices
+├── scripts/                          # Model training and EDA scripts
+├── docker-compose.yml                # Local orchestration (full stack)
+├── .github/workflows/                # CI + CD pipelines
+└── README.md                         # This file
 ```
 
-- **Sync flow:** Client â†’ Kong Gateway (JWT verification) â†’ Java/FastAPI services
-- **Async flow:** Services publish events via transactional outbox â†’ RabbitMQ exchange `platform.events`
-- **Pricing:** FastAPI service loads 36 model artifacts (6 lines Ã— 3 families Ã— 2 algorithms), uses champion config for model selection, returns premiums with SHAP explanations
+---
 
 ## Quick Start
 
 ### Prerequisites
 
-- Docker Desktop (with WSL2 backend)
-- Java 17+ (Gradle toolchain auto-resolves)
-- Python 3.11+ with pip
+- **Docker Desktop** - with WSL2 backend, for containerized deployment
+- **Java 17+** - for backend development (Gradle toolchain auto-resolves)
+- **Node 20+** - for frontend development
+- **Python 3.11+** - for pricing service development
 
-### Run everything with one command
+### 1. Clone & Configure
 
 ```bash
+git clone https://github.com/duongminh98/dynamic-pricing-platform.git
+cd "Dynamic Pricing Platform"
+
+# Copy environment template
+cp .env.example .env
+
+# Edit .env with your configuration
+# Required: DB passwords, Keycloak credentials, VNPay sandbox keys, etc.
+```
+
+### 2. Start All Services
+
+```bash
+# Build and start the full stack in containers
 docker compose up --build -d
 ```
 
-This builds and starts the full stack in containers: 7 PostgreSQL databases,
-RabbitMQ, Keycloak, Kong, Prometheus, Grafana, all six Spring Boot services
-(two replicas each), the Pricing service (two replicas, FastAPI), and the
-frontend Mini_App (nginx). Java services run Flyway migrations on startup; the
-Pricing container runs `alembic upgrade head` before serving (R16.1).
+This builds and starts the full stack: 7 PostgreSQL databases, RabbitMQ, Keycloak, Kong, Prometheus, Grafana, all six Spring Boot services (two replicas each), the Pricing service (two replicas, FastAPI), and the frontend (nginx). Java services run Flyway migrations on startup; the Pricing container runs `alembic upgrade head` before serving.
 
-Verify the stack is healthy:
+### 3. Verify Services
 
 ```bash
+# Check all services are running
 docker compose ps
+
+# Service health checks
+curl http://localhost:8000                              # Kong API Gateway
+curl http://localhost:8000/pricing/health               # Pricing Service
+curl http://localhost:8080/realms/dynamic-pricing       # Keycloak realm
 ```
 
-- API gateway (Kong): http://localhost:8000
-- Frontend (Mini_App): http://localhost:3001
-- Keycloak: http://localhost:8080
+### 4. Access Applications
 
-> The legacy `checkpoint` profile (nginx health-stub) is still available for the
-> infrastructure-only checkpoint: `docker compose --profile checkpoint up -d`.
+| Application | URL | Credentials |
+|-------------|-----|-------------|
+| **Frontend** | http://localhost:3001 | See Demo Accounts below |
+| **API Gateway (Kong)** | http://localhost:8000 | JWT via Keycloak |
+| **Keycloak** | http://localhost:8080 | admin/admin (realm: dynamic-pricing) |
+| **Grafana** | http://localhost:3000 | admin/admin |
+| **RabbitMQ Management** | http://localhost:15672 | See .env |
+| **Prometheus** | http://localhost:9090 | - |
 
-#### Local development (without containers)
+---
 
-For iterating on a single service you can still run it from a built jar
-(`./gradlew :services:<svc>:bootJar` then `java -jar ...`) or, for Pricing,
-`uvicorn app.main:app --port 9001` after `alembic upgrade head`. Point
-`PRICING_BASE_URL` / DB host env vars at your local infra in that case.
+## Cloud Deployment (GCP Staging)
 
-## Services and Ports
+A live staging environment runs on Google Cloud (GKE Autopilot + Cloud SQL, region `asia-southeast1`). Public traffic enters through Kong with managed TLS certificates.
 
-| Service | Technology | Public Host Port | Private Network Port | Database | DB Port |
-|---------|-----------|------------------|----------------------|----------|---------|
-| Kong Gateway | Kong 3.8 | 8000 (proxy), 8001 (admin) | 8000 | â€” | â€” |
-| Keycloak | Keycloak 26 | 8080 | 8080 | â€” | â€” |
-| Customer Service | Spring Boot | â€” | 8080 | customer_db | 5433 |
-| Product Service | Spring Boot | â€” | 8080 | product_db | 5434 |
-| Order Service | Spring Boot | â€” | 8080 | order_db | 5435 |
-| Claims Service | Spring Boot | â€” | 8080 | claims_db | 5437 |
-| Billing Service | Spring Boot | â€” | 8080 | billing_db | 5438 |
-| Notification Service | Spring Boot | â€” | 8080 | notification_db | 5439 |
-| Pricing Service | FastAPI | â€” | 8000 | pricing_db | 5440 |
-| RabbitMQ | 3.13 | 5672 (AMQP), 15672 (mgmt) | 5672 | â€” | â€” |
-| Prometheus | v2.55 | 9090 | 9090 | â€” | â€” |
-| Grafana | 11.3 | 3000 | 3000 | â€” | â€” |
+### Live Endpoints
 
-Application services are intentionally not published to the host in Docker Compose. Public API traffic enters through Kong, which validates JWTs and forwards trusted identity headers to private upstream services.
+| Endpoint | URL | Description |
+|----------|-----|-------------|
+| **Frontend (SPA)** | https://app.dpp-pricing.dev | React mini app |
+| **API Gateway (Kong)** | https://api.dpp-pricing.dev | All service APIs (JWT enforced) |
+| **Keycloak** | https://auth.dpp-pricing.dev | Identity provider (realm: dynamic-pricing) |
+
+Quick checks:
+
+```bash
+curl https://api.dpp-pricing.dev/products                          # public catalog (200)
+curl https://auth.dpp-pricing.dev/realms/dynamic-pricing/.well-known/openid-configuration
+curl https://api.dpp-pricing.dev/pricing/quote                     # 401 without JWT
+```
+
+### Cloud Architecture
+
+- **GKE Autopilot** cluster `dpp` (namespace `dpp`) runs all seven app services, Kong, Keycloak, and RabbitMQ.
+- **Cloud SQL** PostgreSQL 16 (`dpp-pg`, private IP, 8 databases) with a Cloud SQL Auth Proxy sidecar per pod.
+- **Two GKE Ingress + managed certificates** front Kong (app + api) and Keycloak (auth).
+- **Offline model lifecycle** runs as **Cloud Run Jobs** (`pricing-lifecycle`, `pricing-drift-monitor`) orchestrated by a **Cloud Workflow** and a daily **Cloud Scheduler** trigger, all outside the serving path.
+- **Artifact Registry** hosts service images; **Secret Manager** holds DB URLs and client secrets; **Workload Identity Federation** provides keyless CI/CD auth.
+
+> Staging burns roughly $10-20/day. When idle, the cluster and Cloud SQL instance may be torn down to save credit and later re-provisioned from `deploy/provision.sh` + `deploy/deploy.sh`.
+
+---
 
 ## Demo Accounts
 
+Two seeded accounts cover the two realm roles. These are development-only credentials.
+
 | Role | Username | Password | Keycloak Subject |
 |------|----------|----------|------------------|
-| Customer | demo.customer | demo_customer_dev_only | 01e0e4c0-3671-4e84-a97b-7fdfd51fa901 |
-| Administrator | demo.admin | demo_admin_dev_only | 48cd30e3-a9ba-40e0-b4f1-93d1f408cfe3 |
+| **Customer** | demo.customer | demo_customer_dev_only | 01e0e4c0-3671-4e84-a97b-7fdfd51fa901 |
+| **Administrator** | demo.admin | demo_admin_dev_only | 48cd30e3-a9ba-40e0-b4f1-93d1f408cfe3 |
 
-Acquire a JWT via Keycloak password grant:
+Acquire a JWT via the Keycloak password grant (swap the host for `localhost:8080` locally or `auth.dpp-pricing.dev` on staging):
 
 ```bash
-curl -X POST http://localhost:8080/realms/dynamic-pricing/protocol/openid-connect/token \
+curl -X POST https://auth.dpp-pricing.dev/realms/dynamic-pricing/protocol/openid-connect/token \
   -d "grant_type=password" \
   -d "client_id=mini-app" \
   -d "username=demo.customer" \
@@ -102,25 +188,139 @@ curl -X POST http://localhost:8080/realms/dynamic-pricing/protocol/openid-connec
   -d "scope=openid"
 ```
 
+Use the returned `access_token` as `Authorization: Bearer <token>` against the API gateway.
+
+---
+
+## Services Overview
+
+### Backend Services (Java / Spring Boot 3.3, Java 17)
+
+All Java services listen on private port 8080 inside the Docker network and are reached only through Kong. Each owns its own PostgreSQL database.
+
+| Service | Database | Description |
+|---------|----------|-------------|
+| **customer-service** | customer_db | Profile management, line-specific validation, auth events |
+| **product-service** | product_db | Product catalog, admin config, append-only rate versions |
+| **order-service** | order_db | Order lifecycle, policy issuance, endorsements |
+| **billing-service** | billing_db | Invoice creation, VNPay payment, pro-rata adjustments |
+| **claims-service** | claims_db | FNOL, approve/reject, misrepresentation |
+| **notification-service** | notification_db | Event-driven notifications |
+
+### Pricing Service (Python / FastAPI)
+
+| Service | Database | Description |
+|---------|----------|-------------|
+| **pricing-service** | pricing_db | Explainable dynamic pricing across six lines |
+
+**Features:**
+- Frequency x Severity modeling with LightGBM
+- SHAP explainability with per-feature contribution narratives
+- 36 model artifacts (6 lines x 3 families x 2 algorithms), champion-only serving
+- Monotonic constraints and smoothness gates enforced offline
+- VND integer premiums (no floating point money)
+
+### Frontend (React + TypeScript)
+
+- **Framework:** React 18 with TypeScript 5.6
+- **Build Tool:** Vite 5
+- **Routing:** React Router v6
+- **Auth:** Keycloak (OIDC) via API client
+- **Features:**
+  - Profile capture across six insurance lines
+  - Quote flow with premium and SHAP explanation
+  - Order review, payment, and policy tracking
+  - Claims (FNOL) submission and history
+  - Admin dashboard: order/claims review, model lifecycle, drift monitoring
+
+---
+
+## Technology Stack
+
+### Backend
+```
+├── Spring Boot 3.3.5
+├── Spring Data JPA
+├── PostgreSQL (Flyway migrations)
+├── RabbitMQ (transactional outbox)
+├── Kong Gateway (JWT enforcement)
+└── Java 17
+```
+
+### Frontend
+```
+├── React 18
+├── TypeScript 5.6
+├── Vite 5 (Build Tool)
+├── React Router v6
+└── Keycloak (OIDC)
+```
+
+### AI / ML
+```
+├── FastAPI (Web Framework)
+├── LightGBM (ML Models)
+├── SHAP (Explainability)
+├── scikit-learn
+├── pandas, numpy
+├── SQLAlchemy + Alembic
+└── Python 3.11
+```
+
+### Infrastructure
+```
+├── Docker Compose (Local Orchestration)
+├── Kong (API Gateway)
+├── Keycloak (Identity)
+├── RabbitMQ (Event Streaming)
+├── Prometheus (Metrics)
+├── Grafana (Dashboards)
+└── PostgreSQL (Database, one per service)
+```
+
+---
+
+## Key Integrations
+
+### 1. Pricing Service Integration
+
+The frontend calls the pricing engine through Kong to generate an explainable quote:
+
+```
+POST /pricing/quote        (Customer JWT)
+→ champion model selection, feature derivation, premium calculation, SHAP explanation
+→ returns final_premium_vnd, risk breakdown, and per-feature contributions
+```
+
+### 2. Event Flow (RabbitMQ + Outbox)
+
+Each service owns an `outbox` table. An `OutboxRelay` polls it and publishes to the RabbitMQ exchange `platform.events` with the event type as routing key:
+
+```
+Order Service   → InvoicePaid consumer → issues policy → PolicyIssued
+Billing Service → InvoicePaid          → Notification Service
+Product Service → product events        → Pricing read-model
+```
+
+### 3. Kong Gateway
+
+Kong validates JWTs at the edge, strips any spoofed `X-Authenticated-*` headers, injects trusted identity from JWT claims, and forwards to private upstreams. Services perform role checks (Customer vs Administrator) using those trusted headers.
+
+---
+
 ## API Endpoints
 
-### Swagger UI and OpenAPI
+All endpoints are reached through Kong. On staging the base is `https://api.dpp-pricing.dev`; locally it is `http://localhost:8000`.
 
-Backend services keep Swagger/OpenAPI endpoints on their private service ports. In the Docker stack those ports are not published to the host; expose docs through Kong or a dev-only override when API inspection is needed.
-
-Spring Boot services use Springdoc (`/swagger-ui.html`, `/v3/api-docs`). The Pricing service uses FastAPI's built-in Swagger UI (`/docs`) and OpenAPI document (`/openapi.json`). Production environments should keep service docs private, admin-protected through Kong, or disabled.
-
-### Customer Service (8081)
+### Customer Service
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/login` | Public | Frontend redirects to Keycloak hosted login |
-| GET | `/register` | Public | Frontend redirects to Keycloak hosted registration |
 | GET | `/customers/me` | Customer | Get current customer info |
 | PUT | `/customers/me/profile` | Customer | Upsert insurance profile (line-specific validation) |
 | GET | `/customers/me/profile` | Customer | Get latest profile |
 
-### Product Service (8082)
+### Product Service
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -131,19 +331,20 @@ Spring Boot services use Springdoc (`/swagger-ui.html`, `/v3/api-docs`). The Pri
 | PUT | `/admin/loading-factors` | Administrator | Update loading factor |
 | GET | `/admin/rate-versions` | Administrator | List rate versions (append-only) |
 
-### Pricing Service (9001)
+### Pricing Service
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/health` | Public | Health check |
+| GET | `/pricing/health` | Public | Health check |
 | POST | `/pricing/quote` | Customer | Generate quote (real premium + SHAP explanation) |
 | GET | `/pricing/quote/{id}` | Customer | Retrieve stored quote |
-| GET | `/pricing/models` | Administrator | List registered model versions with dataset/artifact lineage and champion flag |
+| GET | `/pricing/models` | Administrator | List model versions with dataset/artifact lineage and champion flag |
+| GET | `/pricing/drift` | Administrator | Per-line drift metrics |
 | POST | `/admin/champion/promote` | Administrator | Promote a model to champion |
 | POST | `/admin/models/reject` | Administrator | Explicitly reject a candidate model |
 | POST | `/admin/champion/rollback` | Administrator | Rollback champion to previous |
 
-### Order Service (8083)
+### Order Service
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -153,14 +354,18 @@ Spring Boot services use Springdoc (`/swagger-ui.html`, `/v3/api-docs`). The Pri
 | POST | `/admin/orders/{id}/approve` | Administrator | Approve order (creates invoice) |
 | POST | `/admin/orders/{id}/reject` | Administrator | Reject order |
 
-### Billing Service (8086)
+### Billing Service
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/billing/invoices` | Public | Create invoice |
 | POST | `/billing/invoices/{id}/pay` | Authenticated | Pay invoice (publishes InvoicePaid event) |
+| POST | `/billing/invoices/{id}/payment-url` | Customer | Create VNPay payment URL |
+| GET | `/billing/vnpay/return` | Public | VNPay browser redirect (display only) |
+| GET | `/billing/vnpay/ipn` | Public | VNPay server-to-server callback (source of truth) |
+| GET | `/billing/vnpay/status` | Customer | Query payment status |
 
-### Claims Service (8085)
+### Claims Service
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -171,271 +376,149 @@ Spring Boot services use Springdoc (`/swagger-ui.html`, `/v3/api-docs`). The Pri
 | POST | `/claims/{id}/reject` | Administrator | Reject claim |
 | POST | `/claims/{id}/misrepresentation` | Administrator | Flag misrepresentation |
 
-### Notification Service (8087)
+### Notification Service
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/notifications` | Customer | List own notifications |
+
+---
 
 ## End-to-End Flow
 
 The complete customer journey:
 
 1. **Register/Login** -> Keycloak hosted UI -> JWT (Customer or Administrator role)
-2. **Profile** â†’ `PUT /customers/me/profile` (line-specific validation: health, motorbike, car, home, accident, travel)
-3. **Quote** â†’ `POST /pricing/quote` (AI engine: champion model selection, feature derivation, premium calculation, SHAP explanation)
-4. **Order** â†’ `POST /orders` (status: `PENDING_REVIEW`)
-5. **Admin Approve** â†’ `POST /admin/orders/{id}/approve` (triggers invoice creation via BillingClient, status: `PENDING_PAYMENT`)
-6. **Pay Invoice** â†’ `POST /billing/invoices/{id}/pay` (publishes `InvoicePaid` event via outbox â†’ RabbitMQ)
-7. **Policy Issued** â†’ Order-service consumes `InvoicePaid`, creates policy (status: `active`), publishes `PolicyIssued` event
-8. **Claims** â†’ `POST /claims/fnol` (requires active policy, ownership enforced)
+2. **Profile** -> `PUT /customers/me/profile` (line-specific validation: health, motorbike, car, home, accident, travel)
+3. **Quote** -> `POST /pricing/quote` (champion model selection, feature derivation, premium calculation, SHAP explanation)
+4. **Order** -> `POST /orders` (status: PENDING_REVIEW)
+5. **Admin Approve** -> `POST /admin/orders/{id}/approve` (triggers invoice creation, status: PENDING_PAYMENT)
+6. **Pay Invoice** -> `POST /billing/invoices/{id}/pay` or VNPay flow (publishes InvoicePaid via outbox -> RabbitMQ)
+7. **Policy Issued** -> order-service consumes InvoicePaid, creates policy (status: active), publishes PolicyIssued
+8. **Claims** -> `POST /claims/fnol` (requires active policy, ownership enforced)
 
-## Build and Test
+---
 
-### Java Services
+## Development
+
+### Backend Development
 
 ```bash
+# Build and test all services
 ./gradlew build test
+
+# Run a single service from a built jar
+./gradlew :services:product-service:bootJar
+java -jar services/product-service/build/libs/*.jar
 ```
 
-Runs jqwik property tests (â‰¥100 iterations) with Mockito for all six services. The `product-service` integration tests (`@SpringBootTest`) require `postgres-product` on port 5434.
+Java services run jqwik property tests (>=100 iterations) with Mockito. The `product-service` integration tests (`@SpringBootTest`) require `postgres-product` on port 5434.
 
-### Pricing Service
+### Frontend Development
+
+```bash
+cd frontend
+
+npm install        # Install dependencies
+npm run dev        # Run dev server
+npm run build      # Build for production
+```
+
+### Pricing Service Development
 
 ```bash
 cd pricing
-python -m pytest tests/ -q          # 45 pricing engine tests
-python -m pytest common/tests/ -q    # 9 common module tests
+
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+alembic upgrade head                                  # apply migrations
+uvicorn app.main:app --port 9001 --reload             # run dev server
+
+python -m pytest tests/ -q                            # pricing engine tests
+python -m pytest common/tests/ -q                     # common module tests
 ```
 
-### CI/CD
+---
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on push/PR to `master`:
+## Model Lifecycle (Offline, No A/B)
 
-- **Java job:** Sets up `postgres-product` service container, runs `./gradlew build test`
-- **Python job:** Installs `pricing/requirements.txt`, runs pytest for `tests/` and `common/tests/`
-
-## Key Design Decisions
-
-- **All monetary amounts** are VND integers (no floating point)
-- **Two roles only:** Customer and Administrator (RBAC via Keycloak realm roles)
-- **Transactional outbox pattern:** Each service owns an `outbox` table; `OutboxRelay` polls and publishes to RabbitMQ exchange `platform.events` with event type as routing key
-- **Rate versions** are append-only (Flyway-managed, never mutated)
-- **Champion model selection:** One serving model per line, configured via `champion_config.json` (deterministic UUID5 synced to DB)
-- **SHAP explainability:** Per-quote feature contributions cached per model instance for performance
-- **Profile versions:** All profile changes tracked via `ProfileVersion` entity for audit trail
-
-## Project Structure
-
-```
-.
-â”œâ”€â”€ services/                 # Java/Spring Boot microservices
-â”‚   â”œâ”€â”€ common/               # Shared module (outbox, security, error handling)
-â”‚   â”œâ”€â”€ customer-service/     # Auth, profile management, validation
-â”‚   â”œâ”€â”€ product-service/      # Product catalog, admin config, rate versions
-â”‚   â”œâ”€â”€ order-service/        # Order lifecycle, policy issuance, endorsements
-â”‚   â”œâ”€â”€ billing-service/      # Invoice creation, payment, pro-rata adjustments
-â”‚   â”œâ”€â”€ claims-service/       # FNOL, approve/reject, misrepresentation
-â”‚   â””â”€â”€ notification-service/ # Event-driven notifications
-â”œâ”€â”€ pricing/                  # Python/FastAPI pricing engine
-â”‚   â”œâ”€â”€ app/                  # Routers, engine, feature store, governance
-â”‚   â”œâ”€â”€ common/               # Shared Python module (errors, health, metrics)
-â”‚   â””â”€â”€ migrations/           # Alembic DB migrations
-â”œâ”€â”€ infra/                    # Infrastructure configs
-â”‚   â”œâ”€â”€ kong/                 # Kong declarative config (routes, JWT, upstreams)
-â”‚   â”œâ”€â”€ keycloak/             # Realm export (roles, users, clients)
-â”‚   â”œâ”€â”€ prometheus/           # Prometheus scrape config
-â”‚   â”œâ”€â”€ grafana/              # Dashboards and provisioning
-â”‚   â””â”€â”€ rabbitmq/             # Exchange/queue definitions
-â”œâ”€â”€ reports/modeling/models/  # 36 trained model artifacts + champion_config.json
-â”œâ”€â”€ data/synthetic_real_1m_history_lift_v2/      # Training datasets, geo risk, cost indices
-â”œâ”€â”€ frontend/                 # React + Vite + TypeScript mini app
-â”œâ”€â”€ scripts/                  # Model training and EDA scripts
-â”œâ”€â”€ docker-compose.yml        # Infrastructure (13 containers)
-â””â”€â”€ .github/workflows/ci.yml  # CI/CD pipeline
-```
-
-
-## VNPAY Payment Integration (Sandbox)
-
-The Billing_Service integrates VNPAY (sandbox) for real payment processing via
-the redirect + IPN flow (R33.2/R33.3). The existing `InvoicePaid` event contract
-is unchanged ? VNPAY only replaces the "confirm payment" step.
-
-### Setup
-
-1. Register at https://sandbox.vnpayment.vn/devreg/ to get `TmnCode` + `HashSecret`
-2. Set in `.env`:
-   ```
-   VNP_TMN_CODE=your_tmn_code
-   VNP_HASH_SECRET=your_hash_secret
-   VNP_RETURN_URL=http://localhost:3001/payment-result
-   ```
-3. The IPN endpoint (`/billing/vnpay/ipn`) must be publicly reachable for VNPAY
-   to call back. For local testing, use ngrok or cloudflared to expose port 8000.
-
-### Test Card (NCB)
-
-- Card number: `9704198526191432198`
-- Name: `NGUYEN VAN A`
-- Expiry: `07/15`
-- OTP: `123456`
-
-### Flow
-
-1. Customer creates a payment URL: `POST /billing/invoices/{id}/payment-url`
-2. Frontend redirects to VNPAY payment page
-3. Customer pays with test card
-4. VNPAY calls IPN: `GET /billing/vnpay/ipn` (source of truth ? confirms payment)
-5. VNPAY redirects browser: `GET /billing/vnpay/return` (display only)
-6. Frontend polls: `GET /billing/vnpay/status?vnp_txn_ref=...` until confirmed
-7. On success, `InvoicePaid` event enqueued ? Order_Service issues policy
-
-### API Endpoints
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/billing/invoices/{id}/payment-url` | POST | Customer | Create VNPAY payment URL |
-| `/billing/vnpay/return` | GET | Public | Browser redirect (display only) |
-| `/billing/vnpay/ipn` | GET | Public | Server-to-server (source of truth) |
-| `/billing/vnpay/status` | GET | Customer | Query payment status |
-
-### Idempotency
-
-- `vnp_txn_ref` is UNIQUE per payment attempt
-- Repeated IPN for the same `vnp_txn_ref` returns `RspCode=02` (already confirmed)
-- Only `RspCode=00` + valid signature + amount match ? invoice paid + 1 `InvoicePaid`
-
-
-
-## Model Lifecycle (R37, No A/B)
-
-The platform supports offline model lifecycle management that runs entirely outside the serving path (R37.10). Runtime pricing remains champion-only: no A/B tables, no shadow scoring, no canary rollout, no sticky assignment, and no candidate-served customer quotes.
+The platform runs offline model lifecycle management entirely outside the serving path. Runtime pricing is champion-only: no A/B tables, no shadow scoring, no canary rollout, and no candidate-served customer quotes.
 
 ### Dataset + Candidate Flow
 
-1. Export and register an immutable dataset version with manifest, checksums, row counts, and registry rows:
+1. Export and register an immutable dataset version (manifest, checksums, row counts):
 
 ```bash
 python offline/build_training_dataset_from_pricing_db.py \
   --database-url postgresql://platform_user:platform_password_dev_only@localhost:5440/pricing_db \
   --output-dir data/pricing_read_model_export \
   --dataset-version-id ds-2026-q3 \
-  --register-registry \
-  --created-by offline-operator
+  --register-registry --created-by offline-operator
 ```
 
-2. Train a candidate, compare it with the current champion on the same holdout, then register it only after comparison, validation, monotonic, and smoothness gates pass:
+2. Train a candidate, compare it to the current champion on the same holdout, then register only after comparison, validation, monotonic, and smoothness gates pass. On GCP this runs as the coarse `model_lifecycle_pipeline` Cloud Run Job.
+
+Administrators then promote, reject, or roll back via `/admin/champion/promote`, `/admin/models/reject`, and `/admin/champion/rollback`. The admin dashboard surfaces model lineage, quality gates, and per-line drift.
+
+### Retrain Trigger and Drift Monitor
 
 ```bash
-python offline/compare_candidate_to_champion.py --line car --dataset-dir data/pricing_read_model_export --candidate-artifact-dir reports/modeling/models --champion-model-version-id <current-champion-id> --output-file reports/modeling/comparison/car_comparison.json
-python offline/register_candidate_model.py --line car --dataset-version-id ds-2026-q3 --artifact-uri reports/modeling/models/car__lgb_tw.joblib --comparison-report-uri reports/modeling/comparison/car_comparison.json --validation-report-uri reports/modeling/validation/car_validation.json --registered-by offline-operator --monotonic-passed --smoothness-passed
+python offline/retrain_trigger.py --dry-run    # schedule / data-threshold / drift trigger
+python offline/drift_monitor.py --dry-run      # feature PSI, prediction PSI, calibration
 ```
 
-`GET /pricing/models` returns DTOs with `status`, `dataset_version_id`, `artifact_checksum`, `quality_gates`, and `is_champion`. Administrators promote, reject, or roll back with `/admin/champion/promote`, `/admin/models/reject`, and `/admin/champion/rollback`.
+Triggers create a candidate model version only; promotion always follows governance. On GCP a daily Cloud Scheduler drives the drift monitor and lifecycle Workflow.
 
-### Retrain Trigger (`offline/retrain_trigger.py`)
+---
 
-Configured in `offline/retrain_config.json`:
+## Monitoring
 
-1. **Schedule:** Quarterly by default (months 1, 4, 7, 10)
-2. **Data threshold:** When new claims/exposure count for a line exceeds a configured threshold
-3. **Drift:** When `model_drift_flag.needs_recalibration=true` for a line
+### Prometheus Metrics
 
-The trigger creates a **candidate** `Model_Version`. It does not auto-promote; promotion follows BR-23 governance (`POST /admin/champion/promote`).
+Services expose metrics for scraping (JVM, HTTP request rates and latency, custom business metrics, RabbitMQ consumer state).
 
-```bash
-python offline/retrain_trigger.py              # check + trigger
-python offline/retrain_trigger.py --dry-run     # show what would trigger
-python offline/retrain_trigger.py --line health # force one line
-```
+### Grafana Dashboards
 
-### Drift Monitor (`offline/drift_monitor.py`)
+Pre-configured dashboards for service health, request rate and latency, database connection pools, and pricing metrics.
 
-Per-line comparison of feature PSI, prediction PSI, and calibration drift. Drift remains diagnostics/retraining input, not the main promotion decision panel.
+---
 
-```bash
-python offline/drift_monitor.py              # compute + persist flags
-python offline/drift_monitor.py --dry-run     # compute without persisting
-```
+## Security
 
-Administrator endpoint:
+### Authentication & Authorization
 
-```bash
-GET /pricing/drift
-```
+- **Keycloak** for identity management (OAuth 2.0 / OpenID Connect)
+- **JWT (RS256)** validated centrally at Kong
+- **Role-based access control** with two realm roles: Customer and Administrator
+- Kong strips spoofed identity headers and injects trusted claims to upstreams
 
-### Scheduling
+### Data Protection
 
-Run offline scripts from cron or GitHub Actions; they do not run in the serving path.
+- TLS termination via GKE managed certificates on staging
+- SQL injection prevention (JPA / SQLAlchemy parameterized queries)
+- XSS protection (React)
+- Secrets via environment variables locally, Secret Manager on GCP
 
-```cron
-0 2 1 1,4,7,10 * python /app/offline/retrain_trigger.py
-0 3 * * 1 python /app/offline/drift_monitor.py
-```
-## CI/CD Pipeline
+---
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and
-pull request to `master`:
+## CI/CD
 
-- **java job:** `./gradlew clean test` + JaCoCo coverage report + 70% coverage gate
-- **python job:** `pytest --cov --cov-fail-under=70` for pricing service
-- **docker-build job:** Builds all 8 service images + frontend (no push)
+### CI Pipeline (`.github/workflows/ci.yml`)
 
-All jobs have a 30-minute timeout (R21.1). Gradle and pip caches are enabled.
+Runs on every push and pull request to `master`:
 
-### Branch Protection (R21.8)
+- **java job:** `./gradlew clean test` + JaCoCo coverage with a 70% gate
+- **python job:** `pytest --cov --cov-fail-under=70` for the pricing service
+- **docker-build job:** builds all service images + frontend (no push)
 
-To enforce CI gates on merges to `master`, enable branch protection in GitHub:
+### CD Pipeline (`.github/workflows/cd.yml`)
 
-1. Go to **Settings ? Branches ? Add branch protection rule** for `master`
-2. Check **Require status checks to pass before merging**
-3. Select required checks: `java`, `python`, `docker-build`
-4. Check **Require branches to be up to date before merging**
-5. Check **Do not allow bypassing the above settings**
+Continuous deployment to GKE staging, running only after CI passes. Uses keyless auth to GCP via Workload Identity Federation (no service-account key in the repo).
 
-This prevents merging when CI fails (R21.8). The `ci.yml` workflow name matches
-the status check names above.
+---
 
-## Kong Gateway Verification
+## License
 
-All API flows are verified through the Kong gateway (port 8000) with centralized JWT enforcement:
-
-- **No JWT** â†’ `401 Unauthorized` on protected routes.
-- **Invalid, expired, or wrong-issuer JWT** â†’ rejected by Kong before reaching services.
-- **Customer JWT on admin endpoints** â†’ `403 Forbidden` from service role checks using trusted Kong headers.
-- **Valid JWT** â†’ Kong strips spoofed `X-Authenticated-*` headers, injects identity from JWT claims, and forwards to the private upstream service.
-
-The Kong declarative config (`infra/kong/kong.yml`) routes all public service paths through the gateway:
-
-| Path Prefix | Upstream Service |
-|-------------|-----------------|
-| `/customers` | customer-service |
-| `/products`, `/admin/products`, `/admin/rate-versions` | product-service |
-| `/orders`, `/admin/orders` | order-service |
-| `/claims` | claims-service |
-| `/billing` | billing-service |
-| `/notifications` | notification-service |
-| `/pricing`, `/admin/champion`, `/admin/models` | pricing-service |
-
-### Verified End-to-End Through Kong
-
-1. `GET /products` â†’ 200 (16 products)
-2. `PUT /customers/me/profile` â†’ 200 (profile created)
-3. `GET /customers/me/profile` â†’ 200
-4. `GET /admin/rate-versions` â†’ 200 (Administrator role)
-5. `POST /pricing/quote` â†’ 200 (premium calculated with SHAP)
-6. `GET /pricing/quote/{id}` â†’ 200
-7. `POST /orders` â†’ 200 (PENDING_REVIEW)
-8. `GET /admin/orders/review-queue` â†’ 200
-9. `POST /admin/orders/{id}/approve` â†’ 200 (PENDING_PAYMENT + invoice created)
-10. `GET /admin/orders/{id}` â†’ 200
-11. `POST /billing/invoices` â†’ 200
-12. `POST /billing/invoices/{id}/pay` â†’ 200 (paid, triggers PolicyIssued event)
-13. `GET /notifications` â†’ 200
-14. `GET /claims` â†’ 200
-15. `GET /pricing/models` â†’ 200
-16. No JWT â†’ 401 (JWT enforcement)
-17. Customer on admin endpoint â†’ 403 (RBAC enforcement)
-
-
+Internal use - Dynamic Pricing Platform.
