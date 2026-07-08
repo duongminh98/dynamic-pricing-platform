@@ -462,6 +462,34 @@ public class PolicyLifecycleService {
                 .stream().map(this::toEndorsementResponse).collect(java.util.stream.Collectors.toList());
     }
 
+    /**
+     * The current risk profile the customer should see pre-filled in the endorsement form.
+     * Reads the latest segment's snapshot and flattens it to the flat endorsement keys the
+     * form uses - resolving each key top-level first then under {@code line_attributes}, the
+     * same order the pricing engine uses - restricted to the attributes actually editable for
+     * this line. Values the form can never edit (coverage/deductible, non-line keys) are
+     * excluded so the returned map is a safe display baseline, never a change set.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> policyRiskBaseline(UUID policyId, String keycloakSubject) {
+        Policy policy = findOwnedPolicy(policyId, keycloakSubject);
+        List<ExposureSegment> segments = segmentRepository.findByPolicyIdOrderByExposureSegmentSeqAsc(policyId);
+        ExposureSegment prior = segments.isEmpty() ? null : segments.get(segments.size() - 1);
+        Map<String, Object> snapshot = prior != null ? readRiskSnapshot(prior) : new LinkedHashMap<>();
+        Map<String, Object> nested = snapshot.get("line_attributes") instanceof Map
+                ? (Map<String, Object>) snapshot.get("line_attributes") : Map.of();
+        String line = resolveLineFromProductId(policy.getProductId());
+        Set<String> allowed = ALLOWED_KEYS_BY_LINE.getOrDefault(line, Set.of());
+        Map<String, Object> baseline = new LinkedHashMap<>();
+        for (String key : allowed) {
+            Object value = snapshot.containsKey(key) ? snapshot.get(key) : nested.get(key);
+            if (value != null) {
+                baseline.put(key, value);
+            }
+        }
+        return baseline;
+    }
+
     @Transactional(readOnly = true)
     public PageResponse<EndorsementRequestResponse> policyEndorsementsPaged(UUID policyId, String keycloakSubject,
                                                                              org.springframework.data.domain.Pageable pageable) {

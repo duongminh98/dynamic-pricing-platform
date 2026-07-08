@@ -13,6 +13,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -76,6 +77,11 @@ public class PolicyController {
     public EndorsementResult endorse(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                      @Valid @RequestBody EndorsementRequest request) {
         return lifecycleService.endorse(id, request, jwt.getSubject());
+    }
+
+    @GetMapping("/{id}/risk-profile")
+    public Map<String, Object> riskProfile(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return lifecycleService.policyRiskBaseline(id, jwt.getSubject());
     }
 
     @GetMapping("/{id}/endorsements")

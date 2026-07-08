@@ -300,6 +300,7 @@ function EndorsePanel({ policyId, line, onDone }: { policyId: string; line: Line
   const toast = useToast();
   const { run, busy, error } = useMutation();
   const fields = line ? LINE_FIELDS[line] : [];
+  const { data: baseline } = useApi<Record<string, string | number | boolean>>(`/policies/${policyId}/risk-profile`, [policyId]);
   const [change, setChange] = useState<Record<string, string | number | boolean>>({});
   const [preview, setPreview] = useState<any>(null);
   const [pollingPreviewId, setPollingPreviewId] = useState<string | null>(null);
@@ -307,6 +308,11 @@ function EndorsePanel({ policyId, line, onDone }: { policyId: string; line: Line
   const [pollAttempts, setPollAttempts] = useState(0);
   const [pollError, setPollError] = useState<ApiError | null>(null);
 
+  // The change set stays a pure delta - only fields the customer actually edits. Untouched
+  // fields display their current value from the baseline but are never sent, so the backend
+  // merges the delta onto the stored risk profile and prior conditions are preserved.
+  const base = baseline ?? {};
+  const fieldValue = (key: string) => (change[key] !== undefined ? change[key] : base[key]);
   const buildBody = () => ({
     change,
   });
@@ -390,7 +396,7 @@ function EndorsePanel({ policyId, line, onDone }: { policyId: string; line: Line
       ) : (
         <div className="form-grid">
           {fields.map((f) => (
-            <EndorsementField key={f.key} field={f} value={change[f.key]} onChange={(value) => {
+            <EndorsementField key={f.key} field={f} value={fieldValue(f.key)} onChange={(value) => {
               setChange((prev) => {
                 const next = { ...prev };
                 if (value === '') delete next[f.key];
