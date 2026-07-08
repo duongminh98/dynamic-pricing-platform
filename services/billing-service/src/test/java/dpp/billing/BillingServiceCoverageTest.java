@@ -6,6 +6,8 @@ import dpp.billing.entity.AdjustmentReason;
 import dpp.billing.entity.AdjustmentType;
 import dpp.billing.entity.Invoice;
 import dpp.billing.entity.InvoiceStatus;
+import dpp.billing.entity.CreditStatus;
+import dpp.billing.entity.PremiumCredit;
 import dpp.billing.repository.AdjustmentRepository;
 import dpp.billing.repository.InvoiceRepository;
 import dpp.billing.service.BillingService;
@@ -58,6 +60,65 @@ class BillingServiceCoverageTest {
         assertEquals(1, resp.getInvoices().size());
         assertEquals(1, resp.getAdjustments().size());
         assertEquals(1_000_000L, resp.getInvoices().get(0).getAmountVnd());
+    }
+
+    @Test
+    void getPolicyBillingReturnsCreditWhenOwnerHasOnlyCredit() {
+        // A price-decrease (RP) endorsement issues a credit but no policy-scoped invoice.
+        // Ownership must still resolve via the credit, or the whole billing view 403s and
+        // the credit never surfaces.
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        AdjustmentRepository adjRepo = mock(AdjustmentRepository.class);
+        CreditService creditService = mock(CreditService.class);
+        RefundService refundService = mock(RefundService.class);
+        UUID policyId = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+
+        when(invRepo.findByPolicyIdOrderByCreatedAtAsc(policyId)).thenReturn(List.of());
+        when(adjRepo.findByPolicyIdOrderByCreatedAtAsc(policyId)).thenReturn(List.of());
+        PremiumCredit credit = new PremiumCredit();
+        credit.setCreditId(UUID.randomUUID());
+        credit.setPolicyId(policyId);
+        credit.setCustomerId(owner);
+        credit.setOriginalAmountVnd(400_000L);
+        credit.setRemainingAmountVnd(400_000L);
+        credit.setStatus(CreditStatus.open);
+        credit.setCreatedAt(OffsetDateTime.now());
+        when(creditService.getCreditsByPolicy(policyId)).thenReturn(List.of(credit));
+        when(refundService.listByPolicy(policyId)).thenReturn(List.of());
+
+        BillingService svc = new BillingService(invRepo, adjRepo, mock(OutboxPublisher.class), creditService, refundService);
+        PolicyBillingResponse resp = svc.getPolicyBilling(policyId, owner);
+
+        assertEquals(1, resp.getCredits().size());
+        assertEquals(400_000L, resp.getCredits().get(0).getRemainingAmountVnd());
+        assertEquals(-400_000L, resp.getBalanceVnd());
+    }
+
+    @Test
+    void getPolicyBillingRejectsNonOwnerWithOnlyCredit() {
+        InvoiceRepository invRepo = mock(InvoiceRepository.class);
+        AdjustmentRepository adjRepo = mock(AdjustmentRepository.class);
+        CreditService creditService = mock(CreditService.class);
+        RefundService refundService = mock(RefundService.class);
+        UUID policyId = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+        UUID attacker = UUID.randomUUID();
+
+        PremiumCredit credit = new PremiumCredit();
+        credit.setCreditId(UUID.randomUUID());
+        credit.setPolicyId(policyId);
+        credit.setCustomerId(owner);
+        credit.setStatus(CreditStatus.open);
+        credit.setCreatedAt(OffsetDateTime.now());
+        when(invRepo.findByPolicyIdOrderByCreatedAtAsc(policyId)).thenReturn(List.of());
+        when(creditService.getCreditsByPolicy(policyId)).thenReturn(List.of(credit));
+        when(refundService.listByPolicy(policyId)).thenReturn(List.of());
+
+        BillingService svc = new BillingService(invRepo, adjRepo, mock(OutboxPublisher.class), creditService, refundService);
+        ServiceException ex = assertThrows(ServiceException.class,
+                () -> svc.getPolicyBilling(policyId, attacker));
+        assertEquals(ErrorCode.FORBIDDEN_RESOURCE, ex.getErrorCode());
     }
 
     @Test

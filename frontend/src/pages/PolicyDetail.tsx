@@ -64,7 +64,7 @@ export default function PolicyDetail() {
     }
   };
 
-  if (loading) return <Loading />;
+  if (loading && !policy) return <Loading />;
   if (error) return <ErrorBanner error={error} />;
   if (!policy) return null;
 

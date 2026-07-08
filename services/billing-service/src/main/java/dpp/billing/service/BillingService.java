@@ -209,16 +209,21 @@ public class BillingService {
     @Transactional(readOnly = true)
     public PolicyBillingResponse getPolicyBilling(UUID policyId, UUID callerCustomerId) {
         List<Invoice> invoiceRows = invoiceRepository.findByPolicyIdOrderByCreatedAtAsc(policyId);
-        boolean hasOwnerInvoice = invoiceRows.stream()
-                .anyMatch(invoice -> callerCustomerId.equals(invoice.getCustomerId()));
-        if (!hasOwnerInvoice) {
+        List<PremiumCredit> credits = creditService.getCreditsByPolicy(policyId);
+        List<RefundResponse> refunds = refundService.listByPolicy(policyId);
+        // Ownership can be proven by any policy-scoped artifact the caller owns. A
+        // price-decrease endorsement issues only a credit (no invoice), so gating on
+        // invoices alone would 403 the whole billing view - hiding the credit.
+        boolean owns = invoiceRows.stream().anyMatch(i -> callerCustomerId.equals(i.getCustomerId()))
+                || credits.stream().anyMatch(c -> callerCustomerId.equals(c.getCustomerId()))
+                || refunds.stream().anyMatch(r -> callerCustomerId.equals(r.getCustomerId()));
+        if (!owns) {
             throw new ServiceException(ErrorCode.FORBIDDEN_RESOURCE);
         }
         PolicyBillingResponse resp = new PolicyBillingResponse();
         List<InvoiceResponse> invoices = invoiceRows.stream().map(this::toResponse).toList();
         List<AdjustmentResponse> adjustments = adjustmentRepository.findByPolicyIdOrderByCreatedAtAsc(policyId)
                 .stream().map(this::toAdjustmentResponse).toList();
-        List<PremiumCredit> credits = creditService.getCreditsByPolicy(policyId);
         long unpaidNet = invoices.stream()
                 .filter(i -> i.getStatus() == InvoiceStatus.unpaid)
                 .mapToLong(InvoiceResponse::getNetAmountVnd)
@@ -227,7 +232,6 @@ public class BillingService {
                 .filter(c -> c.getStatus() == CreditStatus.open || c.getStatus() == CreditStatus.partially_applied)
                 .mapToLong(PremiumCredit::getRemainingAmountVnd)
                 .sum();
-        List<RefundResponse> refunds = refundService.listByPolicy(policyId);
         resp.setInvoices(invoices);
         resp.setAdjustments(adjustments);
         resp.setCredits(credits.stream().map(this::toCreditResponse).toList());
