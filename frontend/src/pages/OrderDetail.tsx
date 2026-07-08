@@ -41,6 +41,7 @@ export default function OrderDetail() {
       );
       sessionStorage.setItem('vnp_txn_ref', res.vnp_txn_ref);
       sessionStorage.setItem('vnp_order_id', order.order_id);
+      sessionStorage.removeItem('vnp_policy_id');
       window.location.href = res.payment_url;
     } catch (e) {
       const err = e as ApiError;

@@ -32,8 +32,37 @@ export default function PolicyDetail() {
   const { data: policy, error, loading, reload } = useApi<PolicyResponse>(`/policies/${id}`, [id]);
   const { data: doc } = useApi<DocResp>(id ? `/policies/${id}/document` : null, [id]);
   const { data: segments } = useApi<Segment[]>(id ? `/policies/${id}/exposure-segments` : null, [id]);
-  const { data: billing } = useApi<Billing>(id ? `/billing/policies/${id}/billing` : null, [id]);
+  const { data: billing, reload: reloadBilling } = useApi<Billing>(id ? `/billing/policies/${id}/billing` : null, [id]);
   const [panel, setPanel] = useState<Panel>('none');
+  const toast = useToast();
+  const { run: runPay, busy: paying } = useMutation();
+  const [settleTries, setSettleTries] = useState(0);
+
+  // After returning from VNPAY the invoice clears + the endorsement applies
+  // asynchronously, so poll briefly while any invoice is still unpaid.
+  const hasUnpaid = !!billing?.invoices.some((i) => i.status === 'unpaid');
+  useInterval(() => {
+    setSettleTries((n) => n + 1);
+    reload();
+    reloadBilling();
+  }, hasUnpaid && settleTries < 15 ? 3000 : null);
+
+  const payInvoice = async (invoiceId: string) => {
+    try {
+      const res = await runPay<{ payment_url: string; vnp_txn_ref: string }>(
+        `/billing/invoices/${invoiceId}/payment-url`, { method: 'POST', body: {} },
+      );
+      sessionStorage.setItem('vnp_txn_ref', res.vnp_txn_ref);
+      sessionStorage.setItem('vnp_policy_id', id ?? '');
+      sessionStorage.removeItem('vnp_order_id');
+      window.location.href = res.payment_url;
+    } catch (e) {
+      const err = e as ApiError;
+      if (err.code === 'INVOICE_NOT_PAYABLE') toast.push('Hóa đơn không còn ở trạng thái chờ thanh toán.', 'warn');
+      else if (err.code === 'SERVICE_UNAVAILABLE') toast.push('Cổng thanh toán tạm thời không khả dụng. Thử lại sau.', 'warn');
+      else toast.push(err.message, 'err');
+    }
+  };
 
   if (loading) return <Loading />;
   if (error) return <ErrorBanner error={error} />;
@@ -136,7 +165,7 @@ export default function PolicyDetail() {
               <div className="eyebrow" style={{ marginBottom: 8 }}>Hóa đơn</div>
               <div className="table-wrap">
                 <table className="table">
-                  <thead><tr><th>Mã</th><th>Số tiền</th><th>Phải trả</th><th>Trạng thái</th><th>Ngày tạo</th></tr></thead>
+                  <thead><tr><th>Mã</th><th>Số tiền</th><th>Phải trả</th><th>Trạng thái</th><th>Ngày tạo</th><th></th></tr></thead>
                   <tbody>
                     {billing.invoices.map((inv) => (
                       <tr key={inv.invoice_id}>
@@ -145,6 +174,13 @@ export default function PolicyDetail() {
                         <td className="num">{vndLabel(inv.net_amount_vnd || inv.amount_vnd)}</td>
                         <td><StatusPill status={inv.status} /></td>
                         <td className="muted">{dateOnly(inv.created_at)}</td>
+                        <td className="num">
+                          {inv.status === 'unpaid' && (
+                            <button className="btn btn-primary btn-sm" disabled={paying} onClick={() => payInvoice(inv.invoice_id)}>
+                              {paying ? <Spinner /> : 'Thanh toán qua VNPAY →'}
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

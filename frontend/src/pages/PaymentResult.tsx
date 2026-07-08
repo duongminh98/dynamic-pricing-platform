@@ -17,6 +17,7 @@ export default function PaymentResult() {
   const nav = useNavigate();
   const txnRef = params.get('vnp_txn_ref') || sessionStorage.getItem('vnp_txn_ref') || '';
   const orderId = sessionStorage.getItem('vnp_order_id');
+  const policyId = sessionStorage.getItem('vnp_policy_id');
 
   const [status, setStatus] = useState<'pending' | 'success' | 'failed' | 'unknown'>('pending');
   const [amount, setAmount] = useState<string | null>(null);
@@ -71,7 +72,9 @@ export default function PaymentResult() {
             <div style={{ fontSize: '3rem', color: 'var(--jade)' }}>✓</div>
             <h3>Thanh toán thành công</h3>
             {amount && <p className="figure" style={{ fontSize: 'var(--step-2)' }}>{vndLabel(amount)}</p>}
-            <p className="muted">Hợp đồng của bạn đang được phát hành. Bạn sẽ nhận thông báo ngay khi hoàn tất.</p>
+            <p className="muted">{orderId
+              ? 'Hợp đồng của bạn đang được phát hành. Bạn sẽ nhận thông báo ngay khi hoàn tất.'
+              : 'Yêu cầu của bạn đang được xử lý. Bạn sẽ nhận thông báo ngay khi hoàn tất.'}</p>
           </>
         )}
         {status === 'failed' && (
@@ -87,7 +90,8 @@ export default function PaymentResult() {
 
         <div className="row" style={{ justifyContent: 'center', marginTop: 'var(--s3)' }}>
           {orderId && <button className="btn btn-ghost" onClick={() => nav(`/orders/${orderId}`)}>Xem đơn hàng</button>}
-          <button className="btn btn-primary" onClick={() => nav('/policies')}>Hợp đồng của tôi</button>
+          {policyId && <button className="btn btn-primary" onClick={() => nav(`/policies/${policyId}`)}>Xem hợp đồng</button>}
+          {!policyId && <button className="btn btn-primary" onClick={() => nav('/policies')}>Hợp đồng của tôi</button>}
         </div>
       </div>
     </div>
